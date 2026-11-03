@@ -1,7 +1,8 @@
 // First-person player: fixed 120 Hz movement with circle-vs-grid collision.
 const TILE = 3;            // metres per tile
-const WALL_H = 3;
+let WALL_H = 3.6;          // ceiling height: set per floor in startFloor (the boss arena is much taller)
 const STEP = 1 / 120;
+const SMALL_PROP = 0.25;   // props with a collision circle this small or smaller (candles) never block the player
 
 class Player {
   constructor() {
@@ -36,8 +37,8 @@ class Player {
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - dy * 0.0022));
   }
 
-  blocked(floor, x, z) {
-    const r = this.radius;
+  // Circle against wall tiles (guards borrow this through Player.prototype.blocked, so it takes the radius).
+  static wallHit(floor, x, z, r) {
     const x0 = Math.floor((x - r) / TILE), x1 = Math.floor((x + r) / TILE);
     const z0 = Math.floor((z - r) / TILE), z1 = Math.floor((z + r) / TILE);
     for (let ty = z0; ty <= z1; ty++) for (let tx = x0; tx <= x1; tx++) {
@@ -47,8 +48,29 @@ class Player {
       const cz = Math.max(ty * TILE, Math.min(z, (ty + 1) * TILE));
       if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return true;
     }
+    return false;
+  }
+
+  blocked(floor, x, z) {
+    const r = this.radius;
+    if (Player.wallHit(floor, x, z, r)) return true;
     for (const p of this.props) if (p.r > 0 && (x - p.x) ** 2 + (z - p.z) ** 2 < (r + p.r) ** 2) return true;
     return false;
+  }
+
+  // Props are circles. Walking into one pushes you out along its surface instead of stopping you dead,
+  // so you slide round barrels, urns and statues rather than catching on them. Tiny clutter (candles) is ignored.
+  slideOffProps(floor) {
+    for (let pass = 0; pass < 2; pass++) for (const p of this.props) {
+      if (p.r <= SMALL_PROP) continue;
+      const dx = this.x - p.x, dz = this.z - p.z, min = this.radius + p.r, d2 = dx * dx + dz * dz;
+      if (d2 >= min * min || d2 < 1e-8) continue;
+      const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
+      const px = p.x + nx * min, pz = p.z + nz * min;
+      if (!Player.wallHit(floor, px, pz, this.radius)) { this.x = px; this.z = pz; }
+      const into = this.vx * nx + this.vz * nz;                 // drop the part of the velocity that pushes into it
+      if (into < 0) { this.vx -= into * nx; this.vz -= into * nz; }
+    }
   }
 
   // Advance by real elapsed seconds, in fixed steps so movement is frame-rate independent.
@@ -59,14 +81,14 @@ class Player {
 
   step(floor) {
     const k = this.keys;
-    let fx = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0);
-    let sx = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0);
+    let fx = (k[KEYS.forward] ? 1 : 0) - (k[KEYS.back] ? 1 : 0);
+    let sx = (k[KEYS.right] ? 1 : 0) - (k[KEYS.left] ? 1 : 0);
     const len = Math.hypot(fx, sx) || 1;
     fx /= len; sx /= len;
 
-    this.crouching = !!(k.ControlLeft || k.KeyC);
-    this.sprinting = !!k.ShiftLeft && !this.crouching && fx > 0 && this.canSprint;
-    const speed = (this.crouching ? 1.6 : this.sprinting ? 6.0 : 3.6) * this.speedMul;
+    this.crouching = !!k[KEYS.crouch];   // C by default, not Ctrl: Ctrl+W (crouch + forward) closes the browser tab and cannot be blocked
+    this.sprinting = !!k[KEYS.sprint] && !this.crouching && fx > 0 && this.canSprint;
+    const speed = (this.crouching ? TUNE.crouchSpeed : this.sprinting ? TUNE.sprintSpeed : TUNE.walkSpeed) * this.speedMul;
 
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const wx = (-sin * fx + cos * sx) * speed;
@@ -78,9 +100,10 @@ class Player {
     this.vz += (wz - this.vz) * a;
 
     const nx = this.x + this.vx * STEP;
-    if (!this.blocked(floor, nx, this.z)) this.x = nx; else this.vx = 0;
+    if (!Player.wallHit(floor, nx, this.z, this.radius)) this.x = nx; else this.vx = 0;
     const nz = this.z + this.vz * STEP;
-    if (!this.blocked(floor, this.x, nz)) this.z = nz; else this.vz = 0;
+    if (!Player.wallHit(floor, this.x, nz, this.radius)) this.z = nz; else this.vz = 0;
+    this.slideOffProps(floor);
 
     const targetEye = this.crouching ? 1.0 : 1.6;
     this.eye += (targetEye - this.eye) * (1 - Math.exp(-12 * STEP));

@@ -3,13 +3,14 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, rug: 0, bones: 0, banner: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, vaultchest: 0.85,
-  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9 };
+  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
-  candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 } };
+  candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 },
+  chandelier: { color: 0xffc060, y: 2.4, str: 1.0 } };   // main.js uses the decor's own ly / ls for scaled (boss arena) ones
 
 const lam = (c, emissive) => new THREE.MeshLambertMaterial(emissive === undefined ? { color: c } : { color: c, emissive });
 const glow = c => new THREE.MeshBasicMaterial({ color: c });
@@ -104,12 +105,13 @@ function makeProp(p) {
 function makeDoor(dr) {
   const inner = new THREE.Group();
   const rg = makeRng(dr.x * 131 + dr.y);
+  const dh = WALL_H - 0.1;                                                                           // planks fill the doorway up to the ceiling
   for (let i = 0; i < 5; i++) {
     const c = new THREE.Color(0x5a3c20).multiplyScalar(0.85 + rg() * 0.3);
-    B(inner, 0.6, 2.8, 0.3, lam(c.getHex()), -1.2 + i * 0.6, 1.4, 0);
+    B(inner, 0.6, dh, 0.3, lam(c.getHex()), -1.2 + i * 0.6, dh / 2, 0);
   }
   const iron = lam(0x2a2a30);
-  for (const y of [0.5, 1.4, 2.3]) B(inner, 3.0, 0.14, 0.34, iron, 0, y, 0);
+  for (const y of [0.5, 1.4, 2.3, dh - 0.3]) B(inner, 3.0, 0.14, 0.34, iron, 0, y, 0);
   B(inner, 0.4, 0.5, 0.12, lam(0xc9a23a, 0x2a2008), 0, 1.3, 0.2);                                  // lock plate
   B(inner, 0.07, 0.14, 0.1, lam(0x120c08), 0, 1.3, 0.28);                                           // keyhole
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.03, 6, 12), iron); ring.position.set(0.9, 1.1, 0.2); inner.add(ring);
@@ -245,6 +247,29 @@ function makeDecor(d) {
       }
       break;
     }
+    case 'chandelier': {   // hangs from the ceiling on a chain: an iron ring and cross with a ring of candles
+      const top = WALL_H / (d.scale || 1), y = top - 1.1;
+      C(inner, 0.015, 0.015, 1.1, iron, 0, top - 0.55, 0, 6);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.035, 6, 20), iron); ring.rotation.x = Math.PI / 2; ring.position.y = y; inner.add(ring);
+      B(inner, 1.1, 0.03, 0.03, iron, 0, y, 0); B(inner, 1.1, 0.03, 0.03, iron, 0, y, 0, Math.PI / 2);
+      B(inner, 0.12, 0.12, 0.12, lam(0xc9a23a, 0x2a2008), 0, y, 0);
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4, x = Math.cos(a) * 0.55, z = Math.sin(a) * 0.55;
+        C(inner, 0.035, 0.04, 0.16, bone, x, y + 0.1, z, 6); flame(inner, x, y + 0.22, z, 0.8);
+      }
+      break;
+    }
+    case 'beam': {         // a wooden ceiling beam across a room, d.len metres long, d.alongZ turns it
+      B(inner, d.len, 0.28, 0.3, wood, 0, WALL_H - 0.14, 0, d.alongZ ? Math.PI / 2 : 0);
+      break;
+    }
+    case 'urn': {
+      const clay = lam(0x8a5a3a);
+      C(inner, 0.28, 0.2, 0.55, clay, 0, 0.28, 0, 10); C(inner, 0.14, 0.26, 0.16, clay, 0, 0.62, 0, 10);
+      C(inner, 0.17, 0.15, 0.05, lam(0x5a3a24), 0, 0.72, 0, 10);
+      B(inner, 0.4, 0.04, 0.4, lam(0x2a2a30), 0, 0.3, 0, 0.4);                                         // iron band
+      break;
+    }
     case 'banner': {
       C(inner, 0.025, 0.025, 1.1, iron, 0, 2.35, 0, 6).rotation.z = Math.PI / 2;
       const c = cloth();
@@ -271,9 +296,13 @@ function makeDecor(d) {
       break;
     }
   }
+  const sc = d.scale || 1;                                         // the boss arena scales banners and statues up to fit the tall walls
+  if (sc !== 1) inner.scale.setScalar(sc);
   const edgeShift = d.edge ? (EDGE_SHIFT[d.kind] || 0) : 0;
   const yaw = d.yaw + (d.edge ? 0 : (d.seed % 7 - 3) * 0.03);
   const pl = placeOnTile(inner, d.x, d.y, yaw, edgeShift);
-  return { p: { kind: 'decor', opened: true, x: d.x, y: d.y }, kind: d.kind, yaw, mesh: pl.mesh, x: pl.x, z: pl.z, r: DECOR_R[d.kind] || 0, lid: null, mats: [] };
+  const light = d.kind === 'chandelier';
+  return { p: { kind: 'decor', opened: true, x: d.x, y: d.y }, kind: d.kind, yaw: light ? 0 : yaw, mesh: pl.mesh, x: pl.x, z: pl.z, r: (DECOR_R[d.kind] || 0) * sc, lid: null, mats: [],
+    ly: light ? WALL_H - 1.4 * sc : undefined, ls: light ? 0.7 + 0.4 * sc : 1 };
 }
 const leatherMat = () => lam(0x3a2616);

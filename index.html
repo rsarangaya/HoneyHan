@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Prototype Test</title>
+<title>HoneyHan</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; color: #eee; }
@@ -27,6 +27,9 @@
   #hp { width: 200px; height: 8px; margin: 0 auto 6px; background: #0008; border: 1px solid #fff5; }
   #hpFill { height: 100%; background: #c0392b; }
   #dev { top: 12px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #111; background: #e8c860; padding: 3px 10px; border-radius: 3px; display: none; }
+  #boss { top: 44px; left: 50%; transform: translateX(-50%); width: 360px; text-align: center; font-size: 13px; letter-spacing: .08em; display: none; }
+  #bossBar { height: 9px; margin-top: 3px; background: #0008; border: 1px solid #fff6; }
+  #bossFill { height: 100%; width: 100%; background: #a8281f; }
   #flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(transparent 40%, #c00a 100%); opacity: 0; transition: opacity .35s; }
   #stam { width: 200px; height: 5px; margin: -2px auto 6px; background: #0008; border: 1px solid #fff5; }
   #stamFill { height: 100%; background: #4cc36a; }
@@ -34,6 +37,10 @@
   #overlay { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
   #overlay h1 { margin: 0 0 8px; }
   #overlay p { margin: 6px 0; opacity: .85; }
+  #overlay h1 { color: #e8c860; }
+  #overlay ul { text-align: left; display: inline-block; margin: 6px 0; padding-left: 20px; line-height: 1.5; }
+  #overlay .small { font-size: 12px; opacity: .6; }
+  .wbtn { font: 13px system-ui; padding: 5px 14px; cursor: pointer; margin: 0 4px; }
 </style>
 </head>
 <body>
@@ -43,6 +50,7 @@
 <div class="hud" id="cross"></div>
 <div class="hud" id="msg"></div>
 <div class="hud" id="dev">DEV: 5x SPEED &middot; GOD &middot; N next floor &middot; M reveal map</div>
+<div class="hud" id="boss"><div>Cave Warlord</div><div id="bossBar"><div id="bossFill"></div></div></div>
 <div id="flash"></div>
 <div class="hud" id="log"></div>
 <div class="hud" id="hitmark"></div>
@@ -53,13 +61,24 @@
   <div id="slots"></div>
   <div id="line"></div>
 </div>
-<div class="hud" id="help" style="bottom:auto;top:84px">WASD move &middot; Shift sprint &middot; Ctrl/C crouch &middot; LMB attack &middot; RMB block &middot; hold E search/use &middot; Tab inventory &middot; 1-4 quickslots &middot; ` dev mode &middot; Esc pause</div>
 <div id="overlay"><div id="overlayText">
-  <h1>Prototype Test</h1>
-  <p>Find the stairs on each floor. Five floors, then the boss (not built yet).</p>
-  <p>Click to start.</p>
+  <h1>Welcome to HoneyHan!</h1>
+  <p><b>This is still a Work in Progress.</b></p>
+  <ul id="welcomeList">
+    <li>No shop yet, so gold is useless.</li>
+    <li>No bow yet, so arrows are useless.</li>
+    <li>Grab potions from potion shelves.</li>
+    <li>Equipment can be found in armories and loot.</li>
+    <li>Monsters have a chance to drop loot.</li>
+  </ul>
+  <p>Find the stairs on each floor. Four floors, then the boss arena on floor 5.</p>
+  <p><b>Give me feedback please, ty muah!</b></p>
+  <p class="small">Press Esc in game for the controls (you can change them) and the glossary.</p>
+  <p><button id="welcomeControls" class="wbtn">Controls</button> <button id="welcomeGlossary" class="wbtn">Glossary</button></p>
+  <p>Click anywhere else to start.</p>
 </div></div>
 <script src="lib/three.min.js"></script>
+<script src="js/controls.js"></script>
 <script src="js/gen.js"></script>
 <script src="js/player.js"></script>
 <script src="js/loot.js"></script>
@@ -68,6 +87,7 @@
 <script src="js/combat.js"></script>
 <script src="js/main.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/menu.js"></script>
 <script src="js/tune.js"></script>
 </body>
 </html>

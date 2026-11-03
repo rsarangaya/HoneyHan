@@ -91,7 +91,7 @@ const invUI = (() => {
     const arm = ['head', 'body', 'legs'].map(z => `${z} ${Math.round(inv.armorRed(z) * 100)}%`).join(', ');
     const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`).join(', ');
     root.innerHTML = `<div class="win">
-      <div class="head"><b>Inventory</b><span>Gold ${inv.gold} · Arrows ${inv.arrows}/${QUIVER_MAX} · Pack ${inv.pack.length}/${PACK_MAX}</span><button data-act="close">Close (Tab)</button></div>
+      <div class="head"><b>Inventory</b><span>Gold ${inv.gold} · Arrows ${inv.arrows}/${QUIVER_MAX} · Pack ${inv.pack.length}/${PACK_MAX}</span><button data-act="close">Close (${keyName(KEYS.inventory)})</button></div>
       <div class="cols">
         <div class="eq"><h3>Equipped</h3>${slotBox('weapon', 'Weapon')}${slotBox('helmet', 'Helmet')}${slotBox('chest', 'Chest')}${slotBox('boots', 'Boots')}</div>
         <div><h3>Backpack</h3><div class="grid">${grid}</div></div>
@@ -99,7 +99,7 @@ const invUI = (() => {
       </div>
       <div class="quick">${slots}</div>
       <div class="sum">Armor cuts damage: ${arm}. Armor noise +${inv.armorNoise()} m.${buffs ? ' Active: ' + buffs + '.' : ''}${note ? '<br><b>' + note + '</b>' : ''}</div>
-      <div class="sum dim">Pickups go to the backpack only. Assign weapons and potions to a quickslot with the → buttons, then press 1 to 4 in the game.</div>
+      <div class="sum dim">Pickups go to the backpack only. Assign weapons and potions to a quickslot with the → buttons, then press ${[1, 2, 3, 4].map(n => keyName(KEYS['slot' + n])).join(', ')} in the game.</div>
     </div>`;
   }
 
@@ -140,7 +140,7 @@ const invUI = (() => {
     try { canvas.requestPointerLock(); } catch (e) {}
   }
   addEventListener('keydown', e => {
-    if (e.code === 'Tab' || e.code === 'KeyI') {
+    if (e.code === KEYS.inventory || e.code === 'Tab') {   // Tab always works so a rebind cannot strand you in the screen
       e.preventDefault();
       if (e.repeat) return;
       if (state === 'play') open(); else if (state === 'inv') close();

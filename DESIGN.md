@@ -101,7 +101,7 @@ Since the theme is fixed for the run, the boss belongs to that theme and the are
 - LMB: attack (hold to draw or charge on some weapons).
 - RMB: block, behaviour depends on equipment.
 - Number keys: quickslots (potions, bombs, throwables, wands).
-- Shift: sprint (loud). Ctrl/C: crouch. E: interact / hold to search. F: silent takedown.
+- Shift: sprint (loud). C: crouch (not Ctrl, since Ctrl+W closes the tab). E: interact / hold to search. F: silent takedown.
 
 ### 5.2 Hit zones
 | Zone | Damage | Notes |
@@ -291,6 +291,67 @@ Goal: optional, random encounters on regular floors that give a reason to explor
 - **Shared rules:** quest NPCs are neutral and never attack the player. The encounter is shown in the inventory screen as one short line. Failing or skipping costs nothing, but the reward is lost. Encounters are seeded, so seeded runs repeat.
 - **Build order:** after the shop. Start with type 1 (it only needs a stronger guard and the existing locked rooms), then 4 (altar plus a small deal screen), then 2, then 5, then 3 (needs the safe room and cell logic), then 6 (needs the noise system and target selection). The bow helps type 5.
 - **Open points:** whether quest NPCs can be killed for loot, whether mini-bosses need their own models, whether the shrine bargain should show its boon before you accept, and how rewards scale by floor.
+
+## 17. Enemy variety (planned 2026-11-03, not implemented, do not build yet)
+Goal: more than one kind of guard, so each floor asks for a different answer (sneak, block, flee, ranged, kill the handler first). Today there is one goblin guard with random gear, plus the floor 5 boss. Each new type should change how you play, not just add HP.
+- **Tamed wolves (first new type):** goblins keep wolves as pets. A wolf patrols with or near a goblin handler.
+  - **Senses:** tracks by smell, so crouching does not shrink how far it notices you, and walls do not help much. It sees poorly and hears normally. It cannot be sneak-killed by a dagger instakill alone unless it is asleep (open point).
+  - **Combat:** fast (faster than a sprint), low HP, bites quickly with a short telegraph. Always attacks the legs or body, never the head, and lunges from a distance. Blocking works but the dodge window is short. Leg hits slow it and a crippled wolf limps (uses the statuses system).
+  - **Handler link:** if the handler goblin is killed quietly, the wolf is left unaware and idle. If the handler is alerted, the wolf is let off the leash. A howl is a loud noise, like a goblin shout, and calls other wolves.
+  - **Where:** barracks, kennel rooms (new room type) and the boss arena rim. Spawns in pairs on later floors.
+- **Other ideas, in rough build order:**
+  1. **Goblin archer:** shoots from a distance with arrows and keeps range. Needs enemy projectiles and the bow work. Punished by closing in or breaking line of sight.
+  2. **Shaman (mage):** priority silent kill. Weak in melee, casts a slow or a daze at range and heals other goblins. Hears well, sees poorly.
+  3. **Brute (ogre):** large, slow, big damage, resists the dagger instakill and shrugs off stagger like the boss. Forces avoid, trap or loud fight.
+  4. **Skeleton:** sees but does not hear, so noise is safe and light and line of sight are what matter. Resists bleed. Fits cellar and chapel themes.
+  5. **Mimic chest:** a chest that bites when searched (design section 3 already lists it). Punishes greedy looting. Needs the noise and stun logic first.
+  6. **Bomb goblin:** rushes you and explodes. Deadly in a pack, can be baited into hurting other enemies (works with Hanahan's Rage).
+  7. **Thief goblin:** the quest enemy from section 16, runs from you instead of fighting.
+  8. **Theme natives:** see the next subsection. Every theme has its own enemies, built on the same type table.
+### Theme-specific enemies
+Each theme has its own roster, so the setting changes who you fight and not only the colours. The theme table in section 3 has the first ideas for the mix. A roster is: 1 to 2 **common natives** (most of the floor's population), 1 **signature native** (rarer, uses the theme's stealth gimmick), 1 **elite** (floors 3 and 4, a mini-boss-lite), and the **boss** with its minions (section 3, floor 5).
+- **Mix rule (first guess):** floor 1 is mostly generic goblins (about 70%) with a few natives, so the player learns the basics. Native share rises each floor to about 70% natives by floor 4, and the boss arena rim uses the roster scaled up. Goblins always remain in the mix, since they are the setting's default guards.
+- **Placement:** natives are tied to room types. A cook sits in the mess hall, a rat nest in the storeroom, books in the library, and so on. This also makes rooms feel different.
+- **Each native must change play:** a different sense profile, a different answer, or a different drop. A reskinned goblin does not count.
+- **Draft rosters (all numbers and names open):**
+  | Theme | Common natives | Signature native | Elite | Boss pool |
+  |---|---|---|---|---|
+  | Sunken Tavern (stage 1, built first) | Goblin cook (carries a cleaver, drops food potions), drunk bandit (loud, sways, easy sneak but yells when hurt), giant rat (small, fast, in packs, drops little) | Mimic chair or chest (springs when you get close), water splashes give away your position | Bouncer (brute type, resists the dagger kill) | Giant Innkeeper |
+  | Moonlit Orchard | Tamed wolf (section 17 first type), bandit archer | Scarecrow construct (stands still like scenery until you pass, then wakes) | Orchard warden (shaman type, casts thorns) | Harvest king or alpha wolf |
+  | Clockwork Library | Animated book (flies, hears everything in the dead silence, weak), robed scholar (shaman type) | Stone golem (slow, huge reach, ignores stagger) | Head librarian (casts, silences your steps) | Librarian Golem |
+  | Mushroom Cellar | Giant rat, skeleton warden (sees, does not hear) | Spore-puffer (bursts into a slowing or dazing cloud when killed) | Fungal brute | Fungal Warden |
+  | Goblin Market | Goblins, merchant guard (shield, blocks head and body), trained boar (charges in a straight line) | Thief goblin (steals and runs, section 16) | Market captain (calls for friends, loud) | Goblin Warlord |
+  | Frozen Chapel | Skeleton, cultist (robed, casts a slow) | Frost wisp (floats, hits by cold, slows) | Ice knight (armored, blocks) | Bell-ringer lich or frost giant |
+- **Spawn data per theme:** each theme lists its natives with a weight per floor, the rooms they prefer, and a pack size. The generator draws from it, and the theme's gimmick (water splashes, snow footprints, spore light) is a rule on the floor, not an enemy.
+- **Build order:** make the Sunken Tavern roster first, since stage 1 uses it. Start with the cook and the drunk bandit (they only need new gear rules, a sense tweak and a loud hurt shout), then the rat pack, then the bouncer. The mimic comes with the mimic chest item. Other themes follow when each theme is made real.
+- **Decided 2026-11-03:** signature and elite natives get their own models, commons may be recolours of the goblin or beast rig. At most 3 native types share one floor. Native loot is thematic (a cook drops food, a scholar drops scrolls, and so on). Food needs the hunger system in section 18.
+
+- **Shared systems needed:** an enemy type table (stats, senses, speed, reach, attack tells, gear rules, loot), a sense profile per type (vision range, hearing multiplier, smell), per-type models built from the same rig, and spawn rules per room type and floor (which types appear, how many, with which handler).
+- **Build order:** after statuses. Do the type table first (move today's goblin into it, no visible change), then the wolf as the proof. Then archer and shaman once the bow and wands exist, then the brute, then theme natives with the first real theme.
+- **Open points:** can wolves be tamed or distracted by the player (thrown food)? Do wolves drop loot (pelt, no gear)? Should a wolf follow the player's scent trail after losing sight? How many types may share one floor?
+
+## 18. Hunger and food (planned 2026-11-03, not implemented, do not build yet)
+Goal: food is a real resource, not a second healing potion. Hunger adds a slow pressure to the run (do not dawdle, do not rest forever) without becoming a chore. It should never kill a player who is playing at a normal pace.
+- **Hunger meter:** 0 to 100, shown as a small bar under stamina. It drains with time while playing (not while a menu is open), faster when you sprint or fight and slower when you stand still or crouch. First guess: about 100 to 0 in 15 minutes of normal play, so a full 5 floor run needs roughly 1 to 2 meals.
+- **Stages of hunger** (each is a clear message and a HUD colour):
+  | Meter | State | Effect |
+  |---|---|---|
+  | 100 to 50 | Fed | No effect. |
+  | 50 to 25 | Hungry | Stamina regen -20%. A stomach growl is a faint noise (about 2 m). |
+  | 25 to 1 | Weak | Stamina regen -40%, max stamina -15%, growl noise 4 m. |
+  | 0 | Starving | Lose 1 HP every 4 s until you eat, never below 1 HP, so it cannot finish you. Sprint is limited. |
+  The growl makes hunger a stealth cost too, which fits the noise system.
+- **Food items:** a new item type, stackable like potions. Each gives hunger points and sometimes a small bonus.
+  - Bread (+25), cheese (+20, light), dried meat (+30), apple (+10, can be eaten fast), stew or a hot meal (+45 plus a short regen or buff, found only at hearths or dropped by cooks), mushrooms in the cellar (+15, a small risk of a bad effect, open point).
+  - Eating takes a short hold (about 1.2 s, bigger meals longer), is interrupted by damage, and makes a little noise.
+  - Quickslots take food like potions.
+- **Sources:** barrels and chests (small chance), mess halls and storerooms (a food shelf prop, like the potion shelf), thematic native drops (cook, boar, scholar and so on), the shop, and rarely the boss arena. A floor should hold enough food for the expected time, so tune supply against the drain, not by feel.
+- **Hearths:** eating at a lit hearth in a mess hall gives a better meal for the same item. Optional, a cheap way to make mess halls worth visiting.
+- **Healing stays separate:** potions heal HP and food only feeds. Starving cannot kill, and a full belly gives no HP back, so the two systems do not overlap. Open point: whether being Fed gives a slow HP regen (there is no natural regen today).
+- **Safe room:** the safe room after a boss does not restore hunger. It is a place to eat from your pack.
+- **Dev mode:** hunger is frozen and a button gives food.
+- **Build order:** after the inventory work is steady. Add the meter, the food item type and eating first (one food item, no hunger penalties), then the penalties and growl noise, then food placement in the generator, then thematic natives that drop food. Needs: item types in `js/loot.js`, a HUD bar, noise events (already built).
+- **Open points:** exact drain and food supply (tune by play), whether mushrooms can be bad, whether Fed gives a slow regen, whether hunger pauses on the stairs between floors.
 
 ## 14. Shop (planned 2026-11-02, not implemented, do not build yet)
 - **Availability:** each stage has exactly one floor with a shop, picked at random from the run seed (with today's single 5-floor stage, one of floors 1 to 5; if stages become 5 floors each, one per block of 5). The player does not know which floor in advance. A shop floor is never the start room or stairs room, and the shop room is never locked.

@@ -77,7 +77,7 @@ const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
   const b = WSTATS[it.base];
-  return b.ranged ? b : { ...b, dmg: b.dmg * TIERS[it.tier].mul };
+  return b.ranged ? b : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
 }
 const armorStats = it => ({ red: Math.min(0.6, ARMOR_RED[it.cls] * TIERS[it.tier].mul), noise: ARMOR_NOISE[it.cls] });
 
@@ -86,7 +86,7 @@ function itemLines(it) {
   if (it.type === 'weapon') {
     const s = weaponStats(it);
     if (s.ranged) return ['Ranged. Not usable yet.'];
-    return [`Damage ${s.dmg.toFixed(1)}`, `Swing ${s.dur.toFixed(2)} s, reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
+    return [`Damage ${s.dmg.toFixed(1)}`, `Attack speed x${s.atkSpd.toFixed(2)} (swing ${s.dur.toFixed(2)} s), reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
       s.sneak >= 99 ? 'Sneak attack: instant kill' : `Sneak attack x${s.sneak}`,
       s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block'];
   }
@@ -171,6 +171,7 @@ class Inventory {
 
   // Adds a drop descriptor. Returns text for the pickup message, or null if it did not fit.
   add(d) {
+    discoverItem(d);                                      // glossary entry (controls.js)
     if (d.type === 'gold') { this.gold += d.n; return `${d.n} gold`; }
     if (d.type === 'arrows') {
       const got = Math.min(d.n, QUIVER_MAX - this.arrows);

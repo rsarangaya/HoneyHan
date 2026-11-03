@@ -1,10 +1,12 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-2';   // bumped so old saved windup/cooldown values don't override the new defaults
-  const WEAPON_FIELDS = [['dmg', 1], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
+  const KEY = 'prototype-test-tune-4';   // bumped so old saved values don't override the new speed and attack-speed defaults
+  const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
-    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1]]],
+    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
+    ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossLegendary', 0.01]]],
+    ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
     ...['sword', 'dagger', 'mace'].map(w => [w, WSTATS[w], WEAPON_FIELDS]),
@@ -42,6 +44,9 @@ const tunePanel = (() => {
     mk('Give potions', () => { Object.keys(POTIONS).forEach(k => inv.add({ type: 'potion', kind: k, n: 1 })); });
     mk('Give keys', () => { floor.doors.forEach(d => { if (!inv.has('key', d.lock)) inv.add({ type: 'key', lock: d.lock, label: d.keyLabel }); }); });
     mk('Spawn guard now', () => { respawnT = 0; });
+    mk('Floor down', () => { if (floorNum < MAX_FLOOR) startFloor(floorNum + 1); else flash('Already on the last floor'); });
+    mk('Floor up', () => { if (floorNum > 1) startFloor(floorNum - 1); else flash('Already on floor 1'); });
+    mk('Test hit', () => damage(10));
     mk('Copy values', copyValues);
     mk('Reset', () => { apply(JSON.parse(defaults)); save(); build(); });
     root.appendChild(btns);

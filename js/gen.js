@@ -33,19 +33,19 @@ const MAP_W = 45, MAP_H = 45;
 //   special: lootable props that define the room (always placed).
 //   props: [min, max] ordinary loot props (chest, barrel, rubble).
 const ROOM_THEMES = {
-  generic:   { edge: [['crates', 0, 2], ['barrels', 0, 2], ['table', 0, 1], ['sacks', 0, 1]], inner: [], floor: [['bones', 0, 2], ['rug', 0, 1], ['candles', 0, 1]], props: [1, 3] },
+  generic:   { edge: [['crates', 0, 2], ['barrels', 0, 2], ['table', 0, 1], ['sacks', 0, 1], ['urn', 0, 2]], inner: [], floor: [['bones', 0, 2], ['rug', 0, 1], ['candles', 0, 1]], props: [1, 3] },
   barracks:  { edge: [['bed', 3, 5], ['weaponrack', 1, 1], ['barrels', 0, 1], ['banner', 1, 2]], inner: [['table', 0, 1]], floor: [['bones', 0, 1], ['rug', 0, 1], ['candles', 0, 1]], props: [1, 2] },
-  messhall:  { edge: [['hearth', 1, 1], ['barrels', 1, 2], ['sacks', 1, 2]], inner: [['table', 2, 3]], floor: [['bones', 1, 3], ['candles', 1, 2]], props: [1, 2] },
+  messhall:  { edge: [['hearth', 1, 1], ['barrels', 1, 2], ['sacks', 1, 2], ['urn', 0, 2]], inner: [['table', 2, 3]], floor: [['bones', 1, 3], ['candles', 1, 2]], props: [1, 2] },
   brewery:   { edge: [['cauldron', 1, 1], ['bookshelf', 1, 2], ['barrels', 1, 1]], inner: [], floor: [['rug', 0, 1], ['candles', 1, 2], ['bones', 0, 1]], props: [0, 0], special: [['potions', 1, 3]] },
-  library:   { edge: [['bookshelf', 4, 7], ['banner', 0, 1]], inner: [['table', 1, 2]], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [1, 2] },
-  storeroom: { edge: [['crates', 2, 4], ['barrels', 2, 3], ['sacks', 1, 2]], inner: [['crates', 0, 1]], floor: [['bones', 0, 1]], props: [2, 3] },
-  shrine:    { edge: [['statue', 1, 3], ['banner', 2, 4]], inner: [['altar', 1, 1]], floor: [['rug', 1, 1], ['candles', 2, 4]], props: [1, 2] },
+  library:   { edge: [['bookshelf', 4, 7], ['banner', 0, 1], ['urn', 1, 2]], inner: [['table', 1, 2]], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [1, 2] },
+  storeroom: { edge: [['crates', 2, 4], ['barrels', 2, 3], ['sacks', 1, 2], ['urn', 1, 3]], inner: [['crates', 0, 1]], floor: [['bones', 0, 1]], props: [2, 3] },
+  shrine:    { edge: [['statue', 1, 3], ['banner', 2, 4], ['urn', 1, 3]], inner: [['altar', 1, 1]], floor: [['rug', 1, 1], ['candles', 2, 4]], props: [1, 2] },
   // locked rooms, opened with a key found elsewhere on the floor
   armory:    { edge: [['banner', 2, 3], ['weaponrack', 1, 1]], inner: [['table', 1, 1]], floor: [['candles', 1, 2], ['rug', 0, 1]], props: [0, 0], special: [['rack', 1, 3]] },
   vault:     { edge: [['banner', 1, 2], ['statue', 1, 2]], inner: [], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [0, 0], special: [['vaultchest', 2, 3]] },
   lockedbrew:{ edge: [['cauldron', 1, 1], ['bookshelf', 1, 2], ['barrels', 1, 1]], inner: [], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [0, 0], special: [['potions', 1, 3]] },
 };
-const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar']);   // guards path around these
+const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue']);   // guards path around these: anything with a collision circle bigger than candles
 const DECALS = new Set(['rug', 'bones', 'candles', 'banner']);                                                     // never fill a tile alone
 const LOCKED_ROOMS = {
   armory:     { w: 7, h: 6, theme: 'armory',     name: 'armory',  key: 'Armory Key' },
@@ -65,12 +65,129 @@ function roomPoint(f, r, k) {
 
 // opts.armory: this floor must contain the armory (retries with new layouts until it fits).
 function generateFloor(seed, floorNum, opts = {}) {
+  if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
   for (let attempt = 0; attempt < 8; attempt++) {
     f = layoutFloor(seed + attempt * 7777, floorNum, opts);
     if (!opts.armory || f.rooms.some(r => r.theme === 'armory')) break;
   }
   return f;
+}
+
+// Boss floor: no rooms, one big lumpy cave arena. The boss waits in the middle, guards patrol the rim,
+// loot and statues sit along the walls, you start at the south end and the stairs are at the north end.
+// Every blocking object is placed so the open floor stays connected (pillars never touch each other
+// or the walls, props are checked with a flood fill).
+function layoutBoss(seed, floorNum) {
+  const rng = makeRng(seed * 7919 + floorNum * 104729);
+  const w = MAP_W, h = MAP_H, cx = w >> 1, cy = h >> 1;
+  const tiles = new Uint8Array(w * h), blocked = new Uint8Array(w * h);
+  const at = (x, y) => tiles[y * w + x];
+  const wallAt = (x, y) => x < 0 || y < 0 || x >= w || y >= h || at(x, y) === T_WALL;
+  const dist = (x, y, px, py) => Math.hypot(x - px, y - py);
+  const seedOf = () => (rng() * 4294967296) >>> 0;
+  const ph = [rng() * 6.28, rng() * 6.28, rng() * 6.28];
+  const edgeR = a => 16.5 + 1.6 * Math.sin(3 * a + ph[0]) + 1.2 * Math.sin(5 * a + ph[1]) + 0.8 * Math.sin(8 * a + ph[2]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+    if (dist(x, y, cx, cy) <= edgeR(Math.atan2(y - cy, x - cx))) tiles[y * w + x] = T_FLOOR;
+
+  let sy = cy + Math.floor(edgeR(Math.PI / 2)) - 2; while (at(cx, sy) !== T_FLOOR) sy--;
+  let ty = cy - Math.floor(edgeR(-Math.PI / 2)) + 2; while (at(cx, ty) !== T_FLOOR) ty++;
+  const start = { x: cx, y: sy }, stairs = { x: cx, y: ty };
+  tiles[start.y * w + start.x] = T_START; tiles[stairs.y * w + stairs.x] = T_STAIRS;
+
+  // rock pillars scattered over the arena (cover); none beside another pillar, a wall, the boss, the start or the stairs
+  const open8 = (x, y) => { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (wallAt(x + dx, y + dy)) return false; return true; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (at(x, y) !== T_FLOOR || dist(x, y, cx, cy) < 7 || dist(x, y, start.x, start.y) < 5 || dist(x, y, stairs.x, stairs.y) < 4.5) continue;
+    if (open8(x, y) && rng() < 0.1) tiles[y * w + x] = T_WALL;
+  }
+
+  const bq = new Int32Array(w * h);
+  const reachCount = () => {
+    const seen = new Uint8Array(w * h);
+    let n = 0, qe = 0;
+    bq[qe++] = start.y * w + start.x; seen[bq[0]] = 1;
+    while (n < qe) {
+      const i = bq[n++], x = i % w, y = (i / w) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy, ni = ny * w + nx;
+        if (wallAt(nx, ny) || seen[ni] || blocked[ni] || (nx === stairs.x && ny === stairs.y)) continue;
+        seen[ni] = 1; bq[qe++] = ni;
+      }
+    }
+    return qe;
+  };
+  let reach = reachCount();
+  const used = new Set(), props = [], decor = [];
+  const wallDir = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => wallAt(x + dx, y + dy)) || [0, 1];
+  const edge = [];                                         // open tiles touching a wall: where loot and statues go
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (at(x, y) !== T_FLOOR || dist(x, y, start.x, start.y) < 6 || dist(x, y, cx, cy) < 8) continue;
+    if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => wallAt(x + dx, y + dy))) edge.push({ x, y });
+  }
+  rng.shuffle(edge);
+  const claim = c => {                                     // a blocking object: never beside another, never cuts the floor
+    const i = c.y * w + c.x;
+    if (used.has(i)) return false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (blocked[(c.y + dy) * w + c.x + dx]) return false;
+    blocked[i] = 1;
+    if (reachCount() !== reach - 1) { blocked[i] = 0; return false; }
+    reach--; used.add(i); return true;
+  };
+  const take = (list) => { for (let k = list.length - 1; k >= 0; k--) { const c = list[k]; if (claim(c)) { list.splice(k, 1); return c; } } return null; };
+  const addProp = (kind, extra = {}, list = edge) => {
+    const c = take(list); if (!c) return;
+    const [dx, dy] = wallDir(c.x, c.y);
+    props.push({ kind, x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy), ...extra });
+  };
+  addProp('potions', { fixed: 'heal' }, edge.filter(c => dist(c.x, c.y, start.x, start.y) >= 14));   // the one guaranteed healing potion, far from the start
+  for (const kind of ['chest', 'chest', 'chest', 'barrel', 'barrel', 'rubble', 'rubble']) addProp(kind);
+  for (let i = 0; i < 4; i++) { const c = take(edge); if (!c) break; const [dx, dy] = wallDir(c.x, c.y); decor.push({ kind: 'statue', x: c.x, y: c.y, seed: seedOf(), edge: true, yaw: Math.atan2(-dx, -dy), scale: 2 }); }
+  for (let i = 0; i < 8 && edge.length; i++) {             // banners hang on the walls and share their tile
+    const c = edge[rng.int(0, edge.length - 1)], [dx, dy] = wallDir(c.x, c.y);
+    decor.push({ kind: 'banner', x: c.x, y: c.y, seed: seedOf(), edge: true, yaw: Math.atan2(-dx, -dy), scale: 2.4 });
+  }
+  // huge iron chandeliers on long chains: one over the boss, a ring around it, and a few toward the start and the stairs
+  const hang = (x, y) => decor.push({ kind: 'chandelier', x, y, seed: seedOf(), edge: false, yaw: 0, scale: 3 });
+  hang(cx, cy);
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; hang(Math.round(cx + Math.cos(a) * 11), Math.round(cy + Math.sin(a) * 11)); }
+  hang(cx, Math.round((cy + sy) / 2 + 3)); hang(cx, Math.round((cy + ty) / 2 - 1));
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.3; decor.push({ kind: 'candles', x: Math.round(cx + Math.cos(a) * 5), y: Math.round(cy + Math.sin(a) * 5), seed: seedOf(), edge: false, yaw: rng() * 6.28 }); }
+  for (let i = 0; i < 14; i++) {
+    const x = rng.int(cx - 14, cx + 14), y = rng.int(cy - 14, cy + 14);
+    if (at(x, y) === T_FLOOR && dist(x, y, start.x, start.y) > 4) decor.push({ kind: 'bones', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+  }
+
+  // wall torches around the rim and on the pillars
+  const spots = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    if (wallAt(x, y) || at(x, y) === T_STAIRS) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy)) spots.push({ x, y, dx, dy });
+  }
+  rng.shuffle(spots);
+  const torches = [];
+  for (const s of spots) { if (torches.length >= 60) break; if (torches.every(t => Math.hypot(t.x - s.x, t.y - s.y) >= 3)) torches.push(s); }
+
+  // the boss in the middle (asleep until you get close) and guards patrolling the rim
+  const nearestOpen = (x, y) => {
+    for (let r = 0; r <= 4; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const px = x + dx, py = y + dy;
+      if (!wallAt(px, py) && !blocked[py * w + px] && at(px, py) === T_FLOOR) return { x: px, y: py };
+    }
+    return { x, y };
+  };
+  const rim = a => nearestOpen(Math.round(cx + Math.cos(a) * (edgeR(a) - 5)), Math.round(cy + Math.sin(a) * (edgeR(a) - 5)));
+  const enemies = [{ x: cx, y: cy, route: [{ x: cx, y: cy }, { x: cx, y: cy }], seed: seedOf(), boss: true }];
+  const a0 = rng() * 6.28;
+  for (let i = 0; i < 7; i++) {
+    const a = a0 + i * 2 * Math.PI / 7, A = rim(a), B = rim(a + 0.7);
+    if (dist(A.x, A.y, start.x, start.y) < 10) continue;
+    enemies.push({ x: A.x, y: A.y, route: [A, B], seed: seedOf() });
+  }
+
+  const room = { x: cx - 19, y: cy - 19, w: 39, h: 39, cx, cy, theme: 'arena', locked: false };
+  return { w, h, tiles, blocked, rooms: [room], start, stairs, props, decor, doors: [], torches, enemies, boss: { x: cx, y: cy }, steps: 0 };
 }
 
 function layoutFloor(seed, floorNum, opts) {
@@ -285,6 +402,19 @@ function layoutFloor(seed, floorNum, opts) {
     for (const [kind, lo, hi] of spec.floor) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, inner);
   };
   rooms.forEach(furnish);
+
+  // ---- ceiling decor (no collision): a chandelier over the centre of most rooms (always in halls, libraries,
+  // shrines and rich locked rooms), a couple more in big rooms, and wooden beams across rooms of 6+ tiles ----
+  const always = new Set(['barracks', 'messhall', 'library', 'shrine', 'armory', 'vault']);
+  for (const r of rooms) {
+    if (r.w * r.h < 20) continue;
+    if (always.has(r.theme) || rng() < 0.5) decor.push({ kind: 'chandelier', x: r.cx, y: r.cy, seed: seedOf(), edge: false, yaw: 0 });
+    if (r.w * r.h >= 64) for (const [ox, oy] of [[-3, 0], [3, 0], [0, -3], [0, 3]])
+      if (rng() < 0.4 && at(r.cx + ox, r.cy + oy) === T_FLOOR && r.cx + ox >= r.x && r.cx + ox < r.x + r.w && r.cy + oy >= r.y && r.cy + oy < r.y + r.h)
+        decor.push({ kind: 'chandelier', x: r.cx + ox, y: r.cy + oy, seed: seedOf(), edge: false, yaw: 0 });
+    if (r.w >= 6 && r.theme !== 'vault') for (let k = 1; k <= Math.floor(r.h / 3); k++)
+      decor.push({ kind: 'beam', x: r.cx, y: r.y + k * 3 - 1, seed: seedOf(), edge: false, yaw: 0, len: (r.w - 0.3) * TILE });
+  }
 
   // ---- each locked room's key sits in a chest elsewhere on the floor (a chest is made from a
   // barrel if the floor has too few) ----

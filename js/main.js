@@ -25,6 +25,7 @@ const mctx = hud.mini.getContext('2d');
 
 const player = new Player();
 let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null;
+const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) has room
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5;
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
@@ -131,15 +132,15 @@ function buildTorches() {
   const fire = new THREE.MeshBasicMaterial({ color: 0xffa94a });
   torchPts = floor.torches.map(t => {
     const x = (t.x + 0.5) * TILE + t.dx * 1.42, z = (t.y + 0.5) * TILE + t.dy * 1.42;
-    const g = new THREE.Group(); g.position.set(x, 2.0, z);
+    const g = new THREE.Group(); g.position.set(x, floor.boss ? 3.6 : 2.0, z);       // higher on the tall arena walls
     const stick = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), iron); stick.position.y = -0.05;
     const flame = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.22, 0.17), fire); flame.position.y = 0.22;
     g.add(stick, flame); group.add(g);
-    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: 2.2, color: theme.light, str: 1 };
+    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss ? 3.8 : 2.2, color: theme.light, str: 1 };
   });
   for (const o of decorObjs) {
     const l = DECOR_LIGHT[o.kind];
-    if (l) torchPts.push({ lx: o.x + Math.sin(o.yaw) * 0.6, lz: o.z + Math.cos(o.yaw) * 0.6, y: l.y, color: l.color, str: l.str });
+    if (l) torchPts.push({ lx: o.x + Math.sin(o.yaw) * 0.6, lz: o.z + Math.cos(o.yaw) * 0.6, y: o.ly ?? l.y, color: l.color, str: l.str * (o.ls || 1) });
   }
 }
 function updateTorches(now) {
@@ -201,13 +202,27 @@ function playerHit() {
   if (!t) { loud(2); return; }                    // swung at nothing
   if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
   const e = t.e;
-  const sneak = e.state !== 'alerted' && !e.seen; // unaware and not looking at you
+  const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you; the boss cannot be sneak-killed
   const dmg = w.dmg * Math.min(TUNE.damageCap, ZONE_MUL[t.zone]) * (sneak ? w.sneak : 1)
     * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[t.zone] || 1);
   const killed = e.hurt(dmg, player);
   loud(sneak && killed ? 2 : w.noise);            // a clean kill is nearly silent
-  if (killed) { makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); }
+  if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); }
   else mark(`${t.zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}`, t.zone === 'head' ? '#ff9a3a' : '#fff');
+}
+
+// The boss always leaves a body holding: one Epic piece (small chance of Legendary), one more rolled
+// piece of equipment (Rare or better) and gold.
+function bossDefeated(e) {
+  const rng = makeRng((e.seed ^ 0xb055) >>> 0);
+  const epic = rollEquipment(floorNum, rng, {});
+  epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
+  const extra = rollEquipment(floorNum, rng, { boost: 1, minTier: 2 });
+  propObjs.push({
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left: [epic, extra, { type: 'gold', n: rng.int(120, 200) }] },
+    mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
+  });
+  flash('The boss falls! Loot its body. The way down is open.');
 }
 
 // A dead enemy leaves a lootable body only if its drop roll gave something.
@@ -225,7 +240,7 @@ function resolveEnemyAttack(e, zone) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
   const facing = (dx * fx + dz * fz) / d > 0.2;
-  const full = TUNE.enemyDmg * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
+  const full = TUNE.enemyDmg * (e.boss ? TUNE.bossDmgMul : 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
   if (cb.block && facing && !w.ranged) {
     if (zone === 'legs') mark('LEG SWEEP', '#ff6a4a');           // goes under the block
     else if (cb.blockT <= w.parryWin) {
@@ -267,6 +282,17 @@ function updateCombat(dt) {
   if (markTimer > 0) { markTimer -= dt; if (markTimer <= 0) document.getElementById('hitmark').style.opacity = 0; }
 }
 
+// Free distance in front of the camera before a wall or solid prop, checked left, centre and right of the blade (max 2 m).
+function freeAhead() {
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+  let free = 2;
+  for (const off of [-0.4, 0, 0.45]) for (let d = 0.1; d < free; d += 0.1) {
+    const px = player.x + fx * d + rx * off, pz = player.z + fz * d + rz * off;
+    if (wallAt(floor, Math.floor(px / TILE), Math.floor(pz / TILE)) || floor.solids.some(s => s.r > 0.3 && (px - s.x) ** 2 + (pz - s.z) ** 2 < s.r * s.r)) { free = d; break; }
+  }
+  return free;
+}
+
 // first-person weapon: rest, swing, block and swap poses
 const vm = { id: null, group: new THREE.Group(), model: null };
 camera.add(vm.group);
@@ -284,16 +310,28 @@ function updateViewmodel(dt) {
     x -= 0.6 * s; z -= 0.25 * s; rx -= 1.25 * s; rz += 0.7 * s;
     k = 1;
   }
+  // Keep the weapon out of walls and furniture: pull it back toward the camera by however far it
+  // would reach past the nearest obstacle (a swing reaches much farther than the rest pose).
+  const pull = Math.max(0, Math.min(1.3, (cb.atk ? 1.9 : 0.95) - freeAhead()));
+  z += pull; y -= pull * 0.15; rx += pull * 0.5;
   const g = vm.group;
   g.position.x += (x - g.position.x) * k; g.position.y += (y - g.position.y) * k; g.position.z += (z - g.position.z) * k;
   g.rotation.x += (rx - g.rotation.x) * k; g.rotation.z += (rz - g.rotation.z) * k;
 }
 
 // ---- damage and death ----
+// Getting hit: a red screen flash plus a quick camera shake, both scaled by the damage (shown in dev mode too, with no HP lost).
+const shake = { t: 0, dur: 0.32, mag: 0 };
+function hitReaction(n) {
+  shake.mag = Math.min(0.055, 0.012 + n * 0.0012); shake.t = shake.dur;
+  const f = el('flash');
+  f.style.transition = 'none'; f.style.opacity = Math.min(1, 0.45 + n / 25);
+  requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
+}
 function damage(n) {
+  hitReaction(n);
   if (dev.on) return;
   inv.hp = Math.max(0, inv.hp - n);
-  el('flash').style.opacity = 1; setTimeout(() => { el('flash').style.opacity = 0; }, 120);
   if (inv.hp <= 0) {
     state = 'dead';
     document.exitPointerLock();
@@ -324,7 +362,7 @@ function targetInfo(o) {
 function updateSearch(dt) {
   const target = lookTarget();
   const info = target && targetInfo(target);
-  if (target && !info.locked && player.keys.KeyE) {
+  if (target && !info.locked && player.keys[KEYS.interact]) {
     if (!search || search.o !== target) search = { o: target, t: 0 };
     search.t += dt;
     if (search.t >= info.time) { finishSearch(target); search = null; }
@@ -347,7 +385,7 @@ function finishSearch(o) {
     flash(`Unlocked the ${o.p.room}`);
     return;
   }
-  const drops = o.p.left || [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || []), ...(o.p.extra || [])];
+  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || []), ...(o.p.extra || [])]);
   const got = [], left = [], notes = [];
   for (const d of drops) {
     const text = inv.add(d);
@@ -371,13 +409,17 @@ function updateDoors(dt) {
   for (const o of propObjs) {
     if (o.p.kind !== 'door' || o.anim === undefined || o.anim >= 1) continue;
     o.anim = Math.min(1, o.anim + dt);
-    o.mesh.position.y = o.anim * 2.8;
+    o.mesh.position.y = o.anim * WALL_H;
     if (o.anim >= 1) o.mesh.visible = false;
   }
 }
 
 let hudKey = '';
 function updateHud() {
+  const boss = enemies.find(e => e.boss);
+  if (boss && boss.justWoke) { boss.justWoke = false; flash('The boss wakes!'); }
+  el('boss').style.display = boss && !boss.dormant && !boss.dead ? 'block' : 'none';
+  if (boss) el('bossFill').style.width = Math.max(0, boss.hp / boss.maxHp * 100) + '%';
   el('hpFill').style.width = (inv.hp / inv.maxHp * 100) + '%';
   el('stamFill').style.width = (cb.stamina / STAMINA_MAX * 100) + '%';
   el('stamFill').style.background = cb.canSprint ? '#4cc36a' : '#c9a23a';
@@ -404,27 +446,29 @@ scene.add(ambient);
 camera.add(torch);
 
 // The armory is on one random floor of the run, picked from the seed. It is always a locked room.
-const armoryFloor = makeRng((runSeed ^ 0x5bd1e995) >>> 0).int(1, MAX_FLOOR);
+const armoryFloor = makeRng((runSeed ^ 0x5bd1e995) >>> 0).int(1, MAX_FLOOR - 1);   // never the boss floor, which has no rooms
 let respawnT = Infinity, baseGuards = 0;
 
 function startFloor(n) {
   floorNum = n;
-  floor = generateFloor(runSeed, n, { armory: n === armoryFloor });
+  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR });
+  WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
   player.props = propObjs;
   search = null;
   player.place(floor);
   baseGuards = floor.enemies.length;
-  respawnT = n >= 3 ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up
+  respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
   hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
   const locked = floor.doors.map(d => d.room).join(', ');
-  flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
+  if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
+  else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
 
 // Floors 3 and deeper: every 35 to 70 seconds a guard appears in a room you cannot see, up to 1.5x the floor's guard count.
 function updateRespawn(dt) {
-  if (floorNum < 3) return;
+  if (floorNum < 3 || floor.boss) return;
   respawnT -= dt;
   if (respawnT > 0) return;
   respawnT = 35 + Math.random() * 35;
@@ -503,7 +547,13 @@ function stairProgress() {
 }
 function eyeY() { return player.eye - stairProgress() * STAIR_DEPTH; }
 
+let sealedMsgT = 0;
 function checkStairs() {
+  if (floor.boss && enemies.some(e => e.boss && !e.dead) && stairProgress() > 0.25) {   // sealed until the boss falls
+    player.z = stairBox.z0 - 0.45; player.vz = 0;
+    if (performance.now() - sealedMsgT > 2500) { sealedMsgT = performance.now(); flash('The way down is sealed until the boss falls.'); }
+    return;
+  }
   if (stairProgress() < 0.85) return;
   if (floorNum < MAX_FLOOR) startFloor(floorNum + 1);
   else finishRun();
@@ -511,7 +561,7 @@ function checkStairs() {
 function finishRun() {
   state = 'won';
   document.exitPointerLock();
-  hud.overlayText.innerHTML = `<h1>Floor ${MAX_FLOOR} stairs reached</h1><p>The first boss is not built yet. That is the end of this iteration.</p><p>Click to start a new run.</p>`;
+  hud.overlayText.innerHTML = `<h1>Boss defeated</h1><p>You took the stairs down from floor ${MAX_FLOOR}. That is the end of this iteration.</p><p>Click to start a new run.</p>`;
   hud.overlay.style.display = 'flex';
 }
 
@@ -527,18 +577,14 @@ hud.seed.textContent = `seed ${runSeed}`;
 
 function begin() {
   if (state === 'won' || state === 'dead') { location.search = '?seed=' + ((Math.random() * 4294967296) >>> 0); return; }
-  state = 'play';
+  state = 'play'; session.started = true;
   hud.overlay.style.display = 'none';
   canvas.requestPointerLock();
 }
 hud.overlay.addEventListener('click', begin);
 canvas.addEventListener('click', () => { if (state === 'play' && document.pointerLockElement !== canvas) canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
-  if (state === 'play' && document.pointerLockElement !== canvas) {
-    state = 'menu';
-    hud.overlayText.innerHTML = '<h1>Paused</h1><p>Click to resume.</p>';
-    hud.overlay.style.display = 'flex';
-  }
+  if (state === 'play' && document.pointerLockElement !== canvas) pauseMenu.open();
 });
 addEventListener('mousemove', e => { if (document.pointerLockElement === canvas) player.look(e.movementX, e.movementY); });
 addEventListener('keydown', e => {
@@ -547,25 +593,34 @@ addEventListener('keydown', e => {
     if (e.code === 'KeyN') { if (floorNum < MAX_FLOOR) startFloor(floorNum + 1); else finishRun(); }
     if (e.code === 'KeyM') explored.fill(1);
   }
-  if (state === 'play' && !e.repeat && /^Digit[1-4]$/.test(e.code)) {
-    const msg = inv.use(+e.code.slice(5) - 1);
+  const slot = [KEYS.slot1, KEYS.slot2, KEYS.slot3, KEYS.slot4].indexOf(e.code);
+  if (state === 'play' && !e.repeat && slot >= 0) {
+    const msg = inv.use(slot);
     if (msg) flash(msg);
     if (inv.swapT > 0) cb.atk = null;
   }
+  if (state === 'play' && !e.repeat) pressAction(e.code);
   player.keys[e.code] = true; if (e.code === 'ControlLeft') e.preventDefault(); });
-addEventListener('keyup', e => { player.keys[e.code] = false; });
+addEventListener('keyup', e => { player.keys[e.code] = false; if (e.code === KEYS.block) cb.want = false; });
+// Attack and block can be bound to a key or a mouse button, so both go through here.
+function pressAction(code) {
+  if (code === KEYS.attack) cb.press = true;
+  if (code === KEYS.block) cb.want = true;
+}
 addEventListener('blur', () => { player.keys = {}; cb.want = false; });
+// A stray Ctrl+W, Ctrl+R or back button during a run asks before leaving instead of losing it.
+addEventListener('beforeunload', e => { if (state === 'play' && !dev.on) { e.preventDefault(); e.returnValue = ''; } });
 addEventListener('mousedown', e => {
   if (state !== 'play' || document.pointerLockElement !== canvas) return;
-  if (e.button === 0) cb.press = true;
-  if (e.button === 2) cb.want = true;
+  player.keys['Mouse' + e.button] = true;
+  pressAction('Mouse' + e.button);
 });
-addEventListener('mouseup', e => { if (e.button === 2) cb.want = false; });
+addEventListener('mouseup', e => { player.keys['Mouse' + e.button] = false; if ('Mouse' + e.button === KEYS.block) cb.want = false; });
 addEventListener('contextmenu', e => e.preventDefault());
 
 startFloor(1);
 if (params.has('dev')) setDev(true);
-let last = performance.now();
+let last = performance.now(), frameNo = 0;
 function frame(now) {
   const dt = (now - last) / 1000; last = now;
   if (state === 'play') {
@@ -583,11 +638,18 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     reveal();
+    if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
     if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) hud.msg.style.opacity = 0; }
   }
   camera.position.set(player.x, eyeY(), player.z);
   camera.rotation.set(player.pitch, player.yaw, 0);
+  if (shake.t > 0) {                               // decaying jolt: a sharp kick that settles over 0.3 s
+    shake.t = Math.max(0, shake.t - dt);
+    const s = shake.mag * (shake.t / shake.dur) ** 1.5;
+    camera.rotation.x += (Math.random() - 0.5) * 2 * s; camera.rotation.y += (Math.random() - 0.5) * 2 * s; camera.rotation.z += (Math.random() - 0.5) * 3 * s;
+    camera.position.y -= s * 2;
+  }
   stairsLight.intensity = 0.35 + Math.sin(now / 300) * 0.08;
   updateViewmodel(dt);
   updateTorches(now);

@@ -1,11 +1,13 @@
 // Guard enemy: vision cone, hearing, awareness meter and the unaware / suspicious /
 // alerted / searching state machine (stage 3 of the build order).
-const COS_HALF_FOV = Math.cos(55 * Math.PI / 180);
-const VIS_RANGE = 12;
-const SHOUT_R = 11;                     // a guard that spots you yells; guards in range come to its spot
+const FOV_HALF = 50;                    // degrees either side of straight ahead (was 55)
+const COS_HALF_FOV = Math.cos(FOV_HALF * Math.PI / 180);
+const VIS_RANGE = 10;                   // metres (was 12)
+const BOSS_SCALE = 1.6;                 // model size; combat.js divides the aim height by it
+const SHOUT_R = 11;                    // a guard that spots you yells; guards in range come to its spot
 const CLASH_R = 5;                      // each swing of an alerted guard carries this far
 const HEAR_THROUGH_WALLS = 0.5;      // noise radius multiplier when there is no line of sight
-const SPEED = { patrol: 1.6, investigate: 2.4, search: 3.0, chase: 4.4 };
+const SPEED = { patrol: 1.6, investigate: 2.4, search: 3.0 };      // the alerted chase speed is TUNE.chaseSpeed
 const STRIKE_T = 0.07;               // the fast swing after the wind-up; the hit lands at its end
 const easeInOut = t => t * t * (3 - 2 * t);
 // Per zone: [raise pose, strike-end pose], each [upper x, upper y, right arm x, left arm x, dip].
@@ -75,6 +77,8 @@ const collider = { radius: 0.4, props: [] };   // borrows Player.blocked for wal
 class Enemy {
   constructor(spec, floor) {
     this.floor = floor;
+    this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
+    this.dormant = this.boss;
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
     this.route = spec.route.map(p => ({ x: (p.x + 0.5) * TILE, z: (p.y + 0.5) * TILE }));
     this.ri = 1;
@@ -84,7 +88,7 @@ class Enemy {
     this.wait = 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
     this.seen = false;
     this.seed = spec.seed;
-    this.hp = TUNE.enemyHp; this.stun = 0; this.hitT = 0;
+    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp; this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
     this.dead = false; this.deadT = 0;
     this.build();
@@ -106,17 +110,19 @@ class Enemy {
     // guard wears is drawn on the model, soaks up damage in that zone, and is what it can drop.
     const tierOf = () => rollTier(typeof floorNum === 'number' ? floorNum : 1, rg);
     const piece = (slot, chance) => rg() < chance ? { type: 'armor', slot, cls: weighted(rg, [50, 35, 15]), tier: tierOf() } : null;
-    const helmet = piece('helmet', 0.4), vest = piece('chest', 0.4), boots = piece('boots', 0.35);
+    const heavy = slot => ({ type: 'armor', slot, cls: 2, tier: 2 });          // the boss wears full plate (Rare)
+    const helmet = this.boss ? heavy('helmet') : piece('helmet', 0.4), vest = this.boss ? heavy('chest') : piece('chest', 0.4), boots = this.boss ? heavy('boots') : piece('boots', 0.35);
     const hood = !helmet && rg() < 0.4;
-    const kind = rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace';
-    const weapon = { type: 'weapon', base: kind, tier: tierOf() };
+    const kind = this.boss ? 'mace' : rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace';
+    const weapon = { type: 'weapon', base: kind, tier: this.boss ? 3 : tierOf() };
+    this.spdRoll = this.boss ? 0.7 : WSTATS[kind].spd * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
     this.gear = [helmet, vest, boots, weapon].filter(Boolean);
     const cut = it => it ? Math.min(0.5, ARMOR_RED[it.cls] * TIERS[it.tier].mul) : 0;
     this.resist = { head: 1 - cut(helmet), body: 1 - cut(vest), legs: 1 - cut(boots) };
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
-    m.scale.setScalar(0.92 + rg() * 0.2);
+    m.scale.setScalar(this.boss ? BOSS_SCALE : 0.92 + rg() * 0.2);
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.legs = [-1, 1].map(s => {
       const g = new THREE.Group(); g.position.set(s * 0.15, 0.7, 0);
@@ -202,7 +208,7 @@ class Enemy {
     // flat fan showing the vision cone, only visible in dev mode
     const segs = 18, verts = [0, 0.04, 0];
     for (let i = 0; i <= segs; i++) {
-      const a = (-55 + 110 * i / segs) * Math.PI / 180;
+      const a = (-FOV_HALF + 2 * FOV_HALF * i / segs) * Math.PI / 180;
       verts.push(Math.sin(a) * VIS_RANGE, 0.04, -Math.cos(a) * VIS_RANGE);
     }
     const idx = []; for (let i = 1; i <= segs; i++) idx.push(0, i, i + 1);
@@ -246,6 +252,12 @@ class Enemy {
     return Math.hypot(tx - this.x, tz - this.z);
   }
 
+  get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
+  get windT_() { return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : 1); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
+  get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : 1); }
+  get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed; }
+  get cooldown() { return TUNE.enemyCooldown / this.atkSpd; }
+
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }
 
   set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; } }
@@ -254,7 +266,7 @@ class Enemy {
   hurt(dmg, player) {
     this.hp -= dmg; this.hitT = 0.14;
     if (this.hp <= 0) { this.dead = true; this.winding = false; this.icon.visible = false; this.cone.visible = false; return true; }
-    this.stun = 0.35; this.winding = false;
+    if (!this.boss) { this.stun = 0.35; this.winding = false; }     // the boss shrugs hits off (only a parry staggers it)
     this.last = { x: player.x, z: player.z };
     if (this.state !== 'alerted') this.set('alerted');
     return false;
@@ -266,6 +278,10 @@ class Enemy {
     if (this.dead) { this.deadT += dt; this.sync(dt); return null; }
     const f = this.floor;
     const dx = player.x - this.x, dz = player.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
+    if (this.boss && this.dormant) {   // waits in the middle of the arena and ignores sights and sounds until you are close
+      if (dist >= TUNE.bossWake) { this.sync(dt); return null; }
+      this.dormant = false; this.justWoke = true; this.last = { x: player.x, z: player.z }; this.set('alerted');
+    }
     const los = hasLOS(f, this.x, this.z, player.x, player.z);
     const range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul;
     const cosA = (dx * -Math.sin(this.yaw) + dz * -Math.cos(this.yaw)) / dist;
@@ -316,19 +332,19 @@ class Enemy {
         this.atkCd -= dt;
         if (this.winding) {
           this.windT += dt;
-          if (this.windT < TUNE.windup) this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
-          if (this.windT >= TUNE.windup + STRIKE_T) {
-            this.winding = false; this.atkCd = TUNE.enemyCooldown;
+          if (this.windT < this.windT_) this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
+          if (this.windT >= this.windT_ + STRIKE_T) {
+            this.winding = false; this.atkCd = this.cooldown;
             noise.emit(this.x, this.z, CLASH_R, this);                  // a fight is loud
-            if (dist <= ATTACK_RANGE + 0.5) attack = this.zone;
+            if (dist <= this.reach + 0.5) attack = this.zone;
           }
           break;
         }
         if (dist > 1.0 || !this.seen) {
-          if (this.goTo(this.last.x, this.last.z, SPEED.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
+          if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
         } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
         if (!this.seen) this.lostT += dt * 0.5;
-        if (dist < ATTACK_RANGE && los && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(); }
+        if (dist < this.reach && los && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(); }
         if (this.lostT > 3) { this.aware = 0.6; this.set('searching'); }
         break;
       }
@@ -364,7 +380,7 @@ class Enemy {
     let snap = false;
     if (this.stun > 0) target = [0.35, 0, -0.3, -0.3, 0];
     else if (this.winding) {
-      const [A, B] = ATTACK_POSES[this.zone], w = TUNE.windup;
+      const [A, B] = ATTACK_POSES[this.zone], w = this.windT_;
       if (this.windT < w) {
         const k = easeInOut(Math.min(1, this.windT / (w * 0.75)));
         target = A.map(v => v * k);
