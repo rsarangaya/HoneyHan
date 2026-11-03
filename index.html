@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prototype Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; color: #eee; }
+  #game { width: 100%; height: 100%; display: block; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 1px 3px #000; }
+  #top { top: 12px; left: 14px; line-height: 1.4; }
+  #top b { font-size: 18px; }
+  #top span { display: block; opacity: .75; font-size: 13px; }
+  #mini { position: fixed; top: 12px; right: 12px; width: 176px; height: 176px; border: 1px solid #555; background: #000; opacity: .9; }
+  #msg { bottom: 18%; left: 0; right: 0; text-align: center; font-size: 20px; opacity: 0; transition: opacity .6s; }
+  #cross { top: 50%; left: 50%; width: 4px; height: 4px; margin: -2px; background: #fff8; border-radius: 50%; }
+  #help { bottom: 12px; left: 14px; font-size: 12px; opacity: .6; }
+  #prompt { top: 56%; left: 0; right: 0; text-align: center; font-size: 15px; display: none; }
+  #bar { display: block; width: 140px; height: 6px; margin: 6px auto 0; background: #0008; border: 1px solid #fff6; }
+  #barFill { height: 100%; width: 0; background: #e8c860; }
+  #log { bottom: 12px; left: 14px; width: 300px; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #log div { transition: opacity .5s; }
+  #stats { bottom: 12px; left: 0; right: 0; text-align: center; font-size: 13px; }
+  #slots { display: flex; gap: 6px; justify-content: center; margin-bottom: 6px; }
+  .slot { width: 112px; height: 40px; border: 1px solid #fff5; background: #0007; font-size: 11px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; line-height: 1.15; }
+  .slot i { font-style: normal; opacity: .55; font-size: 10px; }
+  #hp { width: 200px; height: 8px; margin: 0 auto 6px; background: #0008; border: 1px solid #fff5; }
+  #hpFill { height: 100%; background: #c0392b; }
+  #dev { top: 12px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #111; background: #e8c860; padding: 3px 10px; border-radius: 3px; display: none; }
+  #flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(transparent 40%, #c00a 100%); opacity: 0; transition: opacity .35s; }
+  #stam { width: 200px; height: 5px; margin: -2px auto 6px; background: #0008; border: 1px solid #fff5; }
+  #stamFill { height: 100%; background: #4cc36a; }
+  #hitmark { top: 40%; left: 0; right: 0; text-align: center; font-size: 18px; font-weight: 700; letter-spacing: .06em; opacity: 0; transition: opacity .3s; }
+  #overlay { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
+  #overlay h1 { margin: 0 0 8px; }
+  #overlay p { margin: 6px 0; opacity: .85; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="top"><b id="floor"></b><span id="theme"></span><span id="seed"></span></div>
+<canvas id="mini" width="176" height="176"></canvas>
+<div class="hud" id="cross"></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="dev">DEV: 5x SPEED &middot; GOD &middot; N next floor &middot; M reveal map</div>
+<div id="flash"></div>
+<div class="hud" id="log"></div>
+<div class="hud" id="hitmark"></div>
+<div class="hud" id="prompt"><span id="promptText"></span><span id="bar"><span id="barFill" style="display:block"></span></span></div>
+<div class="hud" id="stats">
+  <div id="hp"><div id="hpFill"></div></div>
+  <div id="stam"><div id="stamFill"></div></div>
+  <div id="slots"></div>
+  <div id="line"></div>
+</div>
+<div class="hud" id="help" style="bottom:auto;top:84px">WASD move &middot; Shift sprint &middot; Ctrl/C crouch &middot; LMB attack &middot; RMB block &middot; hold E search/use &middot; Tab inventory &middot; 1-4 quickslots &middot; ` dev mode &middot; Esc pause</div>
+<div id="overlay"><div id="overlayText">
+  <h1>Prototype Test</h1>
+  <p>Find the stairs on each floor. Five floors, then the boss (not built yet).</p>
+  <p>Click to start.</p>
+</div></div>
+<script src="lib/three.min.js"></script>
+<script src="js/gen.js"></script>
+<script src="js/player.js"></script>
+<script src="js/loot.js"></script>
+<script src="js/props.js"></script>
+<script src="js/enemy.js"></script>
+<script src="js/combat.js"></script>
+<script src="js/main.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/tune.js"></script>
+</body>
+</html>

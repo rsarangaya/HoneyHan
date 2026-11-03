@@ -1,0 +1,129 @@
+// Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
+// Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
+const tunePanel = (() => {
+  const KEY = 'prototype-test-tune-2';   // bumped so old saved windup/cooldown values don't override the new defaults
+  const WEAPON_FIELDS = [['dmg', 1], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
+  const sections = [
+    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1]]],
+    ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
+    ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
+    ...['sword', 'dagger', 'mace'].map(w => [w, WSTATS[w], WEAPON_FIELDS]),
+  ];
+  const defaults = JSON.stringify(sections.map(s => ({ ...s[1] })));
+
+  const read = () => sections.map(s => ({ ...s[1] }));
+  const apply = saved => saved.forEach((vals, i) => Object.assign(sections[i][1], vals));
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.length === sections.length) apply(s); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(read())); } catch (e) {} };
+
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:10px;top:110px;width:236px;max-height:68vh;overflow:auto;z-index:20;background:#000c;border:1px solid #e8c860;color:#eee;font:11px system-ui,sans-serif;display:none';
+  document.body.appendChild(root);
+
+  function build() {
+    root.innerHTML = '';
+    const head = document.createElement('div');
+    head.textContent = 'Combat tuning (live)';
+    head.style.cssText = 'padding:5px 8px;font-weight:700;background:#e8c860;color:#111;position:sticky;top:0';
+    root.appendChild(head);
+    const btns = document.createElement('div');
+    btns.style.cssText = 'padding:6px 8px;display:flex;flex-wrap:wrap;gap:4px';
+    const mk = (label, fn) => {
+      const b = document.createElement('button'); b.textContent = label;
+      b.style.cssText = 'font:11px system-ui;padding:3px 6px;cursor:pointer';
+      b.onclick = fn; btns.appendChild(b);
+    };
+    mk('Guard: back turned', () => spawnGuard('back'));
+    mk('Guard: facing you', () => spawnGuard('front'));
+    mk('Guard: alerted', () => spawnGuard('alerted'));
+    mk('Clear guards', clearGuards);
+    mk('Refill', () => { inv.hp = inv.maxHp; cb.stamina = STAMINA_MAX; });
+    mk('Give gear', () => { const r = makeRng((Math.random() * 4294967296) >>> 0); flash('Got ' + (inv.add(rollEquipment(floorNum, r, { boost: 1 })) || 'nothing (pack full)')); });
+    mk('Give potions', () => { Object.keys(POTIONS).forEach(k => inv.add({ type: 'potion', kind: k, n: 1 })); });
+    mk('Give keys', () => { floor.doors.forEach(d => { if (!inv.has('key', d.lock)) inv.add({ type: 'key', lock: d.lock, label: d.keyLabel }); }); });
+    mk('Spawn guard now', () => { respawnT = 0; });
+    mk('Copy values', copyValues);
+    mk('Reset', () => { apply(JSON.parse(defaults)); save(); build(); });
+    root.appendChild(btns);
+    root.appendChild(spawnBox());
+    for (const [name, obj, fields] of sections) {
+      const h = document.createElement('div');
+      h.textContent = name; h.style.cssText = 'padding:3px 8px;background:#fff2;font-weight:700';
+      root.appendChild(h);
+      for (const [key, step] of fields) {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:2px 8px';
+        row.append(key);
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.step = step; inp.value = obj[key]; inp.style.cssText = 'width:64px;font:11px system-ui';
+        inp.oninput = () => { const v = parseFloat(inp.value); if (!isNaN(v)) { obj[key] = v; save(); } };
+        inp.onkeydown = inp.onkeyup = e => e.stopPropagation();   // typing must not fire game keys
+        row.appendChild(inp); root.appendChild(row);
+      }
+    }
+  }
+
+  // Item spawner: pick any weapon, armor piece or potion, a tier, a count, and drop it in the pack.
+  function spawnBox() {
+    const opts = [];   // [label, descriptor builder taking (tier)]
+    for (const b of ['dagger', 'sword', 'mace']) opts.push([WEAPON_NAMES[b], t => ({ type: 'weapon', base: b, tier: t })]);
+    for (const s of ARMOR_SLOTS) ARMOR_NAMES[s].forEach((n, cls) => opts.push([n, t => ({ type: 'armor', slot: s, cls, tier: t })]));
+    for (const k of Object.keys(POTIONS)) opts.push([POTIONS[k].name, () => ({ type: 'potion', kind: k })]);
+    const box = document.createElement('div');
+    box.style.cssText = 'padding:6px 8px;display:flex;flex-direction:column;gap:4px;border-top:1px solid #fff3';
+    const mkSel = (items) => {
+      const s = document.createElement('select'); s.style.cssText = 'font:11px system-ui';
+      items.forEach((t, i) => s.add(new Option(t, i)));
+      s.onkeydown = s.onkeyup = e => e.stopPropagation(); return s;
+    };
+    const item = mkSel(opts.map(o => o[0])), tier = mkSel(TIERS.map(t => t.name));
+    const qty = document.createElement('input'); qty.type = 'number'; qty.min = 1; qty.value = 1;
+    qty.style.cssText = 'width:48px;font:11px system-ui'; qty.onkeydown = qty.onkeyup = e => e.stopPropagation();
+    const go = document.createElement('button'); go.textContent = 'Spawn into pack'; go.style.cssText = 'font:11px system-ui;padding:3px 6px;cursor:pointer';
+    go.onclick = () => {
+      const [label, build] = opts[item.value], got = [];
+      for (let i = Math.max(1, parseInt(qty.value) || 1); i > 0; i--) { const t = inv.add(build(+tier.value)); if (!t) { got.push('(pack full)'); break; } got.push(t); }
+      flash('Spawned ' + got.join(', '));
+    };
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    row.append(tier, 'x', qty);
+    box.append('Spawn item', item, row, go);
+    return box;
+  }
+
+  function copyValues() {
+    const lines = sections.map(([name, obj]) => `${name}: ${JSON.stringify(obj)}`).join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(lines) : Promise.reject()).then(
+      () => flash('Tuning values copied'), () => { prompt('Copy these values:', lines); });
+  }
+
+  function clearGuards() {
+    enemies.forEach(e => group.remove(e.mesh));
+    for (let i = propObjs.length - 1; i >= 0; i--) if (propObjs[i].p.kind === 'corpse') propObjs.splice(i, 1);
+    enemies.length = 0;
+  }
+
+  // Place a guard 3 to 6 m ahead on open floor. 'back' faces away from you (sneak practice),
+  // 'front' faces you (detection and parry practice), 'alerted' starts the fight at once.
+  function spawnGuard(mode) {
+    const dx = -Math.sin(player.yaw), dz = -Math.cos(player.yaw);
+    for (let d = 6; d >= 2.5; d -= 0.5) {
+      const px = player.x + dx * d, pz = player.z + dz * d;
+      if (player.blocked(floor, px, pz) || !hasLOS(floor, player.x, player.z, px, pz)) continue;
+      const tx = Math.floor(px / TILE), ty = Math.floor(pz / TILE);
+      if (tx === floor.stairs.x && ty === floor.stairs.y) continue;
+      const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: (Math.random() * 4294967296) >>> 0 }, floor);
+      e.x = px; e.z = pz; e.wait = 1e9;
+      e.yaw = mode === 'back' ? player.yaw : Math.atan2(-(player.x - px), -(player.z - pz));
+      e.cone.visible = dev.on;
+      if (mode === 'alerted') { e.last = { x: player.x, z: player.z }; e.set('alerted'); }
+      group.add(e.mesh); enemies.push(e); e.sync(0);
+      return;
+    }
+    flash('No open floor ahead to spawn a guard');
+  }
+
+  build();
+  return { show(on) { root.style.display = on ? 'block' : 'none'; } };
+})();
+tunePanel.show(dev.on);
