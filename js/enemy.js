@@ -74,6 +74,38 @@ let ICONS = null;
 
 const collider = { radius: 0.4, props: [] };   // borrows Player.blocked for wall collision
 
+// Bodies are circles: push overlapping living guards apart (half each) and push guards out of the
+// player. A guard pinned against a wall pushes the player instead. Runs once a frame after the guards move.
+function separateBodies(enemies, player, floor) {
+  collider.props = floor.solids;
+  const free = (x, z) => !Player.prototype.blocked.call(collider, floor, x, z);
+  const live = enemies.filter(e => !e.dead);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+      const a = live[i], b = live[j];
+      let dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+      const min = a.r + b.r;
+      if (d >= min) continue;
+      if (d < 1e-4) { const k = (i * 7 + j * 13) % 628 / 100; dx = Math.cos(k); dz = Math.sin(k); d = 1; }   // exactly stacked: split in a fixed direction
+      else { dx /= d; dz /= d; }
+      const push = (min - Math.min(d, min)) / 2;
+      if (free(a.x - dx * push, a.z - dz * push)) { a.x -= dx * push; a.z -= dz * push; }
+      if (free(b.x + dx * push, b.z + dz * push)) { b.x += dx * push; b.z += dz * push; }
+    }
+    for (const e of live) {
+      let dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
+      const min = e.r + player.radius;
+      if (d >= min) continue;
+      if (d < 1e-4) { dx = -Math.sin(player.yaw); dz = -Math.cos(player.yaw); d = 0; }   // dead centre: step the guard out in front
+      else { dx /= d; dz /= d; }
+      const push = min - d;
+      if (free(e.x + dx * push, e.z + dz * push)) { e.x += dx * push; e.z += dz * push; }
+      else if (!Player.wallHit(floor, player.x - dx * push, player.z - dz * push, player.radius)) { player.x -= dx * push; player.z -= dz * push; }
+    }
+  }
+  for (const e of live) e.mesh.position.set(e.x, e.mesh.position.y, e.z);
+}
+
 class Enemy {
   constructor(spec, floor) {
     this.floor = floor;
@@ -252,6 +284,8 @@ class Enemy {
     return Math.hypot(tx - this.x, tz - this.z);
   }
 
+  get r() { return this.boss ? 0.65 : 0.4; }   // body radius: guards keep this far apart and out of the player
+
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
   get windT_() { return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : 1); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
   get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : 1); }
@@ -336,7 +370,7 @@ class Enemy {
           if (this.windT >= this.windT_ + STRIKE_T) {
             this.winding = false; this.atkCd = this.cooldown;
             noise.emit(this.x, this.z, CLASH_R, this);                  // a fight is loud
-            if (dist <= this.reach + 0.5) attack = this.zone;
+            if (dist <= this.reach + 0.5 && los) attack = this.zone;   // no hits through a wall corner
           }
           break;
         }

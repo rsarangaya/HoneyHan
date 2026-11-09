@@ -1,7 +1,7 @@
 # Status
 
 Project: Prototype Test (working name), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-02
+Last updated: 2026-11-09
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
@@ -92,6 +92,17 @@ Read `DESIGN.md` for the full design. At the end of each work block, update this
   - Dev mode is not mentioned anywhere the player can see; the backtick toggle still works.
   - Checked: welcome screen screenshot, rebinding by key and mouse, swap, reserved key, Ctrl warning, Esc cancel, reset, movement after rebinding, discovery of items and an enemy, glossary screenshot, no console errors. Not checked: real Esc and pointer lock behaviour in a normal browser (the preview cannot lock the pointer), mouse-button rebinding with a real mouse, glossary text and layout on small screens.
 
+- Guard collision, saved tests and a cleanup pass (2026-11-09):
+  - Guards were walking into each other and into the player: a swarm of 8 alerted guards all stood on the player's exact spot, stacked inside one another, and hit from inside you, so you could not see or block them. Guards now have a body radius (0.4 m, boss 0.65 m). After the guards move each frame, overlapping guards are pushed apart and guards are pushed out of the player (`separateBodies` in `js/enemy.js`). The player slides round living guards the same way as round furniture (`Player.mobs` in `js/player.js`), so you cannot walk through a guard or shove it.
+  - A guard's strike no longer lands through a wall corner: the hit needs line of sight when it lands, not only when the wind-up starts.
+  - Changing floors now frees the old floor's materials and textures too (only geometry was freed before).
+  - The debug hook `window.game` also exposes `inv`, `cb` and `state`, for the tests.
+  - Tests are now saved in `tests/` (they were throwaway scripts before):
+    - `node tests/gen.test.js`: plain Node, about 10 s. 1,500 floors (300 seeds x floors 1 to 5): stairs reachable without keys, every prop reachable, every guard waypoint on open reachable floor (tile-based, as guards path), every locked door has exactly one key outside the locked rooms, locked rooms reachable only through their door, the armory floor has the armory, the boss arena has one boss and one healing potion. Pass a number to change the seed count.
+    - `node tests/game.test.js`: headless Chromium through Playwright (`npm i -D playwright`, then `npx playwright install chromium`), about 30 s. Floors 1 to 5 build on 3 seeds, the stairs lead down, a swarm keeps apart and out of the player, the player cannot walk through a guard, dagger sneak kill, sword parry, death screen, no page errors. With the collision fix switched off it fails the three collision checks, so it does catch that bug.
+    - Run both after every change.
+  - Checked: both test files pass. Not checked: how guard spacing feels in a real fight (a ring of guards round you may now be easier to read and block, or may box you in), boss spacing in the arena.
+
 ## Decisions made
 - Name: Prototype Test (placeholder).
 - Scope for now: floors 1 to 5, first boss on floor 5. Run length is up to the player.
@@ -103,7 +114,7 @@ Read `DESIGN.md` for the full design. At the end of each work block, update this
 - Arrows are found, do less damage than melee (starting guess about 55 to 65% of a same-tier melee hit). Bow and melee swap through quickslots (swap with the equipped weapon).
 - Enemies have a chance to drop loot.
 - Six starter themes drafted: Sunken Tavern, Moonlit Orchard, Clockwork Library, Mushroom Cellar, Goblin Market, Frozen Chapel.
-- All project files stay in `C:\Users\rsarangaya\Downloads\Test2`.
+- The project lives in the GitHub repo `rsarangaya/HoneyHan` (it started in `C:\Users\rsarangaya\Downloads\Test2`).
 
 ## Planned items (do not implement yet)
 - **Hanahan's Rage**: Legendary recorder with speakers. Plays a recording of Hanahan talking mad smack, and enemies get angry and are ragebaited into attacking each other instead of the player. Build after stage 5 (needs noise and enemy target selection). Full notes in `DESIGN.md` section 13.
@@ -121,13 +132,13 @@ Read `DESIGN.md` for the full design. At the end of each work block, update this
 - Final stage (stage 5) look and final boss design (later, finish floors 1 to 5 first). Floors per stage (5 assumed). Whether the pack carries over between stages (assumed yes) and whether the player can go back up from the safe room.
 
 ## Next
-- Follow the alpha build order above. Noise system and the first boss are done. Next: (1) a real play and tuning pass on combat, stealth and the boss; (2) statuses (slow, cripple, bleed, stun, daze); (3) enemy type table, then the Sunken Tavern natives (cook, drunk bandit, rat pack, bouncer) and the tamed wolf (`DESIGN.md` section 17); (4) hunger and food, starting with the meter, one food item and eating (`DESIGN.md` section 18), before the cook drops food; (5) bow and shield; (6) wands plus Hanahan's Rage; (7) shop plus stage structure (the shop can sell food); (8) first theme made real, then archer, shaman and brute.
+- Follow the alpha build order above. Noise system and the first boss are done. Next: (1) a real play and tuning pass on combat, stealth and the boss (guard spacing is new, check it too); (2) statuses (slow, cripple, bleed, stun, daze); (3) enemy type table, then the Sunken Tavern natives (cook, drunk bandit, rat pack, bouncer) and the tamed wolf (`DESIGN.md` section 17); (4) hunger and food, starting with the meter, one food item and eating (`DESIGN.md` section 18), before the cook drops food; (5) bow and shield; (6) wands plus Hanahan's Rage; (7) shop plus stage structure (the shop can sell food); (8) first theme made real, then archer, shaman and brute.
 - Locked chests, trapped chests and mimics are not in yet (design section 3).
-- Play stages 1 and 2, tune the feel, and decide if it is fun. The generator is new code, not yet ported from the Test2 generator (room themes, door tiles, locked vaults still to bring over).
-- Then stages 2 to 4 (loot interactions, one enemy with vision cone and states, sneak kill plus simple loud combat). Stages 1 to 4 are the milestone to prove the idea is fun.
-- Full build order is in `DESIGN.md` section 9.
+- Add a test to `tests/` with each new system (statuses, new enemies, shop).
+- Full build order is in `DESIGN.md` section 9 (stages 1 to 5 of it are built).
 
 ## Open issues
+- Guard blocking time (`cb.blockT`) runs on real frame time, but guards run on time capped at 0.05 s per frame, so below about 20 fps the parry window gets harder to hit. Only matters on very slow machines.
 - Boss names and designs per theme.
 - Shield and off-hand behaviour when swapping to a bow or two-hander.
 - Loot drop tuning (drop chance per enemy type, rare drops).

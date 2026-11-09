@@ -15,6 +15,7 @@ class Player {
     this.sprinting = false;
     this.keys = {};
     this.props = [];         // solid circles { x, z, r } set per floor
+    this.mobs = [];          // the floor's guards: living ones are solid circles too (radius e.r)
     this.speedMul = 1;       // dev mode sets this to 5
     this.canSprint = true;   // false when out of stamina
     this.noiseBonus = 0;     // extra noise metres from armor
@@ -58,10 +59,15 @@ class Player {
     return false;
   }
 
+  * solidsAround() {
+    yield* this.props;
+    for (const e of this.mobs) if (!e.dead) yield e;
+  }
+
   // Props are circles. Walking into one pushes you out along its surface instead of stopping you dead,
   // so you slide round barrels, urns and statues rather than catching on them. Tiny clutter (candles) is ignored.
   slideOffProps(floor) {
-    for (let pass = 0; pass < 2; pass++) for (const p of this.props) {
+    for (let pass = 0; pass < 2; pass++) for (const p of this.solidsAround()) {
       if (p.r <= SMALL_PROP) continue;
       const dx = this.x - p.x, dz = this.z - p.z, min = this.radius + p.r, d2 = dx * dx + dz * dz;
       if (d2 >= min * min || d2 < 1e-8) continue;

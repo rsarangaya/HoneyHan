@@ -45,7 +45,13 @@ function noiseTexture(base) {
 }
 
 function buildFloor() {
-  if (group) { scene.remove(group); group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
+    scene.remove(group);
+    group.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
+    });
+  }
   group = new THREE.Group();
   const { w, h, tiles } = floor;
   const solid = (x, y) => x < 0 || y < 0 || x >= w || y >= h || tiles[y * w + x] === T_WALL;
@@ -456,6 +462,7 @@ function startFloor(n) {
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
   player.props = propObjs;
+  player.mobs = enemies;
   search = null;
   player.place(floor);
   baseGuards = floor.enemies.length;
@@ -637,6 +644,7 @@ function frame(now) {
     pulse = 0;
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
+    separateBodies(enemies, player, floor);
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
@@ -662,7 +670,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, get floor() { return floor; }, get enemies() { return enemies; },
+  player, startFloor, inv, cb, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
