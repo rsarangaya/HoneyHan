@@ -120,10 +120,14 @@ function rollEquipment(floorNum, rng, { boost = 0, minTier = 0, kind } = {}) {
 
 // Returns a list of drop descriptors. rng is seeded per prop so a seed repeats.
 // bonus raises drop chances (clean sneak kills leave intact gear).
-function rollLoot(kind, floorNum, rng, bonus = 0, gear = []) {
+function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
   const out = [];
   const potion = () => ({ type: 'potion', kind: rollPotionKind(rng), n: 1 });
   if (kind === 'corpse') {
+    if (type === 'rat') { if (rng() < 0.25 + bonus) out.push({ type: 'gold', n: rng.int(1, 4) }); return out; }   // rats carry next to nothing
+    if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
+    if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(10, 25) }); return out; }   // the elite always pays
+    if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(8, 25) }); return out; }          // robbers carry gold
     // a guard drops at most ONE thing; one of the pieces it was visibly carrying is the likeliest
     if (rng() < 0.7 + bonus) {
       const opts = [[{ type: 'gold', n: rng.int(4, 14) }, 4], [{ type: 'arrows', n: rng.int(2, 5) }, 2], [potion(), 1.5], ...gear.map(g => [g, 3])];

@@ -25,6 +25,7 @@ const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} 
 
 // Page-side helpers, installed once per page.
 const HELPERS = () => {
+  const realRandom = Math.random;
   window.T = {
     sleep: ms => new Promise(r => setTimeout(r, ms)),
     // Wait until test() is true, checked every animation frame; false after maxMs. Game-time
@@ -36,6 +37,7 @@ const HELPERS = () => {
     }),
     // Fresh floor 1 with no guards, the player at the start facing the longest open line, full HP.
     reset() {
+      Math.random = realRandom;                               // some tests pin Math.random
       game.startFloor(1);
       for (const e of game.enemies) e.mesh.parent && e.mesh.parent.remove(e.mesh);
       game.enemies.length = 0;
@@ -51,11 +53,11 @@ const HELPERS = () => {
       return best;
     },
     // A guard d metres straight ahead. facing: 'away' (back to the player) or 'toward'.
-    guard(d, facing, alerted) {
+    guard(d, facing, alerted, type) {
       const P = game.player, f = game.floor;
       const x = P.x - Math.sin(P.yaw) * d, z = P.z - Math.cos(P.yaw) * d;
       const tx = Math.floor(x / TILE), ty = Math.floor(z / TILE);
-      const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: 12345 }, f);
+      const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: 12345, type }, f);
       e.x = x; e.z = z; e.wait = 1e9;
       e.yaw = facing === 'away' ? P.yaw : P.yaw + Math.PI;
       if (alerted) { e.last = { x: P.x, z: P.z }; e.set('alerted'); }
@@ -250,6 +252,109 @@ const HELPERS = () => {
     check('a stunned player cannot swing', !hurt.stunSwing);
     check('bleeding costs HP but never kills', hurt.hpAfterBleed < 50 && hurt.floor >= 1, `hp ${hurt.hpAfterBleed.toFixed(1)}, floor ${hurt.floor}`);
     check('a healing potion stops bleeding', hurt.cured);
+
+
+    // ---- enemy types ----
+    // 11. Every type builds, runs and animates without errors; speeds and sizes are what the table says.
+    const kinds = await page.evaluate(async () => {
+      T.reset(); game.inv.hp = 1e9; const out = {};
+      const quiet = { events: [], emit() {} };
+      for (const type of ['goblin', 'cook', 'bandit', 'rat', 'wolf', 'bouncer']) {
+        const e = T.guard(4, 'toward', true, type);
+        for (let i = 0; i < 40; i++) { e.update(0.03, game.player, quiet); e.sync(0.03); }
+        out[type] = { chase: e.chase, hp: e.maxHp, quad: e.quad, r: e.r, ok: e.mesh.children.length > 0 };
+        game.enemies.pop(); e.mesh.parent.remove(e.mesh);
+      }
+      return out;
+    });
+    check('all six enemy types build and run', Object.values(kinds).every(k => k.ok), Object.keys(kinds).join(', '));
+    check('wolves outrun a sprinting player, bouncers do not', kinds.wolf.chase > 4.6 && kinds.bouncer.chase < 4.6, `wolf ${kinds.wolf.chase.toFixed(1)}, bouncer ${kinds.bouncer.chase.toFixed(1)} m/s`);
+    check('rats are fragile, bouncers tough', kinds.rat.hp < 12 && kinds.bouncer.hp > 80, `rat ${kinds.rat.hp.toFixed(0)} HP, bouncer ${kinds.bouncer.hp.toFixed(0)} HP`);
+
+    // 12. Senses: a wolf smells a moving player behind its back, a bandit sees less far than a goblin.
+    const senses = await page.evaluate(async () => {
+      T.reset(); const P = game.player, quiet = { events: [], emit() {} }, out = {};
+      const test = (type, d, back, moving) => {
+        const e = T.guard(d, back ? 'away' : 'toward', false, type);
+        P.vx = moving ? 2 : 0; P.vz = 0; e.update(0.03, P, quiet);
+        const seen = e.seen; game.enemies.pop(); e.mesh.parent.remove(e.mesh); return seen;
+      };
+      out.wolfBack = test('wolf', 4, true, true); out.wolfStill = test('wolf', 4, true, false);
+      out.goblinBack = test('goblin', 4, true, true);
+      out.goblin8 = test('goblin', 8, false, false); out.bandit8 = test('bandit', 8, false, false);
+      out.wolfFar = test('wolf', 9, true, true);
+      return out;
+    });
+    check('a wolf smells a moving player behind its back', senses.wolfBack && !senses.goblinBack);
+    check('standing still hides you from a wolf', !senses.wolfStill);
+    check('smell has a limited range', !senses.wolfFar);
+    check('a bandit sees less far than a goblin', senses.goblin8 && !senses.bandit8);
+
+    // 13. Wolf and handler.
+    const leash = await page.evaluate(async () => {
+      T.reset(); const P = game.player, quiet = { events: [], emit() {} }, out = {};
+      const h = T.guard(6, 'away', false, 'goblin'), w = T.guard(7, 'away', false, 'wolf'); w.handlerRef = h;
+      for (let i = 0; i < 5; i++) w.update(0.03, P, quiet);
+      out.calm = w.state;
+      h.last = { x: P.x, z: P.z }; h.set('alerted');
+      for (let i = 0; i < 5; i++) w.update(0.03, P, quiet);
+      out.leashOff = w.state;
+      const h2 = T.guard(6, 'away', false, 'goblin'), w2 = T.guard(7, 'away', false, 'wolf'); w2.handlerRef = h2;
+      h2.die(); const x0 = w2.x, z0 = w2.z;
+      for (let i = 0; i < 60; i++) w2.update(0.03, P, quiet);
+      out.idle = w2.state === 'unaware' && Math.hypot(w2.x - x0, w2.z - z0) < 0.5;
+      return out;
+    });
+    check('a calm wolf stays unaware with an unaware handler', leash.calm === 'unaware');
+    check('an alerted handler lets the wolf off the leash', leash.leashOff === 'alerted');
+    check('a wolf whose handler died stays idle', leash.idle);
+
+    // 14. Bouncer: a dagger sneak attack cannot kill it, a normal hit does not stagger it, but a goblin dies / staggers.
+    const brute = await page.evaluate(async () => {
+      const out = {};
+      T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'dagger', tier: 0 });
+      const b = T.guard(1.4, 'away', false, 'bouncer'); await T.sleep(150); game.cb.press = true; await T.until(() => b.hp < b.maxHp, 4000);
+      out.bouncerAlive = !b.dead && b.hp > 0; out.bouncerHit = b.maxHp - b.hp;
+      T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+      const b2 = T.guard(1.2, 'toward', true, 'bouncer'), g2 = T.guard(1.3, 'toward', true, 'goblin');
+      b2.hp = b2.maxHp = g2.hp = g2.maxHp = 900; b2.x += 0.8; g2.x -= 0.8;
+      game.cb.press = true; await T.until(() => b2.hp < 900 || g2.hp < 900, 4000); await T.sleep(100);
+      out.bouncerStun = b2.stun; out.bouncerStatus = b2.addStatus('stun');
+      return out;
+    });
+    check('a dagger sneak attack cannot one-shot a bouncer', brute.bouncerAlive, `took ${brute.bouncerHit.toFixed(0)} damage`);
+    check('a bouncer cannot be stunned', brute.bouncerStatus === false && brute.bouncerStun === 0);
+
+    // 15. Rats: only the legs and body, low to aim at, and one hit kills.
+    const rat = await page.evaluate(async () => {
+      const out = {};
+      T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+      const r = T.guard(1.5, 'toward', false, 'rat'); r.mesh.visible = true;
+      out.zones = new Set(Array.from({ length: 300 }, () => pickZone(r.T.zones)));
+      game.player.pitch = 0; const hi = findMeleeTarget(game.player, game.player.eye, game.enemies, game.floor, 2.3);
+      out.highAim = hi && hi.zone;
+      game.player.pitch = -0.7; const lo = findMeleeTarget(game.player, game.player.eye, game.enemies, game.floor, 2.3);
+      out.lowAim = lo && lo.zone;
+      r.update = function () { this.sync(0); return null; };
+      await T.sleep(100); game.cb.press = true; await T.until(() => r.dead, 4000);
+      out.dead = r.dead;
+      return { ...out, zones: [...out.zones].join(',') };
+    });
+    check('rats attack legs and body, never the head', !/head/.test(rat.zones), rat.zones);
+    check('aiming at head height misses a rat, aiming low hits', !rat.highAim && !!rat.lowAim, `${rat.highAim}/${rat.lowAim}`);
+    check('one sword hit kills a rat', rat.dead);
+
+    // 16. On a Sunken Tavern run the generator mixes natives in, wolves have handlers, and everything runs for a while.
+    const mix = await page.evaluate(async () => {
+      const seen = {}, issues = [];
+      for (const n of [2, 3, 4, 5]) {
+        game.startFloor(n); await T.sleep(300);
+        for (const e of game.enemies) { seen[e.type] = (seen[e.type] || 0) + 1; if (e.type === 'wolf' && !(e.handlerRef && e.handlerRef.type === 'goblin')) issues.push('wolf without handler on ' + n); }
+      }
+      return { seen, issues, theme: document.getElementById('theme').textContent };
+    });
+    check('floors 2-5 mix natives and wolves', /Tavern/.test(mix.theme) && mix.seen.wolf > 0 && mix.seen.goblin > 0 && (mix.seen.cook || 0) + (mix.seen.bandit || 0) + (mix.seen.rat || 0) > 0, JSON.stringify(mix.seen));
+    check('every wolf has a goblin handler', mix.issues.length === 0, mix.issues.join(', '));
 
     await page.close();
 

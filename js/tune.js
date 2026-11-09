@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-5';   // bumped so old saved values don't override the new speed and attack-speed defaults
+  const KEY = 'prototype-test-tune-6';   // bumped so old saved values don't override the new speed and attack-speed defaults
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -9,6 +9,7 @@ const tunePanel = (() => {
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
+    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
     ['slow', STATUS.slow, [['dur', 0.5], ['move', 0.05]]],
     ['cripple', STATUS.cripple, [['dur', 0.5], ['move', 0.05], ['bleed', 0.5], ['immune', 0.5]]],
     ['bleed', STATUS.bleed, [['dur', 0.5], ['dps', 0.5]]],

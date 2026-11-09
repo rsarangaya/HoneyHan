@@ -18,7 +18,7 @@ const ATTACK_POSES = {
   legs: [[-0.5, 0, -0.7, 0, 0.2],  [-0.85, 0, 1.4, 0, 0.3]],
 };
 const ATTACK_RANGE = 1.4;            // hp, damage, windup and cooldown live in TUNE (combat.js)
-const pickZone = () => { const r = Math.random(); return r < 0.3 ? 'head' : r < 0.8 ? 'body' : 'legs'; };
+const pickZone = w => { const r = Math.random() * (w[0] + w[1] + w[2]); return r < w[0] ? 'head' : r < w[0] + w[1] ? 'body' : 'legs'; };
 
 const wallAt = (floor, tx, ty) => tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h || floor.tiles[ty * floor.w + tx] === T_WALL || floor.tiles[ty * floor.w + tx] === T_DOOR;
 
@@ -109,6 +109,11 @@ function separateBodies(enemies, player, floor) {
 class Enemy {
   constructor(spec, floor) {
     this.floor = floor;
+    this.spec = spec;
+    this.type = spec.type || 'goblin';
+    this.T = ENEMY_TYPES[this.type];
+    this.quad = this.T.model === 'quad';
+    this.handlerRef = null;             // a wolf's goblin handler (linkHandlers in enemytypes.js)
     this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
     this.dormant = this.boss;
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
@@ -121,7 +126,7 @@ class Enemy {
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.seed = spec.seed;
-    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp; this.stun = 0; this.hitT = 0;
+    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp * this.T.hpMul; this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
     this.dead = false; this.deadT = 0;
     this.build();
@@ -134,7 +139,7 @@ class Enemy {
     const rg = makeRng(this.seed || 1);
     const pal = arr => arr[Math.floor(rg() * arr.length)];
     const lam = c => new THREE.MeshLambertMaterial({ color: c });
-    const skin = lam(pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
+    const skin = lam(this.T.skin || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
     const dark = lam(new THREE.Color(skin.color).multiplyScalar(0.65).getHex());     // hands, ear tips, warts, brow
     const cloth = lam(pal([0x6a3f2a, 0x5a3a46, 0x3a4a5a, 0x5a5230]));
     const leather = lam(0x3a2616), metal = lam(0x8a8e96), bone = lam(0xe6e0c8), black = lam(0x120c08);
@@ -144,19 +149,23 @@ class Enemy {
     const tierOf = () => rollTier(typeof floorNum === 'number' ? floorNum : 1, rg);
     const piece = (slot, chance) => rg() < chance ? { type: 'armor', slot, cls: weighted(rg, [50, 35, 15]), tier: tierOf() } : null;
     const heavy = slot => ({ type: 'armor', slot, cls: 2, tier: 2 });          // the boss wears full plate (Rare)
-    const helmet = this.boss ? heavy('helmet') : piece('helmet', 0.4), vest = this.boss ? heavy('chest') : piece('chest', 0.4), boots = this.boss ? heavy('boots') : piece('boots', 0.35);
+    const bare = this.T.noGear || this.quad;     // cooks and animals wear no armor
+    const helmet = this.boss ? heavy('helmet') : bare ? null : piece('helmet', 0.4), vest = this.boss ? heavy('chest') : bare ? null : piece('chest', 0.4), boots = this.boss ? heavy('boots') : bare ? null : piece('boots', 0.35);
     const hood = !helmet && rg() < 0.4;
-    const kind = this.boss ? 'mace' : rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace';
+    const kind = this.boss ? 'mace' : this.T.weapon || (rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace');
     this.weaponKind = kind;
     const weapon = { type: 'weapon', base: kind, tier: this.boss ? 3 : tierOf() };
     this.spdRoll = this.boss ? 0.7 : WSTATS[kind].spd * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
-    this.gear = [helmet, vest, boots, weapon].filter(Boolean);
+    this.gear = this.quad ? [] : [helmet, vest, boots, weapon].filter(Boolean);   // animals carry nothing
     const cut = it => it ? Math.min(0.5, ARMOR_RED[it.cls] * TIERS[it.tier].mul) : 0;
     this.resist = { head: 1 - cut(helmet), body: 1 - cut(vest), legs: 1 - cut(boots) };
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
-    m.scale.setScalar(this.boss ? BOSS_SCALE : 0.92 + rg() * 0.2);
+    m.scale.setScalar(this.boss ? BOSS_SCALE : this.T.scale || 0.92 + rg() * 0.2);
+    this.scaleK = m.scale.x;
+    if (this.quad) this.buildQuad(m, lam);
+    else {
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.legs = [-1, 1].map(s => {
       const g = new THREE.Group(); g.position.set(s * 0.15, 0.7, 0);
@@ -234,9 +243,21 @@ class Enemy {
       box(0.04, 0.3, 0.1, blade, 0, -0.38, -0.04, wpn);                                           // short dagger blade
     }
     this.arms[1].add(wpn);
+    // type dressing: what makes a cook, a bandit or a bouncer look like one
+    if (this.type === 'cook') {
+      part(0.5, 0.62, 0.05, lam(0xf2efe6), 0, 0.35, -0.2); part(0.36, 0.3, 0.36, lam(0xf2efe6), 0, 1.2, 0); part(0.4, 0.06, 0.4, lam(0xf2efe6), 0, 1.04, 0);   // apron and chef's hat
+    } else if (this.type === 'bandit') {
+      part(0.4, 0.09, 0.4, lam(0x8a1f1f), 0, 1.04, 0); part(0.1, 0.12, 0.05, lam(0x8a1f1f), 0.18, 0.99, 0.2);   // red bandana
+      box(0.1, 0.3, 0.1, lam(0x2f6a3a), 0, -0.58, -0.1, this.arms[0]); box(0.06, 0.1, 0.06, lam(0x2f6a3a), 0, -0.4, -0.1, this.arms[0]);   // a bottle in the off hand
+    } else if (this.type === 'bouncer') {
+      part(0.9, 0.22, 0.46, lam(0x202020), 0, 0.62, 0); part(0.7, 0.55, 0.38, lam(0x2a2a2e), 0, 0.38, 0);        // wide shoulders and a black jacket
+      part(0.38, 0.1, 0.38, metal, 0, 0.76, 0);                                                                     // spiked collar
+      for (const sx of [-0.3, -0.1, 0.1, 0.3]) part(0.05, 0.1, 0.05, bone, sx, 0.84, -0.18);
+    }
+    }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
-    this.icon.position.y = 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
+    this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
     m.add(this.icon);
 
     // flat fan showing the vision cone, only visible in dev mode
@@ -251,6 +272,46 @@ class Enemy {
     this.cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
     this.cone.visible = false;
     m.add(this.cone);
+  }
+
+  // Four-legged model for rats and wolves. The body group pitches and lunges for attacks (poseQuad).
+  buildQuad(m, lam) {
+    const T = this.T, fur = lam(T.fur), belly = lam(new THREE.Color(T.fur).multiplyScalar(1.35).getHex()), dark = lam(0x1c1612);
+    const bone = lam(0xf0ead0), pink = lam(0xc99a9a), eye = new THREE.MeshBasicMaterial({ color: this.type === 'wolf' ? 0xffd060 : 0xff3030 });
+    this.mats = [fur, belly, dark, pink];
+    const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    const body = this.body = new THREE.Group(); body.position.y = 0.5; m.add(body);
+    box(0.4, 0.38, 0.9, fur, 0, 0.15, 0, body);                                  // torso
+    box(0.3, 0.1, 0.8, belly, 0, -0.02, 0, body);                                // pale belly
+    box(0.3, 0.28, 0.32, fur, 0, 0.3, -0.62, body);                              // head
+    box(0.16, 0.13, 0.24, belly, 0, 0.23, -0.84, body);                          // snout
+    box(0.06, 0.05, 0.04, dark, 0, 0.3, -0.97, body);                            // nose
+    for (const s of [-1, 1]) {
+      box(0.07, 0.15, 0.05, fur, s * 0.1, 0.5, -0.56, body);                     // ears
+      box(0.05, 0.05, 0.03, eye, s * 0.09, 0.34, -0.78, body);                   // eyes
+      box(0.025, 0.06, 0.025, bone, s * 0.05, 0.16, -0.92, body);                // fangs
+    }
+    const tail = box(0.07, 0.07, this.type === 'rat' ? 0.75 : 0.5, this.type === 'rat' ? pink : fur, 0, 0.26, 0.7, body); tail.rotation.x = -0.45;
+    this.legs = [[-1, -0.32], [1, -0.32], [-1, 0.32], [1, 0.32]].map(([sx, z]) => {   // front pair, then back pair
+      const g = new THREE.Group(); g.position.set(sx * 0.15, 0.42, z); box(0.1, 0.42, 0.1, fur, 0, -0.21, 0, g); box(0.11, 0.05, 0.14, dark, 0, -0.42, -0.02, g); m.add(g); return g;
+    });
+    this.arms = [new THREE.Group(), new THREE.Group()];                          // unused, keeps shared code safe
+    this.qp = [0, 0];                                                            // eased pose: [body pitch, lunge offset]
+  }
+
+  poseQuad(dt) {
+    const sw = Math.sin(this.walkT * 0.9) * 0.75, l = this.legs;
+    l[0].rotation.x = sw; l[1].rotation.x = -sw; l[2].rotation.x = -sw; l[3].rotation.x = sw;
+    let pitch = this.state === 'alerted' ? -0.08 : 0, lunge = 0, snap = false;       // alerted: head low
+    if (this.stun > 0) { pitch = 0.4; lunge = 0.15; }
+    else if (this.winding) {
+      const w = this.windT_;
+      if (this.windT < w) { const k = easeInOut(Math.min(1, this.windT / (w * 0.75))); pitch = 0.4 * k; lunge = 0.28 * k; }       // rears back
+      else { const s = 1 - Math.pow(1 - Math.min(1, (this.windT - w) / STRIKE_T), 2); pitch = 0.4 - 0.85 * s; lunge = 0.28 - 0.85 * s; snap = true; }   // springs forward
+    }
+    const k = snap ? 1 : 1 - Math.exp(-14 * dt);
+    this.qp[0] += (pitch - this.qp[0]) * k; this.qp[1] += (lunge - this.qp[1]) * k;
+    this.body.rotation.x = this.qp[0]; this.body.position.z = this.qp[1];
   }
 
   // Walk toward a world point along a BFS path. Returns the straight-line distance left.
@@ -287,13 +348,14 @@ class Enemy {
     return Math.hypot(tx - this.x, tz - this.z);
   }
 
-  get r() { return this.boss ? 0.65 : 0.4; }   // body radius: guards keep this far apart and out of the player
+  get r() { return this.boss ? 0.65 : this.T.r; }   // body radius: guards keep this far apart and out of the player
 
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
-  get windT_() { return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : 1); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
-  get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : 1); }
-  get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed; }
-  get cooldown() { return TUNE.enemyCooldown / this.atkSpd; }
+  get windT_() { return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
+  get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : this.T.reach); }
+  get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
+  get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul; }
+  get cooldown() { return TUNE.enemyCooldown / this.atkSpd * this.T.cdMul; }
 
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }
 
@@ -303,7 +365,7 @@ class Enemy {
 
   // Start a status. The boss cannot be stunned (only a parry staggers it). Returns whether it took hold.
   addStatus(n, dur) {
-    if (n === 'stun' && this.boss) return false;
+    if (n === 'stun' && (this.boss || this.T.noStagger)) return false;
     const ok = this.st.apply(n, dur);
     if (ok && n === 'stun') { this.stun = Math.max(this.stun, dur || STATUS.stun.dur); this.winding = false; }
     return ok;
@@ -313,7 +375,7 @@ class Enemy {
   hurt(dmg, player) {
     this.hp -= dmg; this.hitT = 0.14;
     if (this.hp <= 0) { this.die(); return true; }
-    if (!this.boss) { this.stun = 0.35; this.winding = false; }     // the boss shrugs hits off (only a parry staggers it)
+    if (!this.boss && !this.T.noStagger) { this.stun = 0.35; this.winding = false; }     // the boss and the bouncer shrug hits off (only a parry staggers them)
     this.last = { x: player.x, z: player.z };
     if (this.state !== 'alerted') this.set('alerted');
     return false;
@@ -332,9 +394,11 @@ class Enemy {
       this.dormant = false; this.justWoke = true; this.last = { x: player.x, z: player.z }; this.set('alerted');
     }
     const los = hasLOS(f, this.x, this.z, player.x, player.z);
-    const range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul;
+    let range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul * this.T.vis;
     const cosA = (dx * -Math.sin(this.yaw) + dz * -Math.cos(this.yaw)) / dist;
     this.seen = los && dist < range && cosA > COS_HALF_FOV;
+    // Smell (wolves): a moving player is noticed through walls and while crouching, but not a still one.
+    if (!this.seen && this.T.smell && dist < this.T.smell && Math.hypot(player.vx, player.vz) > 0.4) { this.seen = true; range = this.T.smell; }
 
     if (this.seen) {
       this.aware = Math.min(1, this.aware + (0.6 + 1.6 * (1 - dist / range)) * (player.stealthMul < 1 ? 0.6 : 1) * dt);
@@ -347,7 +411,7 @@ class Enemy {
       for (const n of noise.events) {
         if (n.src === this) continue;
         const nd = Math.hypot(n.x - this.x, n.z - this.z);
-        if (nd < n.r * (hasLOS(f, this.x, this.z, n.x, n.z) ? 1 : HEAR_THROUGH_WALLS)) {
+        if (nd < n.r * this.T.hear * (hasLOS(f, this.x, this.z, n.x, n.z) ? 1 : HEAR_THROUGH_WALLS)) {
           this.aware = Math.max(this.aware, 0.5);
           this.last = { x: n.x, z: n.z };
         }
@@ -355,14 +419,21 @@ class Enemy {
     }
 
     let attack = null;
+    const hd = this.handlerRef;
+    if (hd && !hd.dead && hd.state === 'alerted' && this.state !== 'alerted') { this.last = hd.last || { x: player.x, z: player.z }; this.aware = 1; }
     if (this.state !== 'alerted' && this.aware >= 1) this.set('alerted');
-    if (this.state === 'alerted' && !this.shouted) { this.shouted = true; noise.emit(this.x, this.z, SHOUT_R, this); }   // calls nearby guards
+    if (this.state === 'alerted' && !this.shouted) { this.shouted = true; noise.emit(this.x, this.z, SHOUT_R * this.T.shout, this); }   // calls nearby guards
     if (this.state !== 'alerted') this.shouted = false;
     if (this.stun > 0) { this.stun -= dt; this.winding = false; this.sync(dt); return null; }
 
     switch (this.state) {
       case 'unaware': {
         if (this.aware >= 0.35 && this.last) { this.set('suspicious'); break; }
+        if (hd) {                                   // a wolf trots after its handler, and just waits if the handler is gone
+          if (hd.dead) { this.lookAround(dt * 0.4); break; }
+          if (Math.hypot(hd.x - this.x, hd.z - this.z) > 2.6) this.goTo(hd.x + 1.1, hd.z + 0.8, SPEED.patrol * 1.6, dt); else this.lookAround(dt * 0.4);
+          break;
+        }
         if (this.wait > 0) { this.wait -= dt; this.lookAround(dt * 0.4); break; }
         const p = this.route[this.ri];
         if (this.goTo(p.x, p.z, SPEED.patrol, dt) < 0.7) { this.ri = (this.ri + 1) % this.route.length; this.wait = 2; }
@@ -393,7 +464,7 @@ class Enemy {
           if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
         } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
         if (!this.seen) this.lostT += dt * 0.5;
-        if (dist < this.reach && los && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(); }
+        if (dist < this.reach && los && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(this.T.zones); }
         if (this.lostT > 3) { this.aware = 0.6; this.set('searching'); }
         break;
       }
@@ -419,6 +490,8 @@ class Enemy {
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;
       return;
     }
+    if (this.quad) this.poseQuad(dt);
+    else {
     const sw = Math.sin(this.walkT) * 0.6;
     this.legs[0].rotation.x = sw; this.legs[1].rotation.x = -sw;
 
@@ -444,6 +517,8 @@ class Enemy {
     const p = this.pose;
     this.upper.rotation.x = p[0]; this.upper.rotation.y = p[1]; this.upper.position.y = 0.7 - p[4];
     this.arms[1].rotation.x = p[2]; this.arms[0].rotation.x = p[3];
+    }
+    if (this.T.sway && !this.stun) m.rotation.z = Math.sin(this.walkT * 0.5 + this.seed) * (this.state === 'alerted' ? 0.04 : 0.1);   // a drunk's roll
     // hit flash
     this.hitT = Math.max(0, this.hitT - dt);
     for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : this.st.tint());
@@ -454,7 +529,7 @@ class Enemy {
       const alerted = this.state === 'alerted';
       this.icon.material.map = alerted ? ICONS.a : this.state === 'searching' ? ICONS.s : ICONS.q;
       this.icon.material.opacity = alerted ? 1 : 0.35 + 0.65 * this.aware;
-      this.icon.scale.setScalar(alerted ? 0.9 : 0.5 + 0.3 * this.aware);
+      this.icon.scale.setScalar((alerted ? 0.9 : 0.5 + 0.3 * this.aware) * (this.quad ? 1 / this.scaleK : 1));
     }
     this.cone.material.color.setHex(this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30);
   }

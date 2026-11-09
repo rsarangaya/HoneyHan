@@ -48,7 +48,11 @@ function findMeleeTarget(player, eyeY, enemies, floor, reach) {
     if (d < bestD) { best = e; bestD = d; }
   }
   if (!best) return null;
-  const zone = aimZone(eyeY, player.pitch, bestD, best.boss ? BOSS_SCALE : 1);
+  let zone;
+  if (best.quad) {                                  // rats and wolves are low: any aim at their height lands, low aim is a leg hit
+    const y = eyeY + Math.tan(player.pitch) * bestD, h = best.T.height;
+    zone = y > h || y < -0.1 ? null : y < h * 0.4 ? 'legs' : 'body';
+  } else zone = aimZone(eyeY, player.pitch, bestD, best.boss ? BOSS_SCALE : best.T.scale || 1);
   return zone ? { e: best, zone, dist: bestD } : { e: best, zone: null, dist: bestD };
 }
 

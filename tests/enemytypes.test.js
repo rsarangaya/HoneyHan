@@ -1,0 +1,64 @@
+// Enemy type table and spawn rules, plain Node: node tests/enemytypes.test.js [seeds]
+// Over many seeds and floors: native share and variety limits, rat packs, wolf handlers, the elite, determinism.
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const root = path.join(__dirname, '..');
+const ctx = vm.createContext({ console, Math, TILE: 3 });
+for (const f of ['js/gen.js', 'js/loot.js', 'js/enemytypes.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+const L = vm.runInContext('({ generateFloor, assignEnemyTypes, ENEMY_TYPES, THEME_NATIVES, rollLoot, makeRng, respawnType })', ctx);
+let fails = 0, n = 0;
+const fail = (w, m) => { if (++fails <= 20) console.log(`FAIL ${w}: ${m}`); };
+const N = parseInt(process.argv[2], 10) || 150;
+const TAVERN = 'The Sunken Tavern', OTHER = 'The Moonlit Orchard';
+const shareBy = [0, 0, 0, 0, 0], goblinsBy = [0, 0, 0, 0, 0], guardsBy = [0, 0, 0, 0, 0];
+
+for (let s = 1; s <= N; s++) {
+  const seed = (s * 2654435761) >>> 0;
+  for (let fl = 1; fl <= 5; fl++) {
+    const w = `seed ${seed} floor ${fl}`;
+    const mk = () => L.assignEnemyTypes(L.generateFloor(seed, fl, { armory: false, boss: fl === 5 }), seed, fl, TAVERN);
+    const f = mk(); n++;
+    const again = mk();
+    if (JSON.stringify(f.enemies) !== JSON.stringify(again.enemies)) fail(w, 'not deterministic');
+    const E = f.enemies, type = e => e.type || 'goblin';
+    const natives = new Set(E.map(type).filter(t => ['cook', 'bandit', 'rat', 'bouncer'].includes(t)));
+    if (natives.size > 3) fail(w, `${natives.size} native types on one floor`);
+    if (!E.some(e => type(e) === 'goblin')) fail(w, 'no plain goblins left');
+    if (E.filter(e => e.boss).length !== (fl === 5 ? 1 : 0)) fail(w, 'boss count');
+    if (E.filter(e => e.type === 'bouncer').length !== (fl === 3 || fl === 4 ? 1 : 0)) fail(w, `bouncers: ${E.filter(e => e.type === 'bouncer').length}`);
+    const rats = E.filter(e => e.type === 'rat');
+    if (rats.length && rats.length % 3) fail(w, `rat count ${rats.length} is not whole packs`);
+    for (const e of E.filter(e => e.type === 'wolf')) {
+      const h = E[e.handler];
+      if (!h || h.boss || type(h) !== 'goblin') fail(w, 'wolf handler is not a plain goblin');
+      else if (JSON.stringify(h.route) !== JSON.stringify(e.route)) fail(w, 'wolf does not share its handler\'s route');
+    }
+    const wolves = E.filter(e => e.type === 'wolf').length;
+    if (wolves !== (fl === 1 ? 0 : Math.min(3, fl - 1))) fail(w, `wolves ${wolves}`);
+    if (new Set(E.filter(e => e.handler !== undefined).map(e => e.handler)).size !== wolves) fail(w, 'two wolves share a handler');
+    const solo = E.filter(e => !e.boss && type(e) !== 'rat' && type(e) !== 'wolf');
+    shareBy[fl - 1] += solo.filter(e => type(e) !== 'goblin').length; guardsBy[fl - 1] += solo.length;
+    // another theme: only goblins and wolves
+    const o = L.assignEnemyTypes(L.generateFloor(seed, fl, { armory: false, boss: fl === 5 }), seed, fl, OTHER);
+    if (o.enemies.some(e => e.type && e.type !== 'wolf')) fail(w, 'a theme without natives spawned natives');
+  }
+}
+const pct = shareBy.map((v, i) => Math.round(100 * v / guardsBy[i]));
+console.log(`native share of guards by floor: ${pct.join('%, ')}%  (targets 30, 45, 60, 70, then about 50 in the arena, where wolf handlers take half the rim guards)`);
+pct.forEach((p, i) => { const want = [30, 45, 60, 70, 50][i]; if (Math.abs(p - want) > 14 + (i === 2 || i === 3 ? 8 : 0)) fail(`floor ${i + 1}`, `native share ${p}% is far from ${want}%`); });
+
+// loot per type
+const rng = seed => L.makeRng(seed);
+let ratDrops = 0, banditGold = 0, wolfDrops = 0, bouncerItems = 0;
+for (let i = 1; i <= 400; i++) {
+  if (L.rollLoot('corpse', 2, rng(i), 0, [], 'rat').length) ratDrops++;
+  if (L.rollLoot('corpse', 2, rng(i), 0, [], 'bandit').some(d => d.type === 'gold')) banditGold++;
+  wolfDrops += L.rollLoot('corpse', 2, rng(i), 0, [], 'wolf').length;
+  const b = L.rollLoot('corpse', 3, rng(i), 0, [], 'bouncer'); if (b.some(d => d.type === 'weapon' || d.type === 'armor') && b.some(d => d.type === 'gold')) bouncerItems++;
+}
+n++;
+if (ratDrops > 160) fail('rat loot', `${ratDrops}/400 rats dropped something`);
+if (banditGold < 300) fail('bandit loot', `${banditGold}/400 bandits had gold`);
+if (wolfDrops) fail('wolf loot', 'wolves should drop nothing');
+if (bouncerItems !== 400) fail('bouncer loot', `${bouncerItems}/400 had equipment and gold`);
+console.log(`${n} checks, ${fails} failures`);
+process.exit(fails ? 1 : 0);

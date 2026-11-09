@@ -61,6 +61,11 @@ const pauseMenu = (() => {
         'Its swing shows where it will hit (overhead is the head, sideways is the body, low is the legs). Block head and body hits. Leg sweeps go under a block.',
         'Hit it from behind while it has not noticed you for a sneak attack. A dagger kills it outright.',
         'Has a chance to drop one item when it dies.']),
+      card('enemy:cook', 'Goblin Cook', '#e6e2d2', ['Works the kitchens and mess halls with a chipped cleaver. No armor.', 'Drops food and the odd potion (food comes with the hunger system).', 'Otherwise fights like a guard.']),
+      card('enemy:bandit', 'Drunk Bandit', '#b05a4a', ['Sways, sees poorly and hears worse, so it is an easy sneak kill.', 'Carries a dagger (its body hits make you bleed) and usually some gold.', 'If it spots you or gets hurt it bellows, and that carries about 15 m.']),
+      card('enemy:rat', 'Giant Rat', '#9a8a70', ['Small and fast and always in a pack of three, usually in a storeroom. Dies in one hit but bites at your legs (slow).', 'Aim low: it is only as tall as your knee. Drops next to nothing.']),
+      card('enemy:wolf', 'Tamed Wolf', '#9aa0aa', ['A goblin keeps it as a pet and it trots after that goblin. Faster than a sprint, bites fast with a short warning, goes for your legs and body.', 'Smells you: crouching and walls do not hide you from it, only standing still does.', 'If its handler is alerted the wolf is let off the leash. Kill the handler quietly and it just waits. A leg hit makes it limp.']),
+      card('enemy:bouncer', 'Bouncer', '#7d8672', ['Big, slow and hits hard, with a long warning. 2x the health.', 'Ordinary hits do not stagger it and a dagger cannot kill it in one stab (a sneak attack is capped). A parry still staggers it.', 'Always drops a piece of equipment (Uncommon or better) and some gold.']),
       card('enemy:boss', 'Cave Warlord', '#c0503a', [
         `Boss of floor 5. ${TUNE.bossHp} HP in heavy plate, and it hits much harder than a guard.`,
         'Sleeps in the middle of the arena until you get close. Cannot be sneak-killed and is not staggered by normal hits.',

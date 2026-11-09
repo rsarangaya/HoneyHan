@@ -122,6 +122,7 @@ function buildFloor() {
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
   buildTorches();
   enemies = floor.enemies.map(s => new Enemy(s, floor));
+  linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
 
   scene.add(group);
@@ -208,8 +209,8 @@ function playerHit() {
   if (!t) { loud(2); return; }                    // swung at nothing
   if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
   const e = t.e;
-  const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you; the boss cannot be sneak-killed
-  const dmg = w.dmg * Math.min(TUNE.damageCap, ZONE_MUL[t.zone]) * (sneak ? w.sneak : 1)
+  const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you (or smelling you); the boss cannot be sneak-killed
+  const dmg = w.dmg * Math.min(TUNE.damageCap, ZONE_MUL[t.zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1)
     * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[t.zone] || 1);
   const killed = e.hurt(dmg, player);
   loud(sneak && killed ? 2 : w.noise);            // a clean kill is nearly silent
@@ -241,9 +242,9 @@ function bossDefeated(e) {
 function makeCorpse(e, sneak) {
   e.corpseDone = true;
   const bonus = sneak ? 0.15 : 0;
-  if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear).length) return;
+  if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type).length) return;
   propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear },
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
 }
@@ -253,7 +254,7 @@ function resolveEnemyAttack(e, zone) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
   const facing = (dx * fx + dz * fz) / d > 0.2;
-  const full = TUNE.enemyDmg * (e.boss ? TUNE.bossDmgMul : 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
+  const full = TUNE.enemyDmg * e.dmgMul * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
   if (cb.block && facing && !w.ranged) {
     if (zone === 'legs') mark('LEG SWEEP', '#ff6a4a');           // goes under the block
     else if (cb.blockT <= w.parryWin) {
@@ -409,7 +410,7 @@ function finishSearch(o) {
     flash(`Unlocked the ${o.p.room}`);
     return;
   }
-  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || []), ...(o.p.extra || [])]);
+  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type), ...(o.p.extra || [])]);
   const got = [], left = [], notes = [];
   for (const d of drops) {
     const text = inv.add(d);
@@ -477,6 +478,7 @@ let respawnT = Infinity, baseGuards = 0;
 function startFloor(n) {
   floorNum = n;
   floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR });
+  assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
@@ -506,7 +508,7 @@ function updateRespawn(dt) {
   if (!homes.length) { respawnT = 8; return; }
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
   const a = roomPoint(floor, pick(homes), Math.floor(Math.random() * 8)), b = roomPoint(floor, pick(open), Math.floor(Math.random() * 8));
-  const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (Math.random() * 4294967296) >>> 0 }, floor);
+  const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (Math.random() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, Math.random) }, floor);
   e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
 }
 
@@ -664,7 +666,7 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
-    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog('A guard bled out.', '#ff6a6a'); }
+    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} bled out.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
