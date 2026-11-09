@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-10';   // bumped so old saved values don't override the new speed and attack-speed defaults
+  const KEY = 'prototype-test-tune-11';   // bumped so old saved values don't override the new speed and attack-speed defaults
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -9,7 +9,7 @@ const tunePanel = (() => {
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
-    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
     ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
     ['archer shots', ENEMY_TYPES.archer.ranged, [['min', 0.5], ['max', 0.5], ['wind', 0.05], ['cd', 0.1], ['speed', 1]]],
     ['shaman', ENEMY_TYPES.shaman.ranged, [['min', 0.5], ['max', 0.5], ['wind', 0.05], ['cd', 0.1], ['speed', 1], ['healAt', 0.05], ['healAmt', 1], ['healCd', 0.5]]],

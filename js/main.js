@@ -29,6 +29,9 @@ const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) ha
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5;
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
+const PATCH_KINDS = ['puddle', 'grass', 'glowcap', 'bell', 'ice'];
+const HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the Library's dead silence: every sound you make carries farther
+const THEME_HINT = { 'The Sunken Tavern': 'Shallow puddles splash when you step in them, even when you creep.', 'The Moonlit Orchard': 'Tall grass hides a crouching player. Scarecrows are not all scenery.', 'The Clockwork Library': 'The library is eerily silent: every sound you make carries 40% farther.', 'The Mushroom Cellar': 'Glowing spores light you up: guards see you from farther in them.', 'The Goblin Market': 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.', 'The Frozen Chapel': 'Patches of ice make you slide.' };
 const shopFloor = makeRng((runSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);   // the one floor of this stage with a shop (not the boss arena); the player is not told which
 
 function noiseTexture(base) {
@@ -242,7 +245,8 @@ function playerHit() {
 // draw). noise: metres heard at once (a bow's noise is made when it is loosed and when the arrow lands instead).
 function dealHit(e, zone, base, w, noise) {
   const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you (or smelling you); the boss cannot be sneak-killed
-  const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1)
+  const guarded = !sneak && e.stun <= 0 && e.T.blockFront < 1 && e.facesPlayer(player);        // a raised shield or guard takes hits from the front
+  const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1) * (guarded ? e.T.blockFront : 1)
     * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1);
   const killed = e.hurt(dmg, player);
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
@@ -251,7 +255,7 @@ function dealHit(e, zone, base, w, noise) {
     const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples, bow slows
     const proc = pr && pr.zone === zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
     if (proc) discover('status:' + pr.status, STATUS[pr.status].name);
-    mark(`${zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, zone === 'head' ? '#ff9a3a' : '#fff');
+    mark(`${zone.toUpperCase()}${sneak ? ' SNEAK' : ''}${guarded ? ' GUARDED' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, zone === 'head' ? '#ff9a3a' : '#fff');
   }
 }
 
@@ -340,15 +344,37 @@ function playRage(it) {
   if (--it.charges <= 0) { inv.remove(it); addLog("The recorder's speakers blow out.", '#ff9a2a'); }
 }
 
+// A thief's blow takes gold instead of health. It keeps the gold and drops it when it dies.
+function stealGold(e) {
+  const n = Math.min(inv.gold, 25); inv.gold -= n; e.loot += n; hitReaction(4);
+  flash(n ? `Thief! ${n} gold stolen. Kill it to get it back.` : 'A thief rifles your pockets and finds nothing.');
+  discover('enemy:thief', 'Thief Goblin');
+}
+// A spore puffer bursting: Slow and Daze for anything within 3 m, you included.
+Enemy.burst = e => {
+  if (Math.hypot(e.x - player.x, e.z - player.z) < 3) {
+    if (pst.apply('slow', 4)) discover('status:slow', 'Slow'); if (pst.apply('daze', 3)) discover('status:daze', 'Daze');
+    hitReaction(3); flash('The puffer bursts! Spores!');
+  }
+  for (const o of enemies) if (o !== e && !o.dead && Math.hypot(o.x - e.x, o.z - e.z) < 3) o.addStatus('slow', 4);
+};
+
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
 function spawnEnemyShot(s) {
   const gravity = s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
   const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
   const jitter = () => (Math.random() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
-  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh('#b060ff') };
+  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff' }[s.kind]) };
   a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
 }
 function enemyShotHit(a) {
+  if (a.kind === 'thorn' || a.kind === 'curse') {                                    // thorns make you bleed, a curse slows you; no block stops them
+    hitReaction(4);
+    const s = a.kind === 'thorn' ? 'bleed' : 'slow';
+    if (pst.apply(s, a.kind === 'thorn' ? 4 : 5)) discover('status:' + s, STATUS[s].name);
+    mark(a.kind === 'thorn' ? 'THORNS' : 'CURSED', a.kind === 'thorn' ? '#6aff6a' : '#9adaff'); addLog(`${a.kind === 'thorn' ? 'Thorns' : 'Cursed'}: ${STATUS[s].name}!`, '#9adaff');
+    return;
+  }
   if (a.kind === 'hex') {                                                            // a hex slows or dazes, and no block stops it
     hitReaction(4);
     const s = Math.random() < 0.5 ? 'slow' : 'daze';
@@ -437,9 +463,9 @@ function bossDefeated(e) {
 function makeCorpse(e, sneak) {
   e.corpseDone = true;
   const bonus = sneak ? 0.15 : 0;
-  if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type).length) return;
+  if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type).length && !e.loot) return;
   propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type },
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot ? [{ type: 'gold', n: e.loot }] : undefined },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
 }
@@ -449,7 +475,8 @@ function resolveEnemyAttack(e, zone, ranged = false) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
   const facing = (dx * fx + dz * fz) / d > 0.2;
-  const full = TUNE.enemyDmg * e.dmgMul * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
+  const full = TUNE.enemyDmg * e.dmgMul * (e.hitMul || 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));
+  e.hitMul = 1;   // armor in that zone's slot cuts it
   const bs = blockStats();
   if (cb.block && facing && !w.ranged) {
     if (zone === 'legs' && !bs.legs) mark('LEG SWEEP', '#ff6a4a');           // goes under a plain block
@@ -473,6 +500,7 @@ function resolveEnemyAttack(e, zone, ranged = false) {
 // What a landed hit does besides damage: leg hits slow (the boss cripples), head hits daze, a dagger bleeds.
 function hitStatuses(e, zone) {
   const add = n => { if (pst.apply(n)) { discover('status:' + n, STATUS[n].name); addLog(STATUS[n].name + '!', STATUS[n].color); } };
+  if (e.T.onHit) add(e.T.onHit);                                                    // a frost wisp's touch slows
   if (zone === 'legs') add(e.boss ? 'cripple' : 'slow');
   else if (zone === 'head') add('daze');
   else if (e.weaponKind === 'dagger') add('bleed');
@@ -515,7 +543,13 @@ function updateCombat(dt) {
     if (!inv.find(ea.it.id)) cb.eat = null; else if (ea.t >= ea.dur) finishEat();
   }
   player.noiseBonus = inv.armorNoise();
-  player.stealthMul = inv.buffs.shadow > 0 ? 0.5 : 1;
+  const patch = floor.patches.get(player.tileY * floor.w + player.tileX);       // the theme's gimmick under your feet
+  player.slippery = patch === 'ice';
+  let seenMul = 1;
+  if (patch === 'grass') { seenMul = player.crouching ? 0.55 : 0.85; discover('item:grass', 'Tall grass'); }
+  else if (patch === 'glowcap') { seenMul = 1.4; discover('item:glow', 'Glowing spores'); }
+  else if (patch === 'ice') discover('item:ice', 'Ice');
+  player.stealthMul = (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
 
   if (player.sprinting) spend(TUNE.sprintDrain * dt);
@@ -757,8 +791,8 @@ function startFloor(n) {
   floorNum = n;
   floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
-  if (floor.boss) { const b = floor.enemies.find(e => e.boss); if (b && theme.name === 'The Sunken Tavern') b.innkeeper = true; }   // the Tavern's boss is its giant innkeeper
-  floor.puddles = new Set(floor.decor.filter(d => d.kind === 'puddle').map(d => d.y * floor.w + d.x));   // shallow water: splashes carry sound
+  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; } }   // each theme's boss has its own look
+  floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
@@ -771,6 +805,7 @@ function startFloor(n) {
   baseGuards = floor.enemies.length;
   respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
   el('boss').firstElementChild.textContent = bossNameFor(theme.name);
+  if (n === 1 && THEME_HINT[theme.name]) addLog(THEME_HINT[theme.name], '#9ac8ff');
   hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
   const locked = floor.doors.map(d => d.room).join(', ');
   if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
@@ -944,15 +979,22 @@ function frame(now) {
     updateDoors(dt);
     const events = pending.splice(0);              // noises guards made last frame
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
-    if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse }); rings.push({ x: player.x, z: player.z, r: pulse, t: 0 }); }
-    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: player.noiseRadius });
-    if (player.noiseRadius > 0 && floor.puddles.size && floor.puddles.has(player.tileY * floor.w + player.tileX)) {   // shallow water: a moving step splashes, even a crouched one
+    if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * HUSH }); rings.push({ x: player.x, z: player.z, r: pulse * HUSH, t: 0 }); }
+    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: player.noiseRadius * HUSH });
+    const under = floor.patches.get(player.tileY * floor.w + player.tileX);
+    if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
+      floor.patches.delete(player.tileY * floor.w + player.tileX);
+      const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;
+      events.push({ x: player.x, z: player.z, r: 14 }); rings.push({ x: player.x, z: player.z, r: 14, t: 0 });
+      discover('item:bell', 'Tripwire bells'); flash('DING! A tripwire bell rings.');
+    }
+    if (player.noiseRadius > 0 && under === 'puddle') {   // shallow water: a moving step splashes, even a crouched one
       const r = player.crouching ? 4 : 8;
       events.push({ x: player.x, z: player.z, r }); rings.push({ x: player.x, z: player.z, r, t: 0 });
       if (discover('item:puddle', 'Shallow water')) flash('Splash! Shallow water carries sound.');
     }
     pulse = 0;
-    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot };
+    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }

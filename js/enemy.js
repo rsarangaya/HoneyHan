@@ -113,10 +113,10 @@ class Enemy {
     this.spec = spec;
     this.type = spec.type || 'goblin';
     this.T = ENEMY_TYPES[this.type];
-    this.quad = this.T.model === 'quad';
+    this.quad = this.T.model === 'quad' || this.T.model === 'float';   // floating things aim and animate like animals
     this.handlerRef = null;             // a wolf's goblin handler (linkHandlers in enemytypes.js)
     this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
-    this.dormant = this.boss;
+    this.dormant = this.boss || !!this.T.ambush;   // the boss and scarecrows wait, as scenery, until you come close
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
     this.route = spec.route.map(p => ({ x: (p.x + 0.5) * TILE, z: (p.y + 0.5) * TILE }));
     this.ri = 1;
@@ -127,6 +127,8 @@ class Enemy {
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.healCd = 3; this.healFx = 0; this.cast = null; this.castTarget = null;   // shaman: heals wounded allies
+    this.fleeT = 0; this.fleeTo = null; this.stolen = false; this.loot = 0;   // thieves
+    this.chargeWind = 0; this.chargeT = 0; this.cdx = 0; this.cdz = 0; this.hitMul = 1;   // boars
     this.sleepT = 0;                    // asleep (a sleep wand): sees and hears nothing, any damage wakes it
     this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
     this.cause = 'died';
@@ -144,7 +146,7 @@ class Enemy {
     const rg = makeRng(this.seed || 1);
     const pal = arr => arr[Math.floor(rg() * arr.length)];
     const lam = c => new THREE.MeshLambertMaterial({ color: c });
-    const skin = lam(this.T.skin || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
+    const skin = lam(this.spec.skin || this.T.skin || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
     const dark = lam(new THREE.Color(skin.color).multiplyScalar(0.65).getHex());     // hands, ear tips, warts, brow
     const cloth = lam(pal([0x6a3f2a, 0x5a3a46, 0x3a4a5a, 0x5a5230]));
     const leather = lam(0x3a2616), metal = lam(0x8a8e96), bone = lam(0xe6e0c8), black = lam(0x120c08);
@@ -153,9 +155,10 @@ class Enemy {
     // guard wears is drawn on the model, soaks up damage in that zone, and is what it can drop.
     const tierOf = () => rollTier(typeof floorNum === 'number' ? floorNum : 1, rg);
     const piece = (slot, chance) => rg() < chance ? { type: 'armor', slot, cls: weighted(rg, [50, 35, 15]), tier: tierOf() } : null;
-    const heavy = slot => ({ type: 'armor', slot, cls: 2, tier: 2 });          // the boss wears full plate (Rare)
+    const heavy = slot => ({ type: 'armor', slot, cls: 2, tier: 2 });          // the boss, captains and ice knights wear full plate (Rare)
+    const plate = this.boss || this.T.heavy;
     const bare = this.T.noGear || this.quad;     // cooks and animals wear no armor
-    const helmet = this.boss ? heavy('helmet') : bare ? null : piece('helmet', 0.4), vest = this.boss ? heavy('chest') : bare ? null : piece('chest', 0.4), boots = this.boss ? heavy('boots') : bare ? null : piece('boots', 0.35);
+    const helmet = plate ? heavy('helmet') : bare ? null : piece('helmet', 0.4), vest = plate ? heavy('chest') : bare ? null : piece('chest', 0.4), boots = plate ? heavy('boots') : bare ? null : piece('boots', 0.35);
     const hood = !helmet && rg() < 0.4;
     const kind = this.boss ? 'mace' : this.T.weapon || (rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace');
     this.weaponKind = kind;
@@ -169,7 +172,8 @@ class Enemy {
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
     m.scale.setScalar(this.boss ? BOSS_SCALE : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
-    if (this.quad) this.buildQuad(m, lam);
+    if (this.T.model === 'float') this.buildFloat(m, lam);
+    else if (this.quad) this.buildQuad(m, lam);
     else {
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.legs = [-1, 1].map(s => {
@@ -230,7 +234,7 @@ class Enemy {
       box(0.19, 0.1, 0.2, leather, 0, -0.5, 0, g);                                                // wristband
       up.add(g); return g;
     });
-    if (rg() < 0.3) { const sh = box(0.06, 0.46, 0.46, leather, -0.14, -0.4, -0.14, this.arms[0]); box(0.07, 0.1, 0.1, metal, -0.17, -0.4, -0.14, this.arms[0]); sh.rotation.x = 0; }   // small shield
+    if (rg() < 0.3 || this.T.shield) { const sh = box(0.06, 0.46, 0.46, leather, -0.14, -0.4, -0.14, this.arms[0]); box(0.07, 0.1, 0.1, metal, -0.17, -0.4, -0.14, this.arms[0]); sh.rotation.x = 0; }   // small shield
     // weapon in the right hand: a knobbed club or a chipped cleaver
     const wpn = new THREE.Group(); wpn.position.set(0, -0.62, -0.04);
     const blade = lam(weapon.tier >= 2 ? TIERS[weapon.tier].color : 0x8a8e96);
@@ -239,7 +243,7 @@ class Enemy {
       box(0.04, 0.85, 0.05, lam(0x6a4a24), 0.02, -0.3, -0.05, wpn); box(0.01, 0.8, 0.01, bone, 0.02, -0.3, 0.0, wpn);                         // a bow and its string
     } else if (look === 'staff') {
       box(0.045, 1.25, 0.045, lam(0x4a3018), 0, -0.4, 0, wpn);
-      box(0.12, 0.12, 0.12, new THREE.MeshBasicMaterial({ color: 0xb060ff }), 0, -1.05, 0, wpn);                                             // a glowing orb on the staff
+      box(0.12, 0.12, 0.12, new THREE.MeshBasicMaterial({ color: this.T.orb || 0xb060ff }), 0, -1.05, 0, wpn);                                             // a glowing orb on the staff
     } else if (look === 'mace') {
       box(0.07, 0.6, 0.07, lam(0x4a3018), 0, -0.22, 0, wpn);
       box(0.17, 0.2, 0.17, blade, 0, -0.52, 0, wpn);
@@ -263,22 +267,46 @@ class Enemy {
     } else if (this.type === 'archer') {
       part(0.42, 0.3, 0.42, lam(0x3a5a2a), 0, 1.04, 0); part(0.4, 0.34, 0.07, lam(0x3a5a2a), 0, 0.9, 0.2);                    // a green hood
       part(0.13, 0.42, 0.13, leather, 0.18, 0.55, 0.22); for (const x of [0.14, 0.19, 0.24]) part(0.03, 0.12, 0.03, bone, x, 0.8, 0.22);   // a quiver of arrows
-    } else if (this.type === 'shaman') {
-      const robe = lam(0x5a2a7a);
+    } else if (this.T.robe) {                                                                                                   // casters: shaman, scholar, warden, librarian, cultist
+      const robe = lam(this.T.robe);
       part(0.6, 0.78, 0.38, robe, 0, 0.35, 0); part(0.64, 0.5, 0.38, robe, 0, -0.18, 0);                                          // a purple robe over the torso and down the legs
       part(0.44, 0.34, 0.44, robe, 0, 1.0, 0); part(0.4, 0.34, 0.07, robe, 0, 0.9, 0.2);                                          // a deep hood
-      part(0.3, 0.06, 0.04, new THREE.MeshBasicMaterial({ color: 0xb060ff }), 0, 0.9, -0.2);                                       // glowing eyes in the hood
+      part(0.3, 0.06, 0.04, new THREE.MeshBasicMaterial({ color: this.T.orb || 0xb060ff }), 0, 0.9, -0.2);                                       // glowing eyes in the hood
     } else if (this.type === 'brute') {
       part(0.95, 0.24, 0.5, lam(0x4a3a28), 0, 0.64, 0);                                                                           // a fur mantle
       part(0.2, 0.2, 0.06, bone, 0, 0.12, -0.2);                                                                                  // a skull on the belt
       for (const s of [-1, 1]) { part(0.05, 0.2, 0.05, bone, s * 0.42, 0.9, 0); part(0.05, 0.14, 0.05, bone, s * 0.34, 0.9, 0.1); }  // shoulder spikes
+    } else if (this.type === 'scarecrow') {
+      part(0.55, 0.06, 0.55, lam(0x6a4a24), 0, 1.1, 0); part(0.3, 0.26, 0.3, lam(0x6a4a24), 0, 1.24, 0);          // a floppy hat
+      part(0.08, 1.7, 0.08, lam(0x4a3018), 0, 0.2, 0.22);                                                          // the pole it is tied to
+      for (const s of [-1, 1]) part(0.1, 0.22, 0.04, lam(0xe0c870), s * 0.3, 0.66, -0.17);                          // straw sticking out
+    } else if (this.type === 'skeleton') {
+      for (let i = 0; i < 3; i++) part(0.5, 0.04, 0.34, bone, 0, 0.25 + i * 0.14, 0);                              // ribs
+      part(0.1, 0.1, 0.04, black, -0.08, 0.92, -0.18); part(0.1, 0.1, 0.04, black, 0.08, 0.92, -0.18);            // empty eye sockets
+    } else if (this.type === 'thief') {
+      part(0.42, 0.34, 0.42, lam(0x20302a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x20302a), 0, 0.9, 0.2);        // a dark hood
+      part(0.4, 0.2, 0.2, lam(0x6a4a2a), 0, 0.4, 0.25);                                                            // a swag bag
+    } else if (this.type === 'captain') {
+      part(0.08, 0.3, 0.1, lam(0xc02020), 0, 1.3, 0); part(0.4, 0.7, 0.06, lam(0xc02020), 0, 0.35, 0.22);         // a plume and a red cape
+    } else if (this.type === 'iceknight') {
+      for (const x of [-0.12, 0, 0.12]) part(0.05, 0.22, 0.05, lam(0xd8f0ff), x, 1.28, 0);                          // icicle crest
+    } else if (this.type === 'golem') {
+      for (const [x, y] of [[-0.12, 0.5], [0.15, 0.3], [0, 0.9]]) part(0.05, 0.16, 0.02, new THREE.MeshBasicMaterial({ color: 0xff8a30 }), x, y, -0.18);   // glowing cracks
+    } else if (this.type === 'fungbrute') {
+      for (const [x, y, z] of [[-0.4, 0.85, 0], [0.4, 0.8, 0.1], [0.1, 1.1, 0.1]]) { part(0.1, 0.12, 0.1, lam(0xd8c8f0), x, y, z); part(0.26, 0.08, 0.26, lam(0xa05ad0), x, y + 0.1, z); }   // mushrooms
     } else if (this.type === 'bouncer') {
       part(0.9, 0.22, 0.46, lam(0x202020), 0, 0.62, 0); part(0.7, 0.55, 0.38, lam(0x2a2a2e), 0, 0.38, 0);        // wide shoulders and a black jacket
       part(0.38, 0.1, 0.38, metal, 0, 0.76, 0);                                                                     // spiked collar
       for (const sx of [-0.3, -0.1, 0.1, 0.3]) part(0.05, 0.1, 0.05, bone, sx, 0.84, -0.18);
     }
-    if (this.boss && this.spec.innkeeper) {                                                                                      // the Tavern's boss: a giant innkeeper in an apron and a hat
-      part(0.56, 0.7, 0.06, lam(0xf2efe6), 0, 0.35, -0.2); part(0.42, 0.26, 0.42, lam(0xf2efe6), 0, 1.3, 0); part(0.2, 0.2, 0.06, lam(0xd8b060), 0, 0.2, -0.24);
+    if (this.boss && this.spec.dress) {                                                                                           // each theme's boss has its own look
+      const d = this.spec.dress, gold = lam(0xe8c040);
+      if (d === 'innkeeper') { part(0.56, 0.7, 0.06, lam(0xf2efe6), 0, 0.35, -0.2); part(0.42, 0.26, 0.42, lam(0xf2efe6), 0, 1.3, 0); part(0.2, 0.2, 0.06, gold, 0, 0.2, -0.24); }
+      else if (d === 'king') { part(0.4, 0.14, 0.4, gold, 0, 1.12, 0); for (const x of [-0.14, 0, 0.14]) part(0.06, 0.14, 0.06, gold, x, 1.24, 0); part(0.7, 0.9, 0.06, lam(0x8a2a2a), 0, 0.3, 0.22); }
+      else if (d === 'golem') { for (const [x, y] of [[-0.15, 0.5], [0.18, 0.3], [0, 0.85], [-0.1, 0.1]]) part(0.06, 0.2, 0.02, new THREE.MeshBasicMaterial({ color: 0xff8a30 }), x, y, -0.19); part(0.7, 0.3, 0.5, lam(0x6a6a70), 0, 0.7, 0); }
+      else if (d === 'fungus') { for (const [x, y, z] of [[-0.4, 0.9, 0], [0.4, 0.85, 0.1], [0.1, 1.2, 0.1], [-0.2, 1.15, 0.1]]) { part(0.14, 0.16, 0.14, lam(0xd8c8f0), x, y, z); part(0.34, 0.1, 0.34, lam(0xa05ad0), x, y + 0.12, z); } }
+      else if (d === 'warlord') { part(0.4, 0.14, 0.4, gold, 0, 1.12, 0); for (const s of [-1, 1]) part(0.06, 0.3, 0.06, bone, s * 0.22, 1.28, 0); part(0.5, 0.6, 0.06, lam(0xa02020), 0, 0.45, 0.22); }
+      else if (d === 'frost') { for (const x of [-0.18, -0.06, 0.06, 0.18]) part(0.06, 0.3, 0.06, lam(0xd8f0ff), x, 1.26, 0); for (const s of [-1, 1]) part(0.1, 0.35, 0.1, lam(0xd8f0ff), s * 0.4, 0.95, 0); }
     }
     }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
@@ -317,6 +345,8 @@ class Enemy {
       box(0.05, 0.05, 0.03, eye, s * 0.09, 0.34, -0.78, body);                   // eyes
       box(0.025, 0.06, 0.025, bone, s * 0.05, 0.16, -0.92, body);                // fangs
     }
+    if (this.type === 'boar') for (const s of [-1, 1]) box(0.04, 0.04, 0.16, bone, s * 0.07, 0.12, -0.96, body);   // tusks
+    if (this.type === 'puffer') { box(0.5, 0.2, 0.5, lam(0xd05a9a), 0, 0.42, 0.05, body); for (const [x, z] of [[-0.15, 0], [0.15, 0.15]]) box(0.12, 0.12, 0.12, lam(0xf0c0e0), x, 0.58, z, body); }   // mushroom caps on its back
     const tail = box(0.07, 0.07, this.type === 'rat' ? 0.75 : 0.5, this.type === 'rat' ? pink : fur, 0, 0.26, 0.7, body); tail.rotation.x = -0.45;
     this.legs = [[-1, -0.32], [1, -0.32], [-1, 0.32], [1, 0.32]].map(([sx, z]) => {   // front pair, then back pair
       const g = new THREE.Group(); g.position.set(sx * 0.15, 0.42, z); box(0.1, 0.42, 0.1, fur, 0, -0.21, 0, g); box(0.11, 0.05, 0.14, dark, 0, -0.42, -0.02, g); m.add(g); return g;
@@ -325,10 +355,40 @@ class Enemy {
     this.qp = [0, 0];                                                            // eased pose: [body pitch, lunge offset]
   }
 
+  // Floating creatures (animated books, frost wisps): a body that hovers and bobs, with no legs.
+  buildFloat(m, lam) {
+    const T = this.T, c = new THREE.Color(T.fur);
+    const glow = new THREE.MeshBasicMaterial({ color: c });
+    this.mats = [lam(T.fur)];
+    const body = this.body = new THREE.Group(); body.position.y = T.hover; m.add(body);
+    const box = (w, h, d, mat, x, y, z, parent = body) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    this.wings = [];
+    if (this.type === 'book') {
+      const cover = lam(0x6a3a1a), pages = lam(0xe8dcc0);
+      box(0.34, 0.06, 0.46, cover, 0, 0, 0); box(0.3, 0.05, 0.42, pages, 0, 0.055, 0);                      // the book
+      for (const s of [-1, 1]) { const g = new THREE.Group(); g.position.set(s * 0.18, 0.06, 0); box(0.3, 0.02, 0.4, pages, s * 0.15, 0, 0, g); body.add(g); this.wings.push(g); }   // pages that flap
+      box(0.05, 0.05, 0.02, new THREE.MeshBasicMaterial({ color: 0xffd060 }), -0.07, 0.03, -0.24); box(0.05, 0.05, 0.02, new THREE.MeshBasicMaterial({ color: 0xffd060 }), 0.07, 0.03, -0.24);
+    } else {
+      box(0.34, 0.34, 0.34, glow, 0, 0, 0);                                                                  // a wisp: a bright core, a pale halo and a tail
+      box(0.5, 0.5, 0.5, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.3 }), 0, 0, 0);
+      box(0.16, 0.5, 0.16, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.5 }), 0, -0.4, 0.05);
+      box(0.06, 0.06, 0.02, new THREE.MeshBasicMaterial({ color: 0x103a5a }), -0.08, 0.04, -0.18); box(0.06, 0.06, 0.02, new THREE.MeshBasicMaterial({ color: 0x103a5a }), 0.08, 0.04, -0.18);
+    }
+    this.legs = [0, 1, 2, 3].map(() => new THREE.Group());                                                       // none, but the shared pose code swings them
+    this.arms = [new THREE.Group(), new THREE.Group()];
+    this.qp = [0, 0];
+  }
+
   poseQuad(dt) {
+    if (this.T.hover) {                                                                                         // hover and flap
+      this.body.position.y = this.T.hover + Math.sin(this.walkT * 0.25 + this.seed) * 0.08 + Math.sin(performance.now() / 400 + this.seed) * 0.06;
+      if (this.wings) this.wings.forEach((w, i) => { w.rotation.z = (i ? -1 : 1) * Math.sin(performance.now() / 70 + this.seed) * 0.6; });
+    }
     const sw = Math.sin(this.walkT * 0.9) * 0.75, l = this.legs;
     l[0].rotation.x = sw; l[1].rotation.x = -sw; l[2].rotation.x = -sw; l[3].rotation.x = sw;
     let pitch = this.state === 'alerted' ? -0.08 : 0, lunge = 0, snap = false;       // alerted: head low
+    if (this.chargeWind > 0) { pitch = 0.45; lunge = 0.25; }                          // pawing the ground
+    else if (this.chargeT > 0) { pitch = -0.25; lunge = -0.2; }                      // head down, charging
     if (this.stun > 0) { pitch = 0.4; lunge = 0.15; }
     else if (this.winding) {
       const w = this.windT_;
@@ -387,11 +447,21 @@ class Enemy {
 
   set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; } }
 
-  die() { this.dead = true; this.winding = false; this.icon.visible = false; this.cone.visible = false; }
+  die() {
+    this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
+    if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
+  }
+
+  // Is the player in front of it (within about 60 degrees of where it faces)? Used for shields and guards.
+  facesPlayer(p) {
+    const dx = p.x - this.x, dz = p.z - this.z, d = Math.hypot(dx, dz) || 1;
+    return (dx * -Math.sin(this.yaw) + dz * -Math.cos(this.yaw)) / d > 0.5;
+  }
 
   // Start a status. The boss cannot be stunned (only a parry staggers it). Returns whether it took hold.
   addStatus(n, dur) {
     if (n === 'stun' && (this.boss || this.T.noStagger)) return false;
+    if (n === 'bleed' && this.T.resistBleed) return false;
     const ok = this.st.apply(n, dur);
     if (ok && n === 'stun') { this.stun = Math.max(this.stun, dur || STATUS.stun.dur); this.winding = false; }
     return ok;
@@ -413,6 +483,14 @@ class Enemy {
     this.sleepT = 0; this.winding = false; this.stun = 0;
     this.set('alerted'); this.shouted = true;
     return true;
+  }
+
+  // A thief runs to the room farthest from the player.
+  startFlee(player) {
+    let best = null, bd = -1;
+    for (const r of this.floor.rooms) { if (r.locked || r.theme === 'shop') continue; const d = Math.hypot((r.cx + 0.5) * TILE - player.x, (r.cy + 0.5) * TILE - player.z); if (d > bd) { bd = d; best = r; } }
+    this.fleeTo = best ? { x: (best.cx + 0.5) * TILE, z: (best.cy + 0.5) * TILE } : null;
+    this.fleeT = 9; this.winding = false;
   }
 
   // Archers and shamans: keep their distance, aim at you while they draw or chant, then loose an arrow or a hex.
@@ -487,7 +565,7 @@ class Enemy {
 
   // Returns true if the enemy died from this hit.
   hurt(dmg, player) {
-    this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0;
+    this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0; if (!this.boss) this.dormant = false;
     if (this.hp <= 0) { this.die(); return true; }
     if (!this.boss && !this.T.noStagger) { this.stun = 0.35; this.winding = false; }     // the boss and the bouncer shrug hits off (only a parry staggers them)
     this.last = { x: player.x, z: player.z };
@@ -503,10 +581,16 @@ class Enemy {
     if (bleed > 0) { this.hp -= bleed; if (this.hp <= 0) { this.cause = 'bled out'; this.die(); this.sync(dt); return null; } }   // bled out: main.js leaves the body
     if (this.sleepT > 0) { this.sleepT -= dt; this.aware = 0; this.seen = false; this.sync(dt); return null; }
     if (this.rageT > 0) return this.updateRage(dt, noise);
+    if (this.fleeT > 0 && this.stun <= 0) {                                    // a thief running off with your gold
+      this.fleeT -= dt;
+      if (this.fleeTo) this.goTo(this.fleeTo.x, this.fleeTo.z, 6.2, dt);
+      if (this.fleeT <= 0) { this.set('unaware'); this.aware = 0; this.last = null; }
+      this.sync(dt); return null;
+    }
     const f = this.floor;
     const dx = player.x - this.x, dz = player.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
-    if (this.boss && this.dormant) {   // waits in the middle of the arena and ignores sights and sounds until you are close
-      if (dist >= TUNE.bossWake) { this.sync(dt); return null; }
+    if (this.dormant) {   // the boss waits in the middle of the arena, a scarecrow stands in the field: both ignore sights and sounds until you are close
+      if (dist >= (this.boss ? TUNE.bossWake : this.T.ambush * (player.crouching ? 0.4 : 1))) { this.sync(dt); return null; }   // creep up on a scarecrow and it wakes much later
       this.dormant = false; this.justWoke = true; this.last = { x: player.x, z: player.z }; this.set('alerted');
     }
     const los = hasLOS(f, this.x, this.z, player.x, player.z);
@@ -528,7 +612,7 @@ class Enemy {
         if (n.src === this) continue;
         const nd = Math.hypot(n.x - this.x, n.z - this.z);
         if (nd < n.r * this.T.hear * (hasLOS(f, this.x, this.z, n.x, n.z) ? 1 : HEAR_THROUGH_WALLS)) {
-          this.aware = Math.max(this.aware, 0.5);
+          this.aware = Math.max(this.aware, n.src && n.src.T && n.src.T.callAll ? 1 : 0.5);   // a captain's shout turns everyone alerted
           this.last = { x: n.x, z: n.z };
         }
       }
@@ -567,13 +651,34 @@ class Enemy {
       case 'alerted': {
         if (this.T.ranged) { this.updateRanged(dt, player, noise, dist, los, dx, dz); break; }
         this.atkCd -= dt;
+        if (this.T.thief && this.stolen) { this.startFlee(player); break; }       // already robbed you: run
+        const C = this.T.charge;
+        if (C && !this.winding) {                                                  // a boar paws the ground, then charges in a straight line
+          if (this.chargeT > 0) {
+            this.chargeT -= dt;
+            const nx = this.x + this.cdx * C.speed * dt, nz = this.z + this.cdz * C.speed * dt;
+            collider.props = this.floor.solids;
+            if (!Player.prototype.blocked.call(collider, this.floor, nx, nz)) { this.x = nx; this.z = nz; this.walkT += C.speed * dt * 5; } else this.chargeT = 0;
+            this.yaw = Math.atan2(-this.cdx, -this.cdz);
+            if (Math.hypot(player.x - this.x, player.z - this.z) < 1.15) { this.chargeT = 0; this.atkCd = 1.8; this.zone = 'legs'; this.hitMul = C.dmgMul; attack = 'legs'; noise.emit(this.x, this.z, CLASH_R, this); }
+            break;
+          }
+          if (this.chargeWind > 0) {
+            this.chargeWind -= dt; this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 6 * dt);
+            if (this.chargeWind <= 0) { const d = Math.hypot(player.x - this.x, player.z - this.z) || 1; this.cdx = (player.x - this.x) / d; this.cdz = (player.z - this.z) / d; this.chargeT = 1.1; }
+            break;
+          }
+          if (this.seen && los && dist >= C.min && dist <= C.max && this.atkCd <= 0) { this.chargeWind = C.wind; break; }
+        }
         if (this.winding) {
           this.windT += dt;
           if (this.windT < this.windT_) this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
           if (this.windT >= this.windT_ + STRIKE_T) {
             this.winding = false; this.atkCd = this.cooldown;
             noise.emit(this.x, this.z, CLASH_R, this);                  // a fight is loud
-            if (dist <= this.reach + 0.5 && los) attack = this.zone;   // no hits through a wall corner
+            if (dist <= this.reach + 0.5 && los) {                       // no hits through a wall corner
+              if (this.T.thief) { if (noise.steal) noise.steal(this); this.stolen = true; this.startFlee(player); } else attack = this.zone;
+            }
           }
           break;
         }
@@ -616,6 +721,7 @@ class Enemy {
     // Alerted guards hold the club forward; a staggered one rocks back; an attack goes
     // raise (zone readable) -> strike (fast) -> recover, using ATTACK_POSES.
     let target = [0, 0, this.state === 'alerted' ? 0.7 : sw * 0.8, -sw * 0.8, 0];
+    if (this.dormant && this.T.ambush) target = [0, 0, 1.57, 1.57, 0];                // a scarecrow stands with its arms out
     let snap = false;
     if (this.stun > 0) target = [0.35, 0, -0.3, -0.3, 0];
     else if (this.winding) {

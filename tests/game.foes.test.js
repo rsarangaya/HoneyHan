@@ -70,7 +70,7 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
   // 5. The Sunken Tavern: shallow water splashes, even when you creep, and the boss is the Giant Innkeeper.
   const splash = await page.evaluate(async () => {
     game.startFloor(1); await T.sleep(200);
-    const f = game.floor; if (!f.puddles.size) return { none: true };
+    const f = game.floor, isPuddle = k => f.patches.get(k) === 'puddle'; if (![...f.patches.values()].includes('puddle')) return { none: true };
     const P = game.player;
     const trial = async (tx, ty) => {
       T.reset(); P.x = (tx + 0.5) * TILE; P.z = (ty + 0.5) * TILE; P.vx = P.vz = 0;
@@ -86,10 +86,10 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
       return ear.aware >= 0.5 || ear.state !== 'unaware';
     };
     // the T.reset inside trial reloads floor 1 with the same seed, so the puddle tiles are the same
-    const pud = [...game.floor.puddles].map(k => ({ x: k % game.floor.w, y: Math.floor(k / game.floor.w) }));
+    const pud = [...game.floor.patches.keys()].filter(isPuddle).map(k => ({ x: k % game.floor.w, y: Math.floor(k / game.floor.w) }));
     let wet = null, dry = null;
     for (const p of pud) { wet = await trial(p.x, p.y); if (wet !== null) break; }
-    for (const r of game.floor.rooms) { for (let y = r.y; y < r.y + r.h && dry === null; y++) for (let x = r.x; x < r.x + r.w && dry === null; x++) { if (game.floor.tiles[y * game.floor.w + x] === 1 && !game.floor.blocked[y * game.floor.w + x] && !game.floor.puddles.has(y * game.floor.w + x)) { const t = await trial(x, y); if (t !== null) dry = t; } } if (dry !== null) break; }
+    for (const r of game.floor.rooms) { for (let y = r.y; y < r.y + r.h && dry === null; y++) for (let x = r.x; x < r.x + r.w && dry === null; x++) { if (game.floor.tiles[y * game.floor.w + x] === 1 && !game.floor.blocked[y * game.floor.w + x] && !game.floor.patches.has(y * game.floor.w + x)) { const t = await trial(x, y); if (t !== null) dry = t; } } if (dry !== null) break; }
     return { wet, dry, puddles: pud.length };
   });
   check('puddles carry a creeping player\'s steps; dry floor does not', splash.wet === true && splash.dry === false, JSON.stringify(splash));
@@ -97,7 +97,7 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
   const boss = await page.evaluate(async () => {
     game.startFloor(5); await T.sleep(250);
     const b = game.enemies.find(e => e.boss);
-    return { name: document.querySelector('#boss div').textContent, innkeeper: !!(b && b.spec.innkeeper) };
+    return { name: document.querySelector('#boss div').textContent, innkeeper: !!(b && b.spec.dress === 'innkeeper') };
   });
   check('the Tavern\'s boss is the Giant Innkeeper', boss.name === 'Giant Innkeeper' && boss.innkeeper, boss.name);
   await page.close();

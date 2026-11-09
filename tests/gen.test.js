@@ -8,7 +8,8 @@ const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
 for (const f of ['js/gen.js', 'js/loot.js', 'js/wands.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
-const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS })', ctx);
+const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS, THEMES, THEME_GIMMICK })', ctx);
+const THEME_NAMES = G.THEMES.map(t => t.name);
 
 const N = parseInt(process.argv[2], 10) || 300;
 let fails = 0, checked = 0;
@@ -41,14 +42,14 @@ for (let s = 1; s <= N; s++) {
   for (let n = 1; n <= 5; n++) {
     const boss = n === 5, armory = n === 1 + (s % 4);
     const where = `seed ${seed} floor ${n}`;
-    const tavern = s % 2 === 1, f = G.generateFloor(seed, n, { armory, boss, themeName: tavern ? 'The Sunken Tavern' : undefined });
+    const themeName = s % 7 === 6 ? undefined : THEME_NAMES[(s + n) % THEME_NAMES.length], gim = G.THEME_GIMMICK[themeName], f = G.generateFloor(seed, n, { armory, boss, themeName });
     checked++;
     const closed = flood(f, false), open = flood(f, true), guardOpen = flood(f, true, true), at = (x, y) => y * f.w + x;
     if (!touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');
-    const puddles = f.decor.filter(d => d.kind === 'puddle');
-    if (tavern && !boss && (puddles.length < 3 || puddles.length > 7)) fail(where, `${puddles.length} puddles on a Tavern floor`);
-    if (!tavern && puddles.length) fail(where, 'puddles outside the Tavern');
-    for (const d of puddles) if (f.tiles[d.y * f.w + d.x] === G.T_WALL || f.blocked[d.y * f.w + d.x] || (d.x === f.start.x && d.y === f.start.y)) fail(where, 'a puddle on a wall, furniture or the start tile');
+    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice'].includes(d.kind));
+    if (gim && !boss && (patches.length < gim.n[0] - 2 || patches.length > gim.n[1] || patches.some(d => d.kind !== gim.kind))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
+    if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
+    for (const d of patches) if (f.tiles[d.y * f.w + d.x] === G.T_WALL || f.blocked[d.y * f.w + d.x] || (d.x === f.start.x && d.y === f.start.y)) fail(where, `a ${d.kind} patch on a wall, furniture or the start tile`);
     if (armory && !f.rooms.some(r => r.theme === 'armory')) fail(where, 'armory missing');
     for (const p of f.props) if (!touchable(f, open, p.x, p.y)) fail(where, `${p.kind} at ${p.x},${p.y} unreachable`);
     for (const e of f.enemies) for (const p of [{ x: e.x, y: e.y }, ...e.route])
@@ -68,7 +69,7 @@ for (let s = 1; s <= N; s++) {
     }
     if (f.props.some(p => p.kind === 'pantry') === false && f.rooms.some(r => r.theme === 'messhall')) fail(where, 'a mess hall without a food shelf');
     if (!boss && s % 2 === 0) {                                              // the same floor with a shop in it
-      const g = G.generateFloor(seed, n, { armory, boss: false, shop: true, themeName: tavern ? 'The Sunken Tavern' : undefined }), wh = where + ' (shop)';
+      const g = G.generateFloor(seed, n, { armory, boss: false, shop: true, themeName }), wh = where + ' (shop)';
       const gc = flood(g, false), go = flood(g, true, true), gp = flood(g, true), at2 = (x, y) => y * g.w + x;
       if (!g.shop) fail(wh, 'no shop was made');
       else {

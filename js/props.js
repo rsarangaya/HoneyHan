@@ -3,7 +3,7 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
   bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
@@ -160,6 +160,29 @@ function makeDecor(d) {
     case 'puddle': {                                               // a flat, glossy patch of shallow water
       const pm = new THREE.MeshBasicMaterial({ color: 0x3a6a9a, transparent: true, opacity: 0.55 });
       for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.5 + rg() * 0.5, 14), pm); d.rotation.x = -Math.PI / 2; d.position.set((rg() - 0.5) * 0.9, 0.012 + i * 0.001, (rg() - 0.5) * 0.9); inner.add(d); }
+      break;
+    }
+    case 'grass': {                                                // a tuft of tall grass: crouch in it and you nearly vanish
+      const gm = [lam(0x4a7a2a), lam(0x5a8a32), lam(0x3a6a22)];
+      for (let i = 0; i < 26; i++) { const h = 0.7 + rg() * 0.6, b = B(inner, 0.05, h, 0.03, gm[i % 3], (rg() - 0.5) * 2.3, h / 2, (rg() - 0.5) * 2.3, rg() * 3, (rg() - 0.5) * 0.3); }
+      break;
+    }
+    case 'glowcap': {                                              // glowing mushrooms: their light shows you up
+      for (let i = 0; i < 5; i++) {
+        const x = (rg() - 0.5) * 2, z = (rg() - 0.5) * 2, h = 0.25 + rg() * 0.35;
+        C(inner, 0.04, 0.05, h, lam(0xd8d0f0), x, h / 2, z, 6);
+        C(inner, 0.02, 0.2 + rg() * 0.1, 0.1, glow(0x6affc0), x, h + 0.04, z, 8);
+      }
+      break;
+    }
+    case 'bell': {                                                 // a tripwire with a little bell on it
+      B(inner, 2.2, 0.012, 0.012, lam(0x777777), 0, 0.14, 0); B(inner, 0.05, 0.16, 0.05, lam(0x4a3a22), -1.1, 0.08, 0); B(inner, 0.05, 0.16, 0.05, lam(0x4a3a22), 1.1, 0.08, 0);
+      C(inner, 0.02, 0.09, 0.14, lam(0xd8a030), 0, 0.07, 0, 10);
+      break;
+    }
+    case 'ice': {                                                  // a slick of ice
+      const im = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.6 });
+      for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.6 + rg() * 0.6, 10), im); d.rotation.x = -Math.PI / 2; d.position.set((rg() - 0.5) * 1.2, 0.014 + i * 0.001, (rg() - 0.5) * 1.2); inner.add(d); }
       break;
     }
     case 'counter': {                                              // the merchant's counter: planks, coins, scales and a lantern

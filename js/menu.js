@@ -43,6 +43,11 @@ const pauseMenu = (() => {
     out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. One per shot, up to 25 in the quiver. Arrows that miss often lie where they landed: walk over one to pick it up again.']));
     out.push(card('item:key', 'Keys', '#e8c860', ['Open a locked room (armory, vault or brewery) on the same floor. Each key hides in a chest. Hold the interact key at the door.']));
     out.push(card('item:puddle', 'Shallow water', '#5a8ac8', ['In the Sunken Tavern, puddles of shallow water splash when you step in them: 8 m when walking, 4 m even when crouched. Guards hear it, so go round them or accept the noise.']));
+    out.push(card('item:grass', 'Tall grass', '#5a9a3a', ['In the Moonlit Orchard, tall grass hides you: crouch in it and guards see only about half as far. Standing in it still helps a little.']));
+    out.push(card('item:glow', 'Glowing spores', '#6affc0', ['In the Mushroom Cellar, glowing mushrooms light you up: while you stand in their glow, guards see you about 40% farther.']));
+    out.push(card('item:bell', 'Tripwire bells', '#d8a030', ['In the Goblin Market, tripwires with little bells ring a loud 14 m alarm when you step on one, once. Look at the floor and step over them.']));
+    out.push(card('item:ice', 'Ice', '#bfe6ff', ['In the Frozen Chapel, patches of ice make you slide: you barely steer or stop. Do not slide into an enemy, or off a plan.']));
+    out.push(card('item:hush', 'The Library hush', '#c8b080', ['In the Clockwork Library the silence is so deep that every sound you make carries 40% farther. Creep, and keep fights short.']));
     out.push(card('item:hunger', 'Hunger', '#e0883a', ['Your food meter drains as you play, faster when you sprint or fight. At half you are Hungry (stamina regenerates 20% slower, and a faint stomach growl guards can hear), at a quarter Weak (40% slower, max stamina -15%, louder growl), and at zero Starving (1 HP lost every 4 seconds, never below 1, and no sprinting).', 'Food only feeds you, it does not heal. Eating takes a moment, slows you, and is interrupted if you are hit or attack. Eating beside a lit hearth feeds 25% more.']));
     for (const k of Object.keys(WANDS)) out.push(card('wand:' + k, WANDS[k].name, WANDS[k].color, [WANDS[k].desc, `${WANDS[k].charges} charges, then it breaks. Equip it like a weapon and attack to fire.`, 'Found in chests and vaults.']));
     out.push(card('item:recharge', 'Recharge Wand', '#7fe8d8', [`Restores ${WAND.rechargeGain} charges to a wand (rarely, all of them) and then crumbles. Use it before the wand hits 0, or on an empty one.`, 'Rare. Found in chests and vaults.']));
@@ -60,7 +65,7 @@ const pauseMenu = (() => {
     return { weapons, armor, tiers };
   }
   function enemyCards() {
-    return [
+    const base = [
       card('enemy:goblin', 'Goblin Guard', '#8fbf5a', [
         `${TUNE.enemyHp} HP. Patrols between rooms and carries a random weapon (dagger, sword or mace) and sometimes armor.`,
         'Sees in a cone ahead of it (shorter if you crouch, longer if you sprint) and hears footsteps, fights and chests.',
@@ -82,6 +87,8 @@ const pauseMenu = (() => {
         'A parry still staggers it, and a sprinting player can outrun it.',
         'Drops an Epic piece of equipment (with a small chance of Legendary), more equipment and gold. The stairs stay sealed until it falls.']),
     ];
+    const extra = Object.entries(ENEMY_TYPES).filter(([k, v]) => v.info).map(([k, v]) => card('enemy:' + k, v.name, '#c8c8c8', v.info));   // the other themes' natives
+    return [...base, ...extra];
   }
 
   function statusCards() {

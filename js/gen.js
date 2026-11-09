@@ -28,6 +28,17 @@ const THEMES = [
 
 const MAP_W = 45, MAP_H = 45;
 
+// What each theme does to the floor. kind: the decal that marks it. n: how many per floor.
+//   puddle: moving steps splash (8 m, 4 m crouched).  grass: a crouched player is half as visible.  glowcap: spore light, you are seen 40% farther.
+//   bell: a tripwire that rings a 14 m alarm once.  ice: you slide.  The Library has no decal: all noise carries 40% farther.
+const THEME_GIMMICK = {
+  'The Sunken Tavern':   { kind: 'puddle',  n: [4, 7] },
+  'The Moonlit Orchard': { kind: 'grass',   n: [9, 13] },
+  'The Mushroom Cellar': { kind: 'glowcap', n: [5, 8] },
+  'The Goblin Market':   { kind: 'bell',    n: [3, 5] },
+  'The Frozen Chapel':   { kind: 'ice',     n: [5, 8] },
+};
+
 // What each room type is furnished with: [kind, min, max] per group.
 //   edge: against a wall. inner: in the room's interior. floor: flat or small decals.
 //   special: lootable props that define the room (always placed).
@@ -434,14 +445,15 @@ function layoutFloor(seed, floorNum, opts) {
     }
   }
 
-  // ---- the Sunken Tavern's gimmick: shallow puddles that splash when you step in them (no collision, flat decals) ----
-  if (opts.themeName === 'The Sunken Tavern') {
-    const wet = rooms.filter(r => !r.locked && r.theme !== 'shop'), taken = new Set();
-    for (let i = 4 + rng.int(0, 3), tries = 0; i > 0 && tries < 80; tries++) {
-      const r = rng.pick(wet), x = rng.int(r.x, r.x + r.w - 1), y = rng.int(r.y, r.y + r.h - 1), k = y * w + x;
+  // ---- each theme's gimmick, as flat floor decals with no collision (the Library's hush is a rule, not a decal) ----
+  const gim = THEME_GIMMICK[opts.themeName];
+  if (gim) {
+    const where = rooms.filter(r => !r.locked && r.theme !== 'shop'), taken = new Set();
+    for (let i = rng.int(gim.n[0], gim.n[1]), tries = 0; i > 0 && tries < 120; tries++) {
+      const r = rng.pick(where), x = rng.int(r.x, r.x + r.w - 1), y = rng.int(r.y, r.y + r.h - 1), k = y * w + x;
       if (at(x, y) !== T_FLOOR || blocked[k] || taken.has(k) || (x === start.x && y === start.y)) continue;
       taken.add(k); i--;
-      decor.push({ kind: 'puddle', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+      decor.push({ kind: gim.kind, x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
     }
   }
 
