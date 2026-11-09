@@ -41,7 +41,7 @@ const HELPERS = () => {
       game.startFloor(1);
       for (const e of game.enemies) e.mesh.parent && e.mesh.parent.remove(e.mesh);
       game.enemies.length = 0;
-      game.inv.hp = game.inv.maxHp; game.cb.stamina = 100; game.cb.atk = null; game.cb.want = false; game.pst.clear();
+      game.inv.hp = game.inv.maxHp; game.cb.stamina = 100; game.cb.atk = null; game.cb.want = false; game.pst.clear(); game.inv.pack = []; game.inv.quick = [null, null, null, null]; game.hunger.v = 100; game.hunger.fight = 0; game.hunger.growlT = 10; game.hunger.starveT = 0; game.cb.eat = null;
       const P = game.player, f = game.floor;
       let best = 0, yaw = 0;
       for (let k = 0; k < 16; k++) {
@@ -355,6 +355,61 @@ const HELPERS = () => {
     });
     check('floors 2-5 mix natives and wolves', /Tavern/.test(mix.theme) && mix.seen.wolf > 0 && mix.seen.goblin > 0 && (mix.seen.cook || 0) + (mix.seen.bandit || 0) + (mix.seen.rat || 0) > 0, JSON.stringify(mix.seen));
     check('every wolf has a goblin handler', mix.issues.length === 0, mix.issues.join(', '));
+
+
+    // ---- hunger and food ----
+    // 17. Eating from a quickslot feeds you and uses the item up; it does nothing at full belly; a hit interrupts it.
+    const eat = await page.evaluate(async () => {
+      const out = {}; T.reset();
+      const give = (kind, n = 1) => { game.inv.add({ type: 'food', kind, n }); const it = game.inv.pack.find(i => i.type === 'food' && i.kind === kind); game.inv.assignQuick(0, it); return it; };
+      game.hunger.v = 40; let it = give('bread');
+      game.inv.use(0); out.started = await T.until(() => !!game.cb.eat, 2000);
+      await T.until(() => !game.cb.eat, 6000);
+      out.fed = game.hunger.v - 40; out.used = !game.inv.pack.includes(it);
+      T.reset(); game.hunger.v = 100; it = give('bread'); game.inv.use(0); await T.sleep(400);
+      out.fullBelly = !game.cb.eat && game.inv.pack.includes(it);
+      T.reset(); game.hunger.v = 40; it = give('stew'); game.inv.use(0); await T.until(() => !!game.cb.eat, 2000);
+      damage(5); out.interrupted = !game.cb.eat && game.hunger.v <= 40 && game.inv.pack.includes(it);
+      T.reset(); game.hunger.v = 40; it = give('stew', 2); game.inv.use(0); await T.until(() => !game.cb.eat, 8000);
+      out.stew = { fed: game.hunger.v - 40, buff: game.inv.buffs.hearty > 0, left: it.n };
+      return out;
+    });
+    check('eating takes time, feeds 25 and uses the bread up', eat.started && Math.abs(eat.fed - 25) < 2 && eat.used, 'fed ' + eat.fed.toFixed(1));
+    check('you cannot eat on a full belly', eat.fullBelly);
+    check('a hit interrupts eating and keeps the food', eat.interrupted);
+    check('stew feeds 45, gives the hearty buff and stacks', Math.abs(eat.stew.fed - 45) < 2 && eat.stew.buff && eat.stew.left === 1, JSON.stringify(eat.stew));
+
+    // 18. The hunger stages bite: slower stamina regen, a lower stamina cap, no sprinting when starving, HP loss that never kills, a growl noise.
+    const stages = await page.evaluate(async () => {
+      const out = {};
+      const regen = async v => { T.reset(); await T.sleep(250); game.hunger.v = v; game.cb.stamina = 10; game.cb.delay = 0; await T.sleep(150); const c0 = game.cb.stamina, s0 = performance.now(); await T.sleep(1500); return (game.cb.stamina - c0) / ((performance.now() - s0) / 1000); };
+      out.fed = await regen(100); out.hungry = await regen(40); out.weak = await regen(15);
+      T.reset(); game.hunger.v = 15; game.cb.stamina = 100; await T.sleep(300); out.weakCap = game.cb.stamina;
+      T.reset(); game.hunger.v = 0; await T.sleep(300); out.starveSprint = game.player.canSprint;
+      T.reset(); game.hunger.v = 0; game.hunger.starveT = 3.9; game.inv.hp = 5; await T.until(() => game.inv.hp < 5, 6000); out.hpLoss = 5 - game.inv.hp;
+      game.inv.hp = 1; game.hunger.starveT = 3.9; await T.sleep(1500); out.floorHp = game.inv.hp;
+      T.reset(); const ear = T.guard(1.6, 'away', false); ear.update = Enemy.prototype.update; game.hunger.v = 100; await T.sleep(1200); out.fedQuiet = ear.aware === 0;
+      game.hunger.v = 40; game.hunger.growlT = 0.01; out.growl = await T.until(() => ear.aware >= 0.5 || ear.state !== 'unaware', 4000);
+      T.reset(); setDev(true); game.hunger.v = 50; await T.sleep(1200); out.devFrozen = game.hunger.v === 50; setDev(false);
+      return out;
+    });
+    check('hunger slows stamina regen', stages.hungry < stages.fed * 0.9 && stages.weak < stages.hungry, `fed ${stages.fed.toFixed(0)}, hungry ${stages.hungry.toFixed(0)}, weak ${stages.weak.toFixed(0)} per s`);
+    check('weak caps max stamina at 85', stages.weakCap <= 85.5, stages.weakCap.toFixed(1));
+    check('starving stops sprinting', stages.starveSprint === false);
+    check('starving costs HP but never below 1', stages.hpLoss >= 1 && stages.floorHp === 1, `lost ${stages.hpLoss}, floor ${stages.floorHp}`);
+    check('a hungry stomach growl is heard 1.6 m away, and a full one is silent', stages.growl && stages.fedQuiet);
+    check('hunger is frozen in dev mode', stages.devFrozen);
+
+    // 19. Food shelves exist, can be searched and hold food.
+    const shelf = await page.evaluate(async () => {
+      for (let n = 1; n <= 4; n++) {
+        game.startFloor(n); await T.sleep(200);
+        const o = propObjs.find(o => o.p.kind === 'pantry' && !o.p.opened);
+        if (o) { T.reset === 0; const before = game.inv.pack.filter(i => i.type === 'food').length; finishSearch(o); return { floor: n, got: game.inv.pack.filter(i => i.type === 'food').reduce((a, i) => a + i.n, 0) - 0 * before, opened: o.p.opened }; }
+      }
+      return null;
+    });
+    check('a food shelf gives food when searched', shelf && shelf.got >= 1 && shelf.opened, JSON.stringify(shelf));
 
     await page.close();
 

@@ -1,11 +1,11 @@
 // Procedural models for lootable props, furniture and locked doors (stand-ins until real art).
 // Local frame: the model's +z faces into the room and its back is at -z, so objects on a room's
 // edge tile are pushed toward the wall and face the interior.
-const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, vaultchest: 0.65 };
+const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
   sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
-const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, vaultchest: 0.85,
+const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
   bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
@@ -85,6 +85,19 @@ function makeProp(p) {
         const b = new THREE.MeshLambertMaterial({ color: c, emissive: c.clone().multiplyScalar(0.35) }); o.mats.push(b);
         C(inner, 0.065, 0.08, 0.2 + rg() * 0.08, b, -0.65 + i * 0.26, 0.48 + row * 0.5, 0.0, 8);
         C(inner, 0.025, 0.025, 0.07, mat(0x8a7a5a), -0.65 + i * 0.26, 0.62 + row * 0.5, 0.0, 6);
+      }
+    }
+  } else if (p.kind === 'pantry') {
+    // food shelf: bread, cheese, apples and hanging sausages
+    B(inner, 1.7, 1.7, 0.45, mat(wood), 0, 0.85, -0.15);
+    for (let row = 0; row < 3; row++) {
+      B(inner, 1.6, 0.05, 0.5, mat(0x2a1c10), 0, 0.35 + row * 0.5, -0.1);
+      for (let i = 0; i < 5; i++) {
+        const pick = Math.floor(rg() * 4), x = -0.6 + i * 0.3, y = 0.46 + row * 0.5;
+        if (pick === 0) B(inner, 0.26, 0.13, 0.16, mat(0xc79a58), x, y, 0, (rg() - 0.5) * 0.4);                 // loaf
+        else if (pick === 1) B(inner, 0.2, 0.12, 0.18, mat(0xf0d060), x, y, 0, (rg() - 0.5) * 0.4);             // cheese
+        else if (pick === 2) { const a = new THREE.Mesh(new THREE.SphereGeometry(0.075, 6, 5), mat(0xc8493a)); a.position.set(x, y + 0.02, 0); inner.add(a); }   // apple
+        else B(inner, 0.05, 0.22, 0.05, mat(0x8a4030), x, y + 0.05, 0.05);                                      // sausage
       }
     }
   } else if (p.kind === 'rubble') {

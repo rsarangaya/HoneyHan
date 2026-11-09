@@ -33,6 +33,8 @@
   #flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(transparent 40%, #c00a 100%); opacity: 0; transition: opacity .35s; }
   #stam { width: 200px; height: 5px; margin: -2px auto 6px; background: #0008; border: 1px solid #fff5; }
   #stamFill { height: 100%; background: #4cc36a; }
+  #hunger { width: 200px; height: 4px; margin: -3px auto 6px; background: #0008; border: 1px solid #fff5; }
+  #hungerFill { height: 100%; width: 100%; background: #d9a441; }
   #hitmark { top: 40%; left: 0; right: 0; text-align: center; font-size: 18px; font-weight: 700; letter-spacing: .06em; opacity: 0; transition: opacity .3s; }
   #overlay { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
   #overlay h1 { margin: 0 0 8px; }
@@ -58,6 +60,7 @@
 <div class="hud" id="stats">
   <div id="hp"><div id="hpFill"></div></div>
   <div id="stam"><div id="stamFill"></div></div>
+  <div id="hunger" title="Hunger"><div id="hungerFill"></div></div>
   <div id="slots"></div>
   <div id="line"></div>
 </div>
@@ -80,6 +83,7 @@
 <script src="lib/three.min.js"></script>
 <script src="js/controls.js"></script>
 <script src="js/status.js"></script>
+<script src="js/hunger.js"></script>
 <script src="js/gen.js"></script>
 <script src="js/player.js"></script>
 <script src="js/loot.js"></script>

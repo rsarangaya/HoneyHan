@@ -37,8 +37,19 @@ const POTIONS = {
   stoneskin: { name: 'Stoneskin Potion', color: '#a8a8b8', weight: 10, desc: 'Take 25% less damage for 30 s.' },
   shadow:    { name: 'Shadow Potion',    color: '#8a5ae8', weight: 8,  desc: 'Guards see half as far and notice you slower for 25 s.' },
 };
-const BUFF_TIME = { vigor: 20, swift: 25, might: 25, stoneskin: 30, shadow: 25 };
+const BUFF_TIME = { vigor: 20, swift: 25, might: 25, stoneskin: 30, shadow: 25, hearty: 30 };
 const POTION_BUFF = { stamina: 'vigor', swift: 'swift', might: 'might', stoneskin: 'stoneskin', shadow: 'shadow' };
+
+// Food feeds the hunger meter (js/hunger.js). It never heals. time: seconds to eat. weight: how common. buff: a timed bonus.
+const FOOD = {
+  bread:  { name: 'Bread',     color: '#d9b57a', feed: 25, time: 1.2, weight: 30, desc: 'A hard loaf. Feeds 25.' },
+  cheese: { name: 'Cheese',    color: '#f0d060', feed: 20, time: 1.0, weight: 20, desc: 'A wedge of sharp cheese. Feeds 20.' },
+  jerky:  { name: 'Dried Meat', color: '#b0604a', feed: 30, time: 1.4, weight: 20, desc: 'Tough and salty. Feeds 30.' },
+  apple:  { name: 'Apple',     color: '#c8493a', feed: 10, time: 0.6, weight: 25, desc: 'Quick to eat. Feeds 10.' },
+  stew:   { name: 'Hot Stew',  color: '#e0883a', feed: 45, time: 2.0, weight: 0, buff: 'hearty', desc: 'A hot meal. Feeds 45 and stamina regenerates 50% faster for 30 s. Rare: cooks and pantries.' },
+};
+// Weighted food kind. stewWeight sets how likely the rare stew is.
+const rollFoodKind = (rng, stewWeight = 0) => { const ks = Object.keys(FOOD); return ks[weighted(rng, ks.map(k => k === 'stew' ? stewWeight : FOOD[k].weight))]; };
 
 // Interaction labels and hold times for everything you can search or use.
 const PROP_INFO = {
@@ -48,6 +59,7 @@ const PROP_INFO = {
   corpse:    { label: 'Loot body',        time: 1.0 },
   rack:      { label: 'Take from rack',   time: 0.8 },
   potions:   { label: 'Take potions',     time: 1.0 },
+  pantry:    { label: 'Take food',        time: 1.0 },
   vaultchest:{ label: 'Open vault chest', time: 1.2 },
   door:      { label: 'Unlock door',      time: 0.6 },
 };
@@ -62,6 +74,7 @@ function makeItem(d) {
     case 'armor':  return { id, type: 'armor', slot: d.slot, cls: d.cls, tier: d.tier };
     case 'potion': return { id, type: 'potion', kind: d.kind, n: d.n || 1 };
     case 'key':    return { id, type: 'key', lock: d.lock, label: d.label };
+    case 'food':   return { id, type: 'food', kind: d.kind, n: d.n || 1 };
   }
 }
 
@@ -69,9 +82,10 @@ function itemName(it) {
   if (it.type === 'weapon') return it.tier === 4 ? LEGENDARY_NAMES[it.base] : `${TIER_ADJ[it.tier]} ${WEAPON_NAMES[it.base]}`;
   if (it.type === 'armor') return `${it.tier === 4 ? 'Ancient' : TIER_ADJ[it.tier]} ${ARMOR_NAMES[it.slot][it.cls]}`;
   if (it.type === 'potion') return POTIONS[it.kind].name;
+  if (it.type === 'food') return FOOD[it.kind].name;
   return it.label;
 }
-const itemColor = it => it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
+const itemColor = it => it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
 const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 
 // Weapon stats with the tier multiplier applied to damage.
@@ -97,6 +111,7 @@ function itemLines(it) {
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
   if (it.type === 'potion') return [POTIONS[it.kind].desc, `You have ${it.n}`];
+  if (it.type === 'food') return [FOOD[it.kind].desc, `Takes ${FOOD[it.kind].time} s to eat. Food feeds you, it does not heal.`, `You have ${it.n}`];
   return ['Opens a locked door on this floor.'];
 }
 
@@ -124,6 +139,7 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
   const out = [];
   const potion = () => ({ type: 'potion', kind: rollPotionKind(rng), n: 1 });
   if (kind === 'corpse') {
+    if (type === 'cook' && rng() < 0.8) { out.push({ type: 'food', kind: rng() < 0.3 ? 'stew' : rollFoodKind(rng), n: 1 }); return out; }   // a cook carries food
     if (type === 'rat') { if (rng() < 0.25 + bonus) out.push({ type: 'gold', n: rng.int(1, 4) }); return out; }   // rats carry next to nothing
     if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
     if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(10, 25) }); return out; }   // the elite always pays
@@ -137,6 +153,7 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
     out.push({ type: 'gold', n: rng.int(10, 25) + floorNum * 4 });
     if (rng() < 0.65) out.push({ type: 'arrows', n: rng.int(4, 8) });
     if (rng() < 0.4) out.push(potion());
+    if (rng() < 0.12) out.push({ type: 'food', kind: rollFoodKind(rng, 1), n: 1 });
     if (rng() < 0.4) out.push(rollEquipment(floorNum, rng));
   } else if (kind === 'vaultchest') {
     out.push({ type: 'gold', n: rng.int(40, 90) + floorNum * 10 });
@@ -144,12 +161,15 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1 }));
   } else if (kind === 'rack') {
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1, kind: rng() < 0.5 ? 'weapon' : 'armor' }));   // armory: weapon or armor, nothing below uncommon
+  } else if (kind === 'pantry') {
+    for (let i = rng() < 0.25 ? 2 : 1; i > 0; i--) out.push({ type: 'food', kind: rollFoodKind(rng, 4), n: 1 });   // a food shelf: usually one meal, sometimes two, and a small chance of stew
   } else if (kind === 'potions') {
     out.push(potion());                                                      // one per shelf; a room has 1 to 3 shelves
   } else {   // barrel, rubble: smaller and less certain, the search time is the cost
     if (rng() < 0.45) out.push({ type: 'arrows', n: rng.int(2, 4) });
     if (rng() < 0.4) out.push({ type: 'gold', n: rng.int(3, 10) });
     if (rng() < 0.2) out.push(potion());
+    if (rng() < (kind === 'barrel' ? 0.07 : 0.03)) out.push({ type: 'food', kind: rollFoodKind(rng), n: 1 });
     if (kind === 'rubble' && rng() < 0.06) out.push(rollEquipment(floorNum, rng, { kind: 'weapon' }));
   }
   return out;
@@ -165,6 +185,7 @@ class Inventory {
     this.quick = [null, null, null, null];                // item ids; the item stays in the pack (or is the old weapon after a swap)
     this.swapT = 0;
     this.buffs = {};                                      // name -> seconds left
+    this.eatReq = null;                                   // food the player wants to eat; main.js starts the eating
     this.refillStamina = false;                           // set by the vigor potion, read by main
   }
 
@@ -183,9 +204,9 @@ class Inventory {
       if (got <= 0) return null;
       this.arrows += got; return `${got} arrows`;
     }
-    if (d.type === 'potion') {
-      const s = this.pack.find(i => i.type === 'potion' && i.kind === d.kind);
-      if (s) { s.n += d.n || 1; return POTIONS[d.kind].name; }
+    if (d.type === 'potion' || d.type === 'food') {                   // these stack
+      const s = this.pack.find(i => i.type === d.type && i.kind === d.kind);
+      if (s) { s.n += d.n || 1; return d.type === 'food' ? FOOD[d.kind].name : POTIONS[d.kind].name; }
     }
     if (this.full()) return null;
     const it = makeItem(d);
@@ -246,6 +267,7 @@ class Inventory {
       return `Equipped ${itemName(it)}`;
     }
     if (it.type === 'potion') return this.drink(it);
+    if (it.type === 'food') { this.eatReq = it; return ''; }
     return '';
   }
 

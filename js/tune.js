@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-6';   // bumped so old saved values don't override the new speed and attack-speed defaults
+  const KEY = 'prototype-test-tune-7';   // bumped so old saved values don't override the new speed and attack-speed defaults
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -10,6 +10,7 @@ const tunePanel = (() => {
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
     ...['cook', 'bandit', 'rat', 'wolf', 'bouncer'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
     ['slow', STATUS.slow, [['dur', 0.5], ['move', 0.05]]],
     ['cripple', STATUS.cripple, [['dur', 0.5], ['move', 0.05], ['bleed', 0.5], ['immune', 0.5]]],
     ['bleed', STATUS.bleed, [['dur', 0.5], ['dps', 0.5]]],
@@ -44,6 +45,9 @@ const tunePanel = (() => {
     mk('Guard: back turned', () => spawnGuard('back'));
     mk('Guard: facing you', () => spawnGuard('front'));
     mk('Guard: alerted', () => spawnGuard('alerted'));
+    mk('Hunger: empty', () => { hunger.v = 0; });
+    mk('Hunger: half', () => { hunger.v = 45; });
+    mk('Hunger: full', () => { hunger.v = 100; });
     mk('Clear guards', clearGuards);
     mk('Refill', () => { inv.hp = inv.maxHp; cb.stamina = STAMINA_MAX; });
     mk('Give gear', () => { const r = makeRng((Math.random() * 4294967296) >>> 0); flash('Got ' + (inv.add(rollEquipment(floorNum, r, { boost: 1 })) || 'nothing (pack full)')); });
@@ -80,6 +84,7 @@ const tunePanel = (() => {
     for (const b of ['dagger', 'sword', 'mace']) opts.push([WEAPON_NAMES[b], t => ({ type: 'weapon', base: b, tier: t })]);
     for (const s of ARMOR_SLOTS) ARMOR_NAMES[s].forEach((n, cls) => opts.push([n, t => ({ type: 'armor', slot: s, cls, tier: t })]));
     for (const k of Object.keys(POTIONS)) opts.push([POTIONS[k].name, () => ({ type: 'potion', kind: k })]);
+    for (const k of Object.keys(FOOD)) opts.push([FOOD[k].name, () => ({ type: 'food', kind: k })]);
     const box = document.createElement('div');
     box.style.cssText = 'padding:6px 8px;display:flex;flex-direction:column;gap:4px;border-top:1px solid #fff3';
     const mkSel = (items) => {

@@ -12,6 +12,7 @@ const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS })', ctx);
 
 const N = parseInt(process.argv[2], 10) || 300;
 let fails = 0, checked = 0;
+const supply = [0, 0, 0, 0, 0], floorsBy = [0, 0, 0, 0, 0];   // hunger points of food lying in props, per floor number
 const fail = (where, msg) => { if (++fails <= 25) console.log(`FAIL ${where}: ${msg}`); };
 
 // Flood fill over walkable tiles. withDoors: locked doors count as open (the player has the key).
@@ -56,11 +57,21 @@ for (let s = 1; s <= N; s++) {
     for (const r of f.rooms.filter(r => r.locked))
       for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++)
         if (closed[at(x, y)]) { fail(where, `locked ${r.theme} reachable without its key`); y = 1e9; break; }
+    if (!f.boss || true) {   // hunger supply: every food item a floor's props would give, in hunger points
+      const L = vm.runInContext('({ rollLoot, makeRng })', ctx), F = vm.runInContext('FOOD', ctx);
+      for (const p of f.props) for (const d of p.fixed ? [] : L.rollLoot(p.kind, n, L.makeRng(p.seed), 0, [])) if (d.type === 'food') supply[n - 1] += F[d.kind].feed * (d.n || 1);
+      floorsBy[n - 1]++;
+    }
+    if (f.props.some(p => p.kind === 'pantry') === false && f.rooms.some(r => r.theme === 'messhall')) fail(where, 'a mess hall without a food shelf');
     if (boss) {
       if (f.enemies.filter(e => e.boss).length !== 1) fail(where, 'boss arena needs exactly one boss');
       if (f.props.filter(p => p.fixed === 'heal').length !== 1) fail(where, 'boss arena needs exactly one healing potion');
     }
   }
 }
+const per = supply.map((v, i) => Math.round(v / floorsBy[i]));
+console.log(`food in props per floor (hunger points, floors 1 to 5): ${per.join(', ')}`);
+// Drain is 100 per 15 minutes. A floor takes roughly 3 to 6 minutes, so 20 to 40 points. Supply should beat that by about 2 to 4 times (cooks drop food too), but not drown it.
+for (let i = 0; i < 4; i++) if (per[i] < 40 || per[i] > 110) fail(`floor ${i + 1}`, `food supply ${per[i]} is outside 40 to 110 per floor`);
 console.log(`${checked} floors checked, ${fails} failures`);
 process.exit(fails ? 1 : 0);

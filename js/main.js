@@ -196,10 +196,11 @@ function mark(text, color = '#fff') {
 }
 
 function startAttack() {
+  if (cb.eat) { cb.eat = null; flash('Stopped eating'); return; }
   const w = wstats();
   if (w.ranged) { flash('The bow is not usable yet'); return; }
   if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
-  spend(w.stam);
+  spend(w.stam); hunger.fight = 3;
   cb.atk = { t: 0, hit: false };
 }
 
@@ -277,22 +278,53 @@ function hitStatuses(e, zone) {
   else if (e.weaponKind === 'dagger') add('bleed');
 }
 
+const HUNGER_MSG = { hungry: 'Your stomach growls. You are hungry.', weak: 'You feel weak with hunger.', starving: 'You are starving! Find food.', fed: 'You feel fed.' };
+function startEat(it) {
+  if (cb.eat || !inv.find(it.id)) return;
+  if (hunger.v >= 97) { flash('You are not hungry.'); return; }
+  cb.eat = { it, t: 0, dur: FOOD[it.kind].time };
+}
+function finishEat() {
+  const it = cb.eat.it, f = FOOD[it.kind]; cb.eat = null;
+  const hearth = decorObjs.some(o => o.kind === 'hearth' && Math.hypot(o.x - player.x, o.z - player.z) < 3.2);   // a lit hearth makes the same meal go further
+  const feed = Math.round(f.feed * (hearth ? 1.25 : 1));
+  hunger.feed(feed);
+  if (f.buff) inv.buffs[f.buff] = BUFF_TIME[f.buff];
+  if (--it.n <= 0) inv.remove(it);
+  flash(`Ate ${f.name}${hearth ? ' by the fire' : ''}. +${feed} food`);
+}
+
 function updateCombat(dt) {
   // gear and potions feed the player and the guards' senses
   player.speedMul = (dev.on ? 5 : 1) * (inv.buffs.swift > 0 ? 1.35 : 1) * pst.moveMul();
   const bleed = pst.update(dt);
   if (bleed > 0 && !dev.on && inv.hp > 1) inv.hp = Math.max(1, inv.hp - bleed);   // bleeding never kills on its own
   if (pst.has('daze')) spend(STATUS.daze.drain * dt);
+  if (!dev.on) {                                    // hunger drains while you play (frozen in dev mode)
+    const r = hunger.update(dt, { sprinting: player.sprinting, still: Math.hypot(player.vx, player.vz) < 0.2, crouching: player.crouching });
+    if (r.growl) loud(r.growl);                     // a stomach growl is a faint noise
+    if (r.hp && inv.hp > 1) inv.hp = Math.max(1, inv.hp - r.hp);   // starving hurts but never kills
+    if (r.stage) { flash(HUNGER_MSG[r.stage]); if (r.stage !== 'fed') discover('item:hunger', 'Hunger'); }
+  }
+  if (inv.eatReq) { startEat(inv.eatReq); inv.eatReq = null; }
+  if (cb.eat) {
+    const ea = cb.eat; ea.t += dt; cb.atk = null; cb.block = false;
+    player.speedMul *= 0.5;                         // you shuffle while eating
+    if ((ea.n = (ea.n || 0) + dt) > 0.6) { ea.n = 0; loud(2); }
+    el('prompt').style.display = 'block'; el('promptText').textContent = `Eating ${FOOD[ea.it.kind].name}... (attack to stop)`; el('barFill').style.width = Math.min(1, ea.t / ea.dur) * 100 + '%';
+    if (!inv.find(ea.it.id)) cb.eat = null; else if (ea.t >= ea.dur) finishEat();
+  }
   player.noiseBonus = inv.armorNoise();
   player.stealthMul = inv.buffs.shadow > 0 ? 0.5 : 1;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
 
   if (player.sprinting) spend(TUNE.sprintDrain * dt);
   else if (cb.delay > 0) cb.delay -= dt;
-  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * dt);
+  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * (inv.buffs.hearty > 0 ? 1.5 : 1) * hunger.regenMul() * dt);
+  cb.stamina = Math.min(cb.stamina, STAMINA_MAX * hunger.maxStaminaMul());   // Weak: max stamina is cut
   if (dev.on) cb.stamina = STAMINA_MAX;
   if (cb.stamina <= 1) cb.canSprint = false; else if (cb.stamina > 25) cb.canSprint = true;
-  player.canSprint = cb.canSprint;
+  player.canSprint = cb.canSprint && hunger.canSprint() && !cb.eat;
 
   if (cb.press) { startAttack(); cb.press = false; }
   if (cb.atk) {
@@ -301,7 +333,7 @@ function updateCombat(dt) {
     if (!cb.atk.hit && cb.atk.t >= w.dur * w.hitAt) { cb.atk.hit = true; playerHit(); }
     if (cb.atk.t >= w.dur) cb.atk = null;
   }
-  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !wstats().ranged && (cb.stamina > 0 || dev.on);
+  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !cb.eat && !wstats().ranged && (cb.stamina > 0 || dev.on);
   if (canBlock) { if (!cb.block) { cb.block = true; cb.blockT = 0; } else cb.blockT += dt; } else cb.block = false;
 
   if (markTimer > 0) { markTimer -= dt; if (markTimer <= 0) document.getElementById('hitmark').style.opacity = 0; }
@@ -355,6 +387,8 @@ function hitReaction(n) {
 }
 function damage(n) {
   hitReaction(n);
+  hunger.fight = 3;
+  if (cb.eat) { cb.eat = null; flash('Interrupted!'); }
   if (dev.on) return;
   inv.hp = Math.max(0, inv.hp - n);
   if (inv.hp <= 0) {
@@ -401,7 +435,7 @@ function updateSearch(dt) {
   } else prompt.style.display = 'none';
 }
 
-const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, door: 5 };   // metres, heard when the search finishes
+const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o) {
   loud(SEARCH_NOISE[o.p.kind] || 0);
   if (o.p.kind === 'door') {
@@ -448,9 +482,11 @@ function updateHud() {
   el('hpFill').style.width = (inv.hp / inv.maxHp * 100) + '%';
   el('stamFill').style.width = (cb.stamina / STAMINA_MAX * 100) + '%';
   el('stamFill').style.background = cb.canSprint ? '#4cc36a' : '#c9a23a';
+  el('hungerFill').style.width = hunger.v + '%';
+  el('hungerFill').style.background = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' }[hunger.stage];
   const slots = inv.quick.map((_, i) => {
     const it = inv.quickItem(i);
-    const name = !it ? '' : it.type === 'potion' ? `${itemName(it)} x${it.n}` : itemName(it);
+    const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : itemName(it);
     const c = it ? itemColor(it) : '#fff5';
     return `<div class="slot" style="border-color:${c}"><i>${i + 1}</i><span style="color:${c}">${name || '&nbsp;'}</span></div>`;
   }).join('');
@@ -458,7 +494,7 @@ function updateHud() {
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
   const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
     .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
-  const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${buffs ? '<br>' + buffs : ''}`;
+  const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
   hudKey = key;
@@ -695,7 +731,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, hunger, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

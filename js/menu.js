@@ -42,6 +42,8 @@ const pauseMenu = (() => {
     out.push(card('item:gold', 'Gold', '#e8c860', ['Money. There is no shop yet, so gold is useless for now.']));
     out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. There is no bow yet, so arrows are useless for now.']));
     out.push(card('item:key', 'Keys', '#e8c860', ['Open a locked room (armory, vault or brewery) on the same floor. Each key hides in a chest. Hold the interact key at the door.']));
+    out.push(card('item:hunger', 'Hunger', '#e0883a', ['Your food meter drains as you play, faster when you sprint or fight. At half you are Hungry (stamina regenerates 20% slower, and a faint stomach growl guards can hear), at a quarter Weak (40% slower, max stamina -15%, louder growl), and at zero Starving (1 HP lost every 4 seconds, never below 1, and no sprinting).', 'Food only feeds you, it does not heal. Eating takes a moment, slows you, and is interrupted if you are hit or attack. Eating beside a lit hearth feeds 25% more.']));
+    for (const k of Object.keys(FOOD)) out.push(card('food:' + k, FOOD[k].name, FOOD[k].color, [FOOD[k].desc, 'Found in chests, barrels and on food shelves in mess halls and storerooms. Cooks carry it. Use it from a quickslot or the Eat button.']));
     for (const k of Object.keys(POTIONS)) out.push(card('potion:' + k, POTIONS[k].name, POTIONS[k].color, [POTIONS[k].desc, 'Found on potion shelves, in chests and barrels, and on monsters.']));
     return out;
   }

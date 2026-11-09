@@ -35,10 +35,10 @@ const MAP_W = 45, MAP_H = 45;
 const ROOM_THEMES = {
   generic:   { edge: [['crates', 0, 2], ['barrels', 0, 2], ['table', 0, 1], ['sacks', 0, 1], ['urn', 0, 2]], inner: [], floor: [['bones', 0, 2], ['rug', 0, 1], ['candles', 0, 1]], props: [1, 3] },
   barracks:  { edge: [['bed', 3, 5], ['weaponrack', 1, 1], ['barrels', 0, 1], ['banner', 1, 2]], inner: [['table', 0, 1]], floor: [['bones', 0, 1], ['rug', 0, 1], ['candles', 0, 1]], props: [1, 2] },
-  messhall:  { edge: [['hearth', 1, 1], ['barrels', 1, 2], ['sacks', 1, 2], ['urn', 0, 2]], inner: [['table', 2, 3]], floor: [['bones', 1, 3], ['candles', 1, 2]], props: [1, 2] },
+  messhall:  { edge: [['hearth', 1, 1], ['barrels', 1, 2], ['sacks', 1, 2], ['urn', 0, 2]], inner: [['table', 2, 3]], floor: [['bones', 1, 3], ['candles', 1, 2]], props: [1, 2], special: [['pantry', 1, 1]] },
   brewery:   { edge: [['cauldron', 1, 1], ['bookshelf', 1, 2], ['barrels', 1, 1]], inner: [], floor: [['rug', 0, 1], ['candles', 1, 2], ['bones', 0, 1]], props: [0, 0], special: [['potions', 1, 3]] },
   library:   { edge: [['bookshelf', 4, 7], ['banner', 0, 1], ['urn', 1, 2]], inner: [['table', 1, 2]], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [1, 2] },
-  storeroom: { edge: [['crates', 2, 4], ['barrels', 2, 3], ['sacks', 1, 2], ['urn', 1, 3]], inner: [['crates', 0, 1]], floor: [['bones', 0, 1]], props: [2, 3] },
+  storeroom: { edge: [['crates', 2, 4], ['barrels', 2, 3], ['sacks', 1, 2], ['urn', 1, 3]], inner: [['crates', 0, 1]], floor: [['bones', 0, 1]], props: [2, 3], special: [['pantry', 0, 1]] },
   shrine:    { edge: [['statue', 1, 3], ['banner', 2, 4], ['urn', 1, 3]], inner: [['altar', 1, 1]], floor: [['rug', 1, 1], ['candles', 2, 4]], props: [1, 2] },
   // locked rooms, opened with a key found elsewhere on the floor
   armory:    { edge: [['banner', 2, 3], ['weaponrack', 1, 1]], inner: [['table', 1, 1]], floor: [['candles', 1, 2], ['rug', 0, 1]], props: [0, 0], special: [['rack', 1, 3]] },
@@ -420,7 +420,7 @@ function layoutFloor(seed, floorNum, opts) {
   // barrel if the floor has too few) ----
   const keyHolders = props.filter(p => {
     const r = rooms.find(r => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h && !r.locked);
-    return r && !r.locked && p.kind !== 'rack' && p.kind !== 'vaultchest' && p.kind !== 'potions';
+    return r && !r.locked && p.kind !== 'rack' && p.kind !== 'vaultchest' && p.kind !== 'potions' && p.kind !== 'pantry';
   });
   rng.shuffle(keyHolders);
   keyHolders.sort((a, b) => (a.kind === 'chest' ? 0 : 1) - (b.kind === 'chest' ? 0 : 1));

@@ -34,8 +34,8 @@ const invUI = (() => {
   let note = '';
 
   const selected = () => !sel ? null : sel.src === 'pack' ? inv.find(sel.id) : inv.equip[sel.slot];
-  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' ? ' x' + it.n : ''}</span>`;
-  const sub = it => it.type === 'weapon' || it.type === 'armor' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : '') : it.type === 'potion' ? 'Potion' : 'Key';
+  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : ''}</span>`;
+  const sub = it => it.type === 'weapon' || it.type === 'armor' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : 'Key';
   const slotBox = (slot, label) => {
     const it = inv.equip[slot];
     const on = sel && sel.src === 'equip' && sel.slot === slot ? ' sel' : '';
@@ -81,7 +81,8 @@ const invUI = (() => {
       if (fromPack) {
         if (it.type === 'weapon' || it.type === 'armor') buttons += btn('equip', 'Equip');
         if (it.type === 'potion') buttons += btn('drink', 'Drink');
-        if (it.type === 'weapon' || it.type === 'potion') buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
+        if (it.type === 'food') buttons += btn('eat', 'Eat');
+        if (it.type === 'weapon' || it.type === 'potion' || it.type === 'food') buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
         if (it.type !== 'key') buttons += btn('drop', 'Drop');
       } else if (it.type === 'armor') buttons += btn('unequip', 'Unequip');
       else buttons += '<span class="dim">Equipped. Equip another from the pack to swap.</span>';
@@ -91,7 +92,7 @@ const invUI = (() => {
     const arm = ['head', 'body', 'legs'].map(z => `${z} ${Math.round(inv.armorRed(z) * 100)}%`).join(', ');
     const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`).join(', ');
     root.innerHTML = `<div class="win">
-      <div class="head"><b>Inventory</b><span>Gold ${inv.gold} · Arrows ${inv.arrows}/${QUIVER_MAX} · Pack ${inv.pack.length}/${PACK_MAX}</span><button data-act="close">Close (${keyName(KEYS.inventory)})</button></div>
+      <div class="head"><b>Inventory</b><span>Gold ${inv.gold} · Food ${Math.round(hunger.v)}% · Arrows ${inv.arrows}/${QUIVER_MAX} · Pack ${inv.pack.length}/${PACK_MAX}</span><button data-act="close">Close (${keyName(KEYS.inventory)})</button></div>
       <div class="cols">
         <div class="eq"><h3>Equipped</h3>${slotBox('weapon', 'Weapon')}${slotBox('helmet', 'Helmet')}${slotBox('chest', 'Chest')}${slotBox('boots', 'Boots')}</div>
         <div><h3>Backpack</h3><div class="grid">${grid}</div></div>
@@ -111,6 +112,7 @@ const invUI = (() => {
     if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' ? 'weapon' : it.slot }; }
     else if (a === 'unequip') { if (inv.unequip(sel.slot)) sel = null; else note = 'Pack is full.'; }
     else if (a === 'drink') { note = inv.drink(it); if (!inv.find(it.id)) sel = null; }
+    else if (a === 'eat') { inv.eatReq = it; sel = null; return close(); }
     else if (a === 'drop') { inv.remove(it); sel = null; }
     else if (/^q\d$/.test(a)) inv.assignQuick(+a[1], it);
   }

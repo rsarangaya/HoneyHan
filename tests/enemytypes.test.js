@@ -48,16 +48,18 @@ pct.forEach((p, i) => { const want = [30, 45, 60, 70, 50][i]; if (Math.abs(p - w
 
 // loot per type
 const rng = seed => L.makeRng(seed);
-let ratDrops = 0, banditGold = 0, wolfDrops = 0, bouncerItems = 0;
+let cookFood = 0, ratDrops = 0, banditGold = 0, wolfDrops = 0, bouncerItems = 0;
 for (let i = 1; i <= 400; i++) {
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'rat').length) ratDrops++;
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'bandit').some(d => d.type === 'gold')) banditGold++;
+  if (L.rollLoot('corpse', 2, rng(i), 0, [], 'cook').some(d => d.type === 'food')) cookFood++;
   wolfDrops += L.rollLoot('corpse', 2, rng(i), 0, [], 'wolf').length;
   const b = L.rollLoot('corpse', 3, rng(i), 0, [], 'bouncer'); if (b.some(d => d.type === 'weapon' || d.type === 'armor') && b.some(d => d.type === 'gold')) bouncerItems++;
 }
 n++;
 if (ratDrops > 160) fail('rat loot', `${ratDrops}/400 rats dropped something`);
 if (banditGold < 300) fail('bandit loot', `${banditGold}/400 bandits had gold`);
+if (cookFood < 270) fail('cook loot', `${cookFood}/400 cooks carried food`);
 if (wolfDrops) fail('wolf loot', 'wolves should drop nothing');
 if (bouncerItems !== 400) fail('bouncer loot', `${bouncerItems}/400 had equipment and gold`);
 console.log(`${n} checks, ${fails} failures`);
