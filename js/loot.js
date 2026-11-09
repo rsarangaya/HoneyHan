@@ -74,6 +74,7 @@ function makeItem(d) {
     case 'armor':  return { id, type: 'armor', slot: d.slot, cls: d.cls, tier: d.tier };
     case 'potion': return { id, type: 'potion', kind: d.kind, n: d.n || 1 };
     case 'key':    return { id, type: 'key', lock: d.lock, label: d.label };
+    case 'shield': return { id, type: 'shield', slot: 'offhand', tier: d.tier };
     case 'food':   return { id, type: 'food', kind: d.kind, n: d.n || 1 };
   }
 }
@@ -81,6 +82,7 @@ function makeItem(d) {
 function itemName(it) {
   if (it.type === 'weapon') return it.tier === 4 ? LEGENDARY_NAMES[it.base] : `${TIER_ADJ[it.tier]} ${WEAPON_NAMES[it.base]}`;
   if (it.type === 'armor') return `${it.tier === 4 ? 'Ancient' : TIER_ADJ[it.tier]} ${ARMOR_NAMES[it.slot][it.cls]}`;
+  if (it.type === 'shield') return it.tier === 4 ? 'Aegis of Dawn' : `${TIER_ADJ[it.tier]} Shield`;
   if (it.type === 'potion') return POTIONS[it.kind].name;
   if (it.type === 'food') return FOOD[it.kind].name;
   return it.label;
@@ -91,7 +93,7 @@ const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
   const b = WSTATS[it.base];
-  return b.ranged ? b : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
+  return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
 }
 const armorStats = it => ({ red: Math.min(0.6, ARMOR_RED[it.cls] * TIERS[it.tier].mul), noise: ARMOR_NOISE[it.cls] });
 
@@ -99,7 +101,7 @@ const armorStats = it => ({ red: Math.min(0.6, ARMOR_RED[it.cls] * TIERS[it.tier
 function itemLines(it) {
   if (it.type === 'weapon') {
     const s = weaponStats(it);
-    if (s.ranged) return ['Ranged. Not usable yet.'];
+    if (s.ranged) return [`Damage ${s.dmg.toFixed(1)} at a full draw (a body hit, about 65% of a sword)`, `Hold attack to draw, release to fire. Full draw ${s.draw} s, and you move slowly while drawing`, `Uses an arrow per shot. Stamina ${s.stam}, noise ${s.noise} m`, `Sneak shot x${s.sneak}, headshots hit hard, leg hits slow`, 'Right click while drawing cancels. A shield is stowed while the bow is out.'];
     return [`Damage ${s.dmg.toFixed(1)}`, `Attack speed x${s.atkSpd.toFixed(2)} (swing ${s.dur.toFixed(2)} s), reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
       s.sneak >= 99 ? 'Sneak attack: instant kill' : `Sneak attack x${s.sneak}`,
       s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block']
@@ -110,6 +112,7 @@ function itemLines(it) {
     return [`Cuts ${Math.round(a.red * 100)}% of damage to the ${ARMOR_ZONE[it.slot]}`,
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
+  if (it.type === 'shield') return [`Block costs ${Math.round(SHIELD.cost / TIERS[it.tier].mul)} stamina (less at higher tiers)`, `Parry window ${SHIELD.parryWin} s`, `Covers leg sweeps: only ${Math.round(SHIELD.legsTake * 100)}% of the hit gets through and no slow`, `Bash: attack while blocking. Stuns for ${SHIELD.bashStun} s and shoves, ${SHIELD.bashStam} stamina`, 'Lets a dagger block properly. Stowed while a bow is out.'];
   if (it.type === 'potion') return [POTIONS[it.kind].desc, `You have ${it.n}`];
   if (it.type === 'food') return [FOOD[it.kind].desc, `Takes ${FOOD[it.kind].time} s to eat. Food feeds you, it does not heal.`, `You have ${it.n}`];
   return ['Opens a locked door on this floor.'];
@@ -129,7 +132,10 @@ function rollTier(floorNum, rng, boost = 0) {
 const rollPotionKind = rng => Object.keys(POTIONS)[weighted(rng, Object.values(POTIONS).map(p => p.weight))];
 function rollEquipment(floorNum, rng, { boost = 0, minTier = 0, kind } = {}) {
   const tier = Math.max(minTier, rollTier(floorNum, rng, boost));
-  if (kind === 'weapon' || (!kind && rng() < 0.35)) return { type: 'weapon', base: rng.pick(['dagger', 'sword', 'mace']), tier };
+  if (kind === 'weapon' || (!kind && rng() < 0.35)) {
+    if (rng() < 0.2) return { type: 'shield', tier };                                       // shields come with the weapons
+    return { type: 'weapon', base: rng.pick(['dagger', 'sword', 'mace', 'bow']), tier };
+  }
   return { type: 'armor', slot: rng.pick(ARMOR_SLOTS), cls: weighted(rng, [50, 35, 15]), tier };
 }
 
@@ -181,7 +187,7 @@ class Inventory {
     this.hp = 100; this.maxHp = 100;
     this.gold = 0; this.arrows = 0;
     this.pack = [];                                       // items, up to PACK_MAX
-    this.equip = { weapon: makeItem({ type: 'weapon', base: 'sword', tier: 0 }), helmet: null, chest: null, boots: null };
+    this.equip = { weapon: makeItem({ type: 'weapon', base: 'sword', tier: 0 }), helmet: null, chest: null, boots: null, offhand: null };
     this.quick = [null, null, null, null];                // item ids; the item stays in the pack (or is the old weapon after a swap)
     this.swapT = 0;
     this.buffs = {};                                      // name -> seconds left

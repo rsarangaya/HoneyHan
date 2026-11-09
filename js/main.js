@@ -182,7 +182,7 @@ function setDev(on) {
 }
 
 // ---- combat: stamina, melee attacks, block and parry (numbers live in combat.js) ----
-const cb = { stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
+const cb = { draw: null, bashCd: 0, bash: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
@@ -198,7 +198,8 @@ function mark(text, color = '#fff') {
 function startAttack() {
   if (cb.eat) { cb.eat = null; flash('Stopped eating'); return; }
   const w = wstats();
-  if (w.ranged) { flash('The bow is not usable yet'); return; }
+  if (w.ranged) return startDraw(w);
+  if (cb.block && shield()) return bash();            // a shield bash: attack while blocking
   if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
   spend(w.stam); hunger.fight = 3;
   cb.atk = { t: 0, hit: false };
@@ -209,18 +210,88 @@ function playerHit() {
   const t = findMeleeTarget(player, eyeY(), enemies, floor, w.reach);
   if (!t) { loud(2); return; }                    // swung at nothing
   if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
-  const e = t.e;
+  dealHit(t.e, t.zone, w.dmg, w, w.noise);
+}
+
+// Damage the player deals with a melee swing or an arrow. base: the weapon's damage (already scaled by tier and
+// draw). noise: metres heard at once (a bow's noise is made when it is loosed and when the arrow lands instead).
+function dealHit(e, zone, base, w, noise) {
   const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you (or smelling you); the boss cannot be sneak-killed
-  const dmg = w.dmg * Math.min(TUNE.damageCap, ZONE_MUL[t.zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1)
-    * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[t.zone] || 1);
+  const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1)
+    * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1);
   const killed = e.hurt(dmg, player);
-  loud(sneak && killed ? 2 : w.noise);            // a clean kill is nearly silent
+  if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); }
   else {
-    const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples
-    const proc = pr && pr.zone === t.zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
+    const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples, bow slows
+    const proc = pr && pr.zone === zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
     if (proc) discover('status:' + pr.status, STATUS[pr.status].name);
-    mark(`${t.zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, t.zone === 'head' ? '#ff9a3a' : '#fff');
+    mark(`${zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, zone === 'head' ? '#ff9a3a' : '#fff');
+  }
+}
+
+// ---- shield: blocks properly (even with a dagger), covers leg sweeps, and bashes ----
+const shield = () => inv.equip.offhand && !wstats().ranged ? inv.equip.offhand : null;   // stowed while the bow is out
+function blockStats() {
+  const w = wstats(), sh = shield();
+  if (!sh) return { parryWin: w.parryWin, cost: w.blockCost, legs: false };
+  return { parryWin: Math.max(w.parryWin, SHIELD.parryWin), cost: SHIELD.cost / TIERS[sh.tier].mul, legs: true };
+}
+function bash() {
+  if (cb.bashCd > 0 || cb.eat || (cb.stamina < SHIELD.bashStam && !dev.on)) return;
+  spend(SHIELD.bashStam); cb.bashCd = SHIELD.bashCd; cb.bash = 0.25; loud(SHIELD.noise);
+  const t = findMeleeTarget(player, eyeY(), enemies, floor, SHIELD.bashReach);
+  if (!t) return;
+  const e = t.e, sh = inv.equip.offhand;
+  const killed = e.hurt(SHIELD.bashDmg * TIERS[sh.tier].mul, player);
+  if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); mark('KILLED', '#ffd23a'); return; }
+  const stunned = e.addStatus('stun', SHIELD.bashStun);
+  if (stunned) discover('status:stun', 'Stun');
+  const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;       // shove it back if there is room
+  if (!e.boss && !Player.wallHit(floor, e.x + dx / d * SHIELD.bashPush, e.z + dz / d * SHIELD.bashPush, e.r)) { e.x += dx / d * SHIELD.bashPush; e.z += dz / d * SHIELD.bashPush; }
+  mark(stunned ? 'BASH +STUN' : 'BASH', '#7fe8ff');
+}
+
+// ---- bow: hold attack to draw, release to fire. One arrow per shot, found arrows can be picked up again ----
+const arrows = [];          // flying and stuck arrows
+function startDraw(w) {
+  if (cb.draw || inv.swapT > 0 || pst.has('stun') || cb.eat) return;
+  if (inv.arrows <= 0 && !dev.on) { flash('No arrows'); return; }
+  if (cb.stamina < w.stam && !dev.on) return;
+  spend(w.stam); hunger.fight = 3;
+  cb.draw = { t: 0 };
+}
+function fireArrow(frac) {
+  const w = wstats();
+  const cp = Math.cos(player.pitch), dx = -Math.sin(player.yaw) * cp, dy = Math.sin(player.pitch), dz = -Math.cos(player.yaw) * cp;
+  const sp = BOW.speedMin + (BOW.speedMax - BOW.speedMin) * frac;
+  const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * sp, vy: dy * sp, vz: dz * sp, dmg: w.dmg * (0.4 + 0.6 * frac), owner: 'player', stuck: false, w, mesh: makeArrowMesh() };
+  a.mesh.position.set(a.x, a.y, a.z); a.mesh.lookAt(a.x + dx, a.y + dy, a.z + dz);
+  group.add(a.mesh); arrows.push(a);
+  if (!dev.on) inv.arrows--;
+  loud(w.noise);
+}
+function stickArrow(a, hitEnemy) {
+  a.stuck = true; a.vx = a.vy = a.vz = 0;
+  const keep = Math.random() < (hitEnemy ? BOW.recoverHit : BOW.recoverWorld) && arrows.filter(q => q.stuck).length <= BOW.maxStuck;
+  if (!keep) { group.remove(a.mesh); arrows.splice(arrows.indexOf(a), 1); return; }
+  if (!hitEnemy && a.px !== undefined) { a.x = a.px; a.z = a.pz; }                     // lie in front of the wall, not inside it
+  a.y = 0.05; a.mesh.position.set(a.x, 0.05, a.z); a.mesh.rotation.set(0, Math.atan2(a.dirx || 0, a.dirz || 1), 0);
+}
+function updateArrows(dt) {
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    if (a.stuck) {
+      if (Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
+      continue;
+    }
+    const sp = Math.hypot(a.vx, a.vz) || 1; a.dirx = a.vx / sp; a.dirz = a.vz / sp;
+    const ev = stepArrow(a, dt, floor, enemies, player);
+    a.mesh.position.set(a.x, a.y, a.z); a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+    if (!ev) continue;
+    pending.push({ x: a.x, z: a.z, r: BOW.impactNoise });                              // an arrow hitting something is heard
+    if (ev.type === 'hit') { dealHit(ev.e, ev.zone, a.dmg, a.w, 0); stickArrow(a, true); }
+    else stickArrow(a, false);
   }
 }
 
@@ -256,13 +327,19 @@ function resolveEnemyAttack(e, zone) {
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
   const facing = (dx * fx + dz * fz) / d > 0.2;
   const full = TUNE.enemyDmg * e.dmgMul * ZONE_MUL[zone] * (1 - inv.armorRed(zone));   // armor in that zone's slot cuts it
+  const bs = blockStats();
   if (cb.block && facing && !w.ranged) {
-    if (zone === 'legs') mark('LEG SWEEP', '#ff6a4a');           // goes under the block
-    else if (cb.blockT <= w.parryWin) {
+    if (zone === 'legs' && !bs.legs) mark('LEG SWEEP', '#ff6a4a');           // goes under a plain block
+    else if (zone === 'legs') {                                              // a shield covers most of a low sweep
+      const c = bs.cost * SHIELD.legsCost;
+      if (cb.stamina >= c || dev.on) { spend(c); mark('LOW BLOCK', '#cfe'); loud(5); cb.atk = null; damage(full * SHIELD.legsTake); return; }
+      cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
+    }
+    else if (cb.blockT <= bs.parryWin) {
       e.stun = 1.0; e.winding = false; e.atkCd = 0.6;
       mark('PARRY', '#7fe8ff'); loud(5); return;
-    } else if (w.blockCost > 0) {
-      if (cb.stamina >= w.blockCost || dev.on) { spend(w.blockCost); mark('BLOCKED', '#cfe'); loud(5); return; }
+    } else if (bs.cost > 0) {
+      if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); mark('BLOCKED', '#cfe'); loud(5); return; }
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
   }
@@ -326,7 +403,22 @@ function updateCombat(dt) {
   if (cb.stamina <= 1) cb.canSprint = false; else if (cb.stamina > 25) cb.canSprint = true;
   player.canSprint = cb.canSprint && hunger.canSprint() && !cb.eat;
 
+  if (cb.bashCd > 0) cb.bashCd -= dt;
+  if (cb.bash > 0) cb.bash -= dt;
   if (cb.press) { startAttack(); cb.press = false; }
+  if (cb.draw) {                                    // drawing the bow: slow, release to fire, block cancels
+    const w = wstats();
+    cb.draw.t += dt; player.speedMul *= 0.4;
+    if (!w.ranged || inv.swapT > 0 || cb.eat || pst.has('stun') || cb.want) cb.draw = null;
+    else if (!player.keys[KEYS.attack]) {
+      const frac = Math.min(1, cb.draw.t / w.draw);
+      if (frac >= BOW.minDraw) fireArrow(frac);
+      cb.draw = null;
+    } else {
+      const frac = Math.min(1, cb.draw.t / w.draw);
+      el('prompt').style.display = 'block'; el('promptText').textContent = frac >= 1 ? 'Release to fire' : 'Drawing...'; el('barFill').style.width = frac * 100 + '%';
+    }
+  }
   if (cb.atk) {
     const w = wstats();
     cb.atk.t += dt;
@@ -351,14 +443,38 @@ function freeAhead() {
 }
 
 // first-person weapon: rest, swing, block and swap poses
-const vm = { id: null, group: new THREE.Group(), model: null };
-camera.add(vm.group);
+const vm = { id: null, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null };
+camera.add(vm.group); camera.add(vm.shield);
+function buildShieldModel(it) {
+  const g = new THREE.Group(), c = new THREE.Color(TIERS[it.tier].color);
+  const add = (w, h, d, col, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: col })); b.position.set(x, y, z); g.add(b); };
+  add(0.42, 0.56, 0.05, 0x5a3a20, 0, 0, 0);                                    // wooden board
+  add(0.36, 0.5, 0.02, c.getHex(), 0, 0, -0.03);                                // tier-coloured face
+  add(0.1, 0.1, 0.06, 0xb8bcc4, 0, 0, -0.05);                                   // boss
+  add(0.42, 0.04, 0.06, 0xb8bcc4, 0, 0.27, -0.02); add(0.42, 0.04, 0.06, 0xb8bcc4, 0, -0.27, -0.02);   // rims
+  return g;
+}
 function updateViewmodel(dt) {
   if (vm.id !== inv.weapon) {
     if (vm.model) vm.group.remove(vm.model);
     vm.model = buildWeaponModel(inv.weapon); vm.group.add(vm.model); vm.id = inv.weapon;
   }
+  const sh = shield();                                     // the off-hand shield, raised while blocking, thrust forward on a bash
+  if ((sh && sh.id) !== vm.shieldId) {
+    while (vm.shield.children.length) vm.shield.remove(vm.shield.children[0]);
+    if (sh) vm.shield.add(buildShieldModel(sh));
+    vm.shieldId = sh && sh.id;
+  }
+  vm.shield.visible = !!sh;
+  if (sh) {
+    const bashK = cb.bash > 0 ? Math.sin((1 - cb.bash / 0.25) * Math.PI) : 0;
+    const tx = cb.block ? -0.1 : -0.42, ty = cb.block ? -0.2 : -0.4, tz = (cb.block ? -0.62 : -0.68) - 0.3 * bashK;
+    const k2 = 1 - Math.exp(-16 * dt), sp = vm.shield.position;
+    sp.x += (tx - sp.x) * k2; sp.y += (ty - sp.y) * k2; sp.z += (tz - sp.z) * k2;
+    vm.shield.rotation.y += ((cb.block ? 0.05 : 0.4) - vm.shield.rotation.y) * k2;
+  }
   let x = 0.38, y = -0.5, z = -0.7, rx = -0.15, rz = 0.15;
+  if (cb.draw) { const f = Math.min(1, cb.draw.t / wstats().draw); x = 0.2; y = -0.38; z = -0.8 + 0.18 * f; rx = 0.05; rz = 0.02; }   // the bow is raised and the string drawn back
   if (cb.block) { x = 0.05; y = -0.36; z = -0.62; rx = -0.05; rz = 0; }
   if (inv.swapT > 0) y -= 0.5 * Math.sin(inv.swapT / SWAP_TIME * Math.PI);
   let k = 1 - Math.exp(-16 * dt);
@@ -494,7 +610,7 @@ function updateHud() {
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
   const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
     .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
-  const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
+  const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
   hudKey = key;
@@ -521,6 +637,8 @@ function startFloor(n) {
   player.props = propObjs;
   player.mobs = enemies;
   search = null;
+  arrows.length = 0;                                  // the old floor's group (and its arrows) is gone
+  cb.draw = null;
   player.place(floor);
   baseGuards = floor.enemies.length;
   respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
@@ -693,6 +811,7 @@ function frame(now) {
     updateSearch(dt);
     updateCombat(dt);
     updateRespawn(dt);
+    updateArrows(dt);
     updateDoors(dt);
     const events = pending.splice(0);              // noises guards made last frame
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
@@ -724,14 +843,14 @@ function frame(now) {
   updateTorches(now);
   drawMinimap();
   updateHud();
-  renderer.render(scene, camera);
+  if (!params.has('norender')) renderer.render(scene, camera);   // ?norender=1: tests skip the (software) drawing and keep all the game logic
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, hunger, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, hunger, arrows, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

@@ -54,7 +54,7 @@ for (let i = 1; i <= 400; i++) {
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'bandit').some(d => d.type === 'gold')) banditGold++;
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'cook').some(d => d.type === 'food')) cookFood++;
   wolfDrops += L.rollLoot('corpse', 2, rng(i), 0, [], 'wolf').length;
-  const b = L.rollLoot('corpse', 3, rng(i), 0, [], 'bouncer'); if (b.some(d => d.type === 'weapon' || d.type === 'armor') && b.some(d => d.type === 'gold')) bouncerItems++;
+  const b = L.rollLoot('corpse', 3, rng(i), 0, [], 'bouncer'); if (b.some(d => ['weapon', 'armor', 'shield'].includes(d.type)) && b.some(d => d.type === 'gold')) bouncerItems++;
 }
 n++;
 if (ratDrops > 160) fail('rat loot', `${ratDrops}/400 rats dropped something`);

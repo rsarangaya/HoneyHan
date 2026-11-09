@@ -40,7 +40,7 @@ const pauseMenu = (() => {
   function itemCards() {
     const out = [];
     out.push(card('item:gold', 'Gold', '#e8c860', ['Money. There is no shop yet, so gold is useless for now.']));
-    out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. There is no bow yet, so arrows are useless for now.']));
+    out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. One per shot, up to 25 in the quiver. Arrows that miss often lie where they landed: walk over one to pick it up again.']));
     out.push(card('item:key', 'Keys', '#e8c860', ['Open a locked room (armory, vault or brewery) on the same floor. Each key hides in a chest. Hold the interact key at the door.']));
     out.push(card('item:hunger', 'Hunger', '#e0883a', ['Your food meter drains as you play, faster when you sprint or fight. At half you are Hungry (stamina regenerates 20% slower, and a faint stomach growl guards can hear), at a quarter Weak (40% slower, max stamina -15%, louder growl), and at zero Starving (1 HP lost every 4 seconds, never below 1, and no sprinting).', 'Food only feeds you, it does not heal. Eating takes a moment, slows you, and is interrupted if you are hit or attack. Eating beside a lit hearth feeds 25% more.']));
     for (const k of Object.keys(FOOD)) out.push(card('food:' + k, FOOD[k].name, FOOD[k].color, [FOOD[k].desc, 'Found in chests, barrels and on food shelves in mess halls and storerooms. Cooks carry it. Use it from a quickslot or the Eat button.']));
@@ -48,7 +48,8 @@ const pauseMenu = (() => {
     return out;
   }
   function equipCards() {
-    const weapons = ['dagger', 'sword', 'mace'].map(b => card('weapon:' + b, WEAPON_NAMES[b], '#c8c8c8', itemLines({ type: 'weapon', base: b, tier: 0 }).concat('Stats shown at Common tier.')));
+    const weapons = ['dagger', 'sword', 'mace', 'bow'].map(b => card('weapon:' + b, WEAPON_NAMES[b], '#c8c8c8', itemLines({ type: 'weapon', base: b, tier: 0 }).concat('Stats shown at Common tier.')));
+    weapons.push(card('equip:shield', 'Shield', '#c8c8c8', itemLines({ type: 'shield', tier: 0 }).concat('Stats shown at Common tier.')));
     const armor = [];
     for (const s of ARMOR_SLOTS) ARMOR_NAMES[s].forEach((n, cls) => armor.push(card(`armor:${s}:${cls}`, n, '#c8c8c8', itemLines({ type: 'armor', slot: s, cls, tier: 0 }).concat('Stats shown at Common tier.'))));
     const tiers = TIERS.map((t, i) => card('tier:' + i, `${t.name} tier`, t.color, [`Multiplies weapon damage and armor protection by x${t.mul}.`, i === 4 ? 'Legendary weapons have their own names.' : 'Higher tiers drop deeper in the dungeon, from vaults and armories, and from bosses.']));

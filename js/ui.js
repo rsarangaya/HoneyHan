@@ -35,7 +35,7 @@ const invUI = (() => {
 
   const selected = () => !sel ? null : sel.src === 'pack' ? inv.find(sel.id) : inv.equip[sel.slot];
   const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : ''}</span>`;
-  const sub = it => it.type === 'weapon' || it.type === 'armor' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : 'Key';
+  const sub = it => it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : 'Key';
   const slotBox = (slot, label) => {
     const it = inv.equip[slot];
     const on = sel && sel.src === 'equip' && sel.slot === slot ? ' sel' : '';
@@ -46,7 +46,7 @@ const invUI = (() => {
   function compare(it) {
     if (it.type === 'weapon') {
       const a = weaponStats(it), b = weaponStats(inv.equip.weapon);
-      if (a.ranged || b.ranged) return '';
+      if (a.ranged || b.ranged) return a.ranged && b.ranged ? `vs equipped: damage ${a.dmg - b.dmg >= 0 ? '+' : ''}${(a.dmg - b.dmg).toFixed(1)}` : 'A bow is a different style: slow, ranged, uses arrows.';
       const d = a.dmg - b.dmg;
       return `vs equipped: damage ${d >= 0 ? '+' : ''}${d.toFixed(1)}, swing ${a.dur >= b.dur ? '+' : ''}${(a.dur - b.dur).toFixed(2)} s`;
     }
@@ -79,12 +79,12 @@ const invUI = (() => {
       const btn = (act, label) => `<button data-act="${act}">${label}</button>`;
       let buttons = '';
       if (fromPack) {
-        if (it.type === 'weapon' || it.type === 'armor') buttons += btn('equip', 'Equip');
+        if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield') buttons += btn('equip', 'Equip');
         if (it.type === 'potion') buttons += btn('drink', 'Drink');
         if (it.type === 'food') buttons += btn('eat', 'Eat');
         if (it.type === 'weapon' || it.type === 'potion' || it.type === 'food') buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
         if (it.type !== 'key') buttons += btn('drop', 'Drop');
-      } else if (it.type === 'armor') buttons += btn('unequip', 'Unequip');
+      } else if (it.type === 'armor' || it.type === 'shield') buttons += btn('unequip', 'Unequip');
       else buttons += '<span class="dim">Equipped. Equip another from the pack to swap.</span>';
       detail = `<div class="nm">${nameHtml(it)}</div><div class="dim">${sub(it)}${fromPack ? '' : ' · equipped'}</div>
         <ul>${lines}</ul>${fromPack && compare(it) ? `<div class="cmp">${compare(it)}</div>` : ''}${buttons}`;
@@ -94,7 +94,7 @@ const invUI = (() => {
     root.innerHTML = `<div class="win">
       <div class="head"><b>Inventory</b><span>Gold ${inv.gold} · Food ${Math.round(hunger.v)}% · Arrows ${inv.arrows}/${QUIVER_MAX} · Pack ${inv.pack.length}/${PACK_MAX}</span><button data-act="close">Close (${keyName(KEYS.inventory)})</button></div>
       <div class="cols">
-        <div class="eq"><h3>Equipped</h3>${slotBox('weapon', 'Weapon')}${slotBox('helmet', 'Helmet')}${slotBox('chest', 'Chest')}${slotBox('boots', 'Boots')}</div>
+        <div class="eq"><h3>Equipped</h3>${slotBox('weapon', 'Weapon')}${slotBox('offhand', 'Off-hand')}${slotBox('helmet', 'Helmet')}${slotBox('chest', 'Chest')}${slotBox('boots', 'Boots')}</div>
         <div><h3>Backpack</h3><div class="grid">${grid}</div></div>
         <div><h3>Details</h3><div class="detail">${detail}</div></div>
       </div>

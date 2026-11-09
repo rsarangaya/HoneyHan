@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-7';   // bumped so old saved values don't override the new speed and attack-speed defaults
+  const KEY = 'prototype-test-tune-8';   // bumped so old saved values don't override the new speed and attack-speed defaults
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -17,6 +17,9 @@ const tunePanel = (() => {
     ['stun', STATUS.stun, [['dur', 0.1], ['immune', 0.5]]],
     ['daze', STATUS.daze, [['dur', 0.5], ['drain', 1]]],
     ...['sword', 'dagger', 'mace'].map(w => [w, WSTATS[w], WEAPON_FIELDS]),
+    ['bow', WSTATS.bow, [['dmg', 1], ['draw', 0.05], ['stam', 1], ['noise', 1], ['sneak', 0.5]]],
+    ['arrows', BOW, [['speedMin', 1], ['speedMax', 1], ['gravity', 0.5], ['minDraw', 0.05], ['recoverWorld', 0.05], ['recoverHit', 0.05], ['impactNoise', 1]]],
+    ['shield', SHIELD, [['cost', 1], ['parryWin', 0.05], ['legsTake', 0.05], ['legsCost', 0.05], ['bashStam', 1], ['bashCd', 0.1], ['bashStun', 0.1], ['bashDmg', 1], ['bashReach', 0.1], ['bashPush', 0.1]]],
   ];
   const defaults = JSON.stringify(sections.map(s => ({ ...s[1] })));
 
@@ -51,6 +54,7 @@ const tunePanel = (() => {
     mk('Clear guards', clearGuards);
     mk('Refill', () => { inv.hp = inv.maxHp; cb.stamina = STAMINA_MAX; });
     mk('Give gear', () => { const r = makeRng((Math.random() * 4294967296) >>> 0); flash('Got ' + (inv.add(rollEquipment(floorNum, r, { boost: 1 })) || 'nothing (pack full)')); });
+    mk('Give arrows', () => { inv.arrows = QUIVER_MAX; });
     mk('Give potions', () => { Object.keys(POTIONS).forEach(k => inv.add({ type: 'potion', kind: k, n: 1 })); });
     mk('Give keys', () => { floor.doors.forEach(d => { if (!inv.has('key', d.lock)) inv.add({ type: 'key', lock: d.lock, label: d.keyLabel }); }); });
     mk('Spawn guard now', () => { respawnT = 0; });
@@ -81,7 +85,8 @@ const tunePanel = (() => {
   // Item spawner: pick any weapon, armor piece or potion, a tier, a count, and drop it in the pack.
   function spawnBox() {
     const opts = [];   // [label, descriptor builder taking (tier)]
-    for (const b of ['dagger', 'sword', 'mace']) opts.push([WEAPON_NAMES[b], t => ({ type: 'weapon', base: b, tier: t })]);
+    for (const b of ['dagger', 'sword', 'mace', 'bow']) opts.push([WEAPON_NAMES[b], t => ({ type: 'weapon', base: b, tier: t })]);
+    opts.push(['Shield', t => ({ type: 'shield', tier: t })]);
     for (const s of ARMOR_SLOTS) ARMOR_NAMES[s].forEach((n, cls) => opts.push([n, t => ({ type: 'armor', slot: s, cls, tier: t })]));
     for (const k of Object.keys(POTIONS)) opts.push([POTIONS[k].name, () => ({ type: 'potion', kind: k })]);
     for (const k of Object.keys(FOOD)) opts.push([FOOD[k].name, () => ({ type: 'food', kind: k })]);
