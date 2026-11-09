@@ -62,6 +62,7 @@ const PROP_INFO = {
   pantry:    { label: 'Take food',        time: 1.0 },
   vaultchest:{ label: 'Open vault chest', time: 1.2 },
   door:      { label: 'Unlock door',      time: 0.6 },
+  merchant:  { label: 'Trade with the merchant', time: 0.35 },
 };
 
 // ---- item construction and display ----

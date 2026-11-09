@@ -3,7 +3,7 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
   bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
@@ -155,6 +155,17 @@ function makeDecor(d) {
       B(inner, 0.1, 0.75, 1.1, wood, -1.0, 0.45, 0);                                                 // headboard
       B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, 0.5); B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, -0.5);
       if (rg() < 0.5) B(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
+      break;
+    }
+    case 'counter': {                                              // the merchant's counter: planks, coins, scales and a lantern
+      B(inner, 2.0, 0.95, 0.75, wood, 0, 0.475, 0);
+      B(inner, 2.1, 0.08, 0.85, wood2, 0, 0.99, 0);
+      B(inner, 1.9, 0.05, 0.05, lam(0x2a1c10), 0, 0.2, 0.38);
+      for (let i = 0; i < 4; i++) C(inner, 0.07, 0.07, 0.025 + i * 0.012, lam(0xe8c860), -0.7 + (i % 2) * 0.12, 1.05 + i * 0.01, 0.18 - (i >> 1) * 0.1, 8);    // coin stacks
+      B(inner, 0.5, 0.03, 0.05, iron, 0.25, 1.35, 0.1); B(inner, 0.02, 0.3, 0.02, iron, 0.25, 1.2, 0.1);                                                  // scales
+      C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.02, 1.07, 0.12, 12); C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.5, 1.07, 0.12, 12);
+      for (const x of [-0.1, 0.75]) B(inner, 0.22, 0.2, 0.22, lam(0x6a4a2a), x, 1.13, -0.15);                                                              // goods crates
+      flame(inner, -0.95, 1.2, -0.25); C(inner, 0.02, 0.02, 0.18, iron, -0.95, 1.1, -0.25, 6);
       break;
     }
     case 'bookshelf': {

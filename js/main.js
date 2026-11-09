@@ -29,6 +29,7 @@ const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) ha
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5;
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
+const shopFloor = makeRng((runSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);   // the one floor of this stage with a shop (not the boss arena); the player is not told which
 
 function noiseTexture(base) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -120,6 +121,7 @@ function buildFloor() {
     if (o.r > 0) { propObjs.push(o); if (o.r > 0.3) floor.solids.push({ x: o.x, z: o.z, r: o.r }); }   // small floor clutter (candles) never traps a guard   // rugs, bones and banners are flat or hung: no collision
   }
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
+  if (floor.shop) buildShop();
   buildTorches();
   enemies = floor.enemies.map(s => new Enemy(s, floor));
   Enemy.all = enemies;
@@ -133,6 +135,27 @@ function buildFloor() {
 
 // ---- light sources: wall torches plus glowing furniture (hearths, cauldrons, candles, altars).
 // Emissive meshes everywhere, real light only on the 4 nearest to the player. ----
+// The merchant: a goblin in an apron behind his counter (not an enemy, never moves), a solid circle so you cannot walk
+// through him, and an invisible trading spot at the counter. The stock is seeded per floor.
+function buildShop() {
+  const sh = floor.shop;
+  floor.shopStock = makeStock(runSeed, floorNum);
+  const mn = new Enemy({ x: sh.merchant.x, y: sh.merchant.y, route: [sh.merchant, sh.merchant], seed: sh.seed, type: 'cook' }, floor);
+  mn.yaw = sh.merchant.yaw; mn.sync(0); mn.icon.visible = false; mn.cone.visible = false;
+  group.add(mn.mesh);
+  propObjs.push({ p: { kind: 'decor', opened: true, x: sh.merchant.x, y: sh.merchant.y }, mesh: mn.mesh, x: mn.x, z: mn.z, r: 0.45, lid: null, mats: [] });
+  floor.solids.push({ x: mn.x, z: mn.z, r: 0.45 });
+  const co = decorObjs.find(o => o.kind === 'counter');
+  propObjs.push({ p: { kind: 'merchant', x: sh.counter.x, y: sh.counter.y, opened: false }, mesh: new THREE.Group(), x: co.x, z: co.z, r: 0, lid: null, mats: [] });
+  floor.shopSeen = false;
+}
+// The first time you see the merchant's counter you are told how to trade.
+function checkShopSight() {
+  if (!floor.shop || floor.shopSeen) return;
+  const c = floor.shop.counter, cx = (c.x + 0.5) * TILE, cz = (c.y + 0.5) * TILE;
+  if (Math.hypot(cx - player.x, cz - player.z) < 9 && hasLOS(floor, player.x, player.z, cx, cz)) { floor.shopSeen = true; flash('A goblin merchant! Hold E at his counter to trade.'); }
+}
+
 let torchPts = [];
 const torchLights = Array.from({ length: 6 }, () => { const l = new THREE.PointLight(theme.light, 0, 14, 1.5); scene.add(l); return l; });
 function buildTorches() {
@@ -627,6 +650,7 @@ function updateSearch(dt) {
 
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o) {
+  if (o.p.kind === 'merchant') { shopUI.open(); return; }
   loud(SEARCH_NOISE[o.p.kind] || 0);
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
@@ -703,7 +727,7 @@ let respawnT = Infinity, baseGuards = 0;
 
 function startFloor(n) {
   floorNum = n;
-  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR });
+  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
@@ -729,7 +753,7 @@ function updateRespawn(dt) {
   if (respawnT > 0) return;
   respawnT = 35 + Math.random() * 35;
   if (enemies.filter(e => !e.dead).length >= Math.ceil(baseGuards * 1.5)) return;
-  const open = floor.rooms.filter(r => !r.locked);
+  const open = floor.rooms.filter(r => !r.locked && r.theme !== 'shop');
   const homes = open.filter((r, i) => r !== floor.rooms[0]
     && Math.hypot((r.cx + 0.5) * TILE - player.x, (r.cy + 0.5) * TILE - player.z) > 24
     && !hasLOS(floor, player.x, player.z, (r.cx + 0.5) * TILE, (r.cy + 0.5) * TILE));
@@ -785,7 +809,7 @@ function drawMinimap() {
   } else rings.length = 0;
   for (const o of propObjs) {
     if (o.p.opened || !explored[o.p.y * floor.w + o.p.x]) continue;
-    mctx.fillStyle = o.p.kind === 'chest' ? '#e8c860' : '#b08a5a';
+    mctx.fillStyle = o.p.kind === 'chest' ? '#e8c860' : o.p.kind === 'merchant' ? '#6cf' : '#b08a5a';
     mctx.fillRect(o.p.x * S + S / 4, o.p.y * S + S / 4, S / 2 + 1, S / 2 + 1);
   }
   const px = player.x / TILE * S, py = player.z / TILE * S;
@@ -899,6 +923,7 @@ function frame(now) {
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
+    checkShopSight();
     if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) hud.msg.style.opacity = 0; }
   }
   camera.position.set(player.x, eyeY(), player.z);
@@ -924,7 +949,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, hunger, arrows, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, hunger, arrows, shopFloor, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

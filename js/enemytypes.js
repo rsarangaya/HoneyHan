@@ -65,7 +65,7 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
     if (eliteLeft) { const g = free.find(e => e.type !== roster.elite); if (g) g.type = roster.elite; }   // the elite always turns up on floors 3 and 4
     if (!guards.some(g => !g.type)) { const g = guards.find(g => g.type !== roster.elite); if (g) delete g.type; }   // always leave at least one plain goblin
     if (commons.includes('rat')) {                                                           // rat packs of 3, in a storeroom if there is one
-      const packs = floorNum >= 3 ? 2 : 1, homes = f.rooms.filter((r, i) => i > 0 && !r.locked);
+      const packs = floorNum >= 3 ? 2 : 1, homes = f.rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop');
       for (let p = 0; p < packs && homes.length; p++) {
         const store = homes.filter(r => r.theme === 'storeroom'), home = rng.pick(store.length ? store : homes);
         for (let k = 0; k < 3; k++) {

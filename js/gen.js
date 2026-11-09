@@ -40,6 +40,8 @@ const ROOM_THEMES = {
   library:   { edge: [['bookshelf', 4, 7], ['banner', 0, 1], ['urn', 1, 2]], inner: [['table', 1, 2]], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [1, 2] },
   storeroom: { edge: [['crates', 2, 4], ['barrels', 2, 3], ['sacks', 1, 2], ['urn', 1, 3]], inner: [['crates', 0, 1]], floor: [['bones', 0, 1]], props: [2, 3], special: [['pantry', 0, 1]] },
   shrine:    { edge: [['statue', 1, 3], ['banner', 2, 4], ['urn', 1, 3]], inner: [['altar', 1, 1]], floor: [['rug', 1, 1], ['candles', 2, 4]], props: [1, 2] },
+  // the shop room (DESIGN.md section 14): shelves, a rug and lanterns. The counter and merchant are placed after furnishing.
+  shop:      { edge: [['bookshelf', 2, 3], ['barrels', 0, 1], ['urn', 0, 1]], inner: [], floor: [['rug', 1, 1], ['candles', 2, 3]], props: [0, 0] },
   // locked rooms, opened with a key found elsewhere on the floor
   armory:    { edge: [['banner', 2, 3], ['weaponrack', 1, 1]], inner: [['table', 1, 1]], floor: [['candles', 1, 2], ['rug', 0, 1]], props: [0, 0], special: [['rack', 1, 3]] },
   vault:     { edge: [['banner', 1, 2], ['statue', 1, 2]], inner: [], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [0, 0], special: [['vaultchest', 2, 3]] },
@@ -69,7 +71,7 @@ function generateFloor(seed, floorNum, opts = {}) {
   let f;
   for (let attempt = 0; attempt < 8; attempt++) {
     f = layoutFloor(seed + attempt * 7777, floorNum, opts);
-    if (!opts.armory || f.rooms.some(r => r.theme === 'armory')) break;
+    if ((!opts.armory || f.rooms.some(r => r.theme === 'armory')) && (!opts.shop || f.shop)) break;
   }
   return f;
 }
@@ -264,6 +266,13 @@ function layoutFloor(seed, floorNum, opts) {
     r.theme = pickWeighted(names, big ? [2, 3, 3, 1.5, 2, 1.5, 1] : [3, 1, 0.3, 2, 2, 2, 1.5]);
   });
 
+  // ---- the shop: a mid-size ordinary room that is neither the start nor the stairs room (opts.shop) ----
+  let shopRoom = null;
+  if (opts.shop) {
+    const cands = rooms.filter((r, i) => i > 0 && r !== far && r.w * r.h >= 16 && r.w * r.h <= 60);
+    if (cands.length) { shopRoom = rng.pick(cands); shopRoom.theme = 'shop'; }
+  }
+
   // ---- pillars: in big rooms, every other tile, never beside a room centre (start, stairs and
   // guard waypoints live there) and only where all 8 neighbours are open, so they can never
   // block a path. They block movement and sight, which makes cover.
@@ -403,9 +412,31 @@ function layoutFloor(seed, floorNum, opts) {
   };
   rooms.forEach(furnish);
 
+  // ---- the shop's counter near the middle of its room, with the merchant standing behind it ----
+  let shop = null;
+  if (shopRoom) {
+    const r = shopRoom, cand = [];
+    for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) cand.push({ x, y });
+    cand.sort((a, b) => (Math.abs(a.x - r.cx) + Math.abs(a.y - r.cy)) - (Math.abs(b.x - r.cx) + Math.abs(b.y - r.cy)));
+    for (const c of cand) {
+      const i = c.y * w + c.x;
+      if (at(c.x, c.y) !== T_FLOOR || blocked[i] || used.has(i)) continue;
+      const nb = [[0, -1], [0, 1], [-1, 0], [1, 0]].map(([dx, dy]) => ({ x: c.x + dx, y: c.y + dy, dx, dy }))
+        .find(n => at(n.x, n.y) === T_FLOOR && !blocked[n.y * w + n.x] && !used.has(n.y * w + n.x));
+      if (!nb) continue;
+      const j = nb.y * w + nb.x;
+      blocked[i] = 1; blocked[j] = 1;
+      if (reachCount() !== reach - 2) { blocked[i] = 0; blocked[j] = 0; continue; }   // never cut the floor in two
+      reach -= 2; used.add(i); used.add(j);
+      decor.push({ kind: 'counter', x: c.x, y: c.y, seed: seedOf(), edge: false, yaw: Math.atan2(-nb.dx, -nb.dy) });
+      shop = { room: { x: r.x, y: r.y, w: r.w, h: r.h }, counter: { x: c.x, y: c.y }, merchant: { x: nb.x, y: nb.y, yaw: Math.atan2(nb.dx, nb.dy) }, seed: seedOf() };
+      break;
+    }
+  }
+
   // ---- ceiling decor (no collision): a chandelier over the centre of most rooms (always in halls, libraries,
   // shrines and rich locked rooms), a couple more in big rooms, and wooden beams across rooms of 6+ tiles ----
-  const always = new Set(['barracks', 'messhall', 'library', 'shrine', 'armory', 'vault']);
+  const always = new Set(['barracks', 'messhall', 'library', 'shrine', 'armory', 'vault', 'shop']);
   for (const r of rooms) {
     if (r.w * r.h < 20) continue;
     if (always.has(r.theme) || rng() < 0.5) decor.push({ kind: 'chandelier', x: r.cx, y: r.cy, seed: seedOf(), edge: false, yaw: 0 });
@@ -457,16 +488,21 @@ function layoutFloor(seed, floorNum, opts) {
   // ---- guards: 1 + 2 per floor, spread over the unlocked rooms (barracks hold more). Each patrols
   // between two room waypoints beside room centres, so none sit on the stairwell.
   const f = { w, h, tiles, blocked };
-  const pool = rooms.filter((r, i) => i > 0 && !r.locked);
+  const pool = rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop');   // no guards live in the shop
   const enemies = [], perRoom = new Map();
+  const inShop = p => !!shopRoom && p.x >= shopRoom.x && p.x < shopRoom.x + shopRoom.w && p.y >= shopRoom.y && p.y < shopRoom.y + shopRoom.h;
   for (let i = 0; i < 4 + 2 * floorNum; i++) {
-    const home = pickWeighted(pool, pool.map(r => r.theme === 'barracks' ? 2.5 : 1));
-    const k = perRoom.get(home) || 0; perRoom.set(home, k + 1);
-    let dest = rng.pick(rooms.filter(r => !r.locked));
-    if (dest === home) dest = rooms[0];
-    const a = roomPoint(f, home, k), b = roomPoint(f, dest, k + 3);
+    let a, b;
+    for (let tries = 0; tries < 12; tries++) {                    // re-pick when a waypoint falls inside the shop (rooms can overlap)
+      const home = pickWeighted(pool, pool.map(r => r.theme === 'barracks' ? 2.5 : 1));
+      const k = perRoom.get(home) || 0; perRoom.set(home, k + 1);
+      let dest = rng.pick(rooms.filter(r => !r.locked && r.theme !== 'shop'));        // and none patrol into it
+      if (dest === home) dest = rooms[0];
+      a = roomPoint(f, home, k); b = roomPoint(f, dest, k + 3);
+      if (!inShop(a) && !inShop(b)) break;
+    }
     enemies.push({ x: a.x, y: a.y, route: [a, b], seed: seedOf() });
   }
 
-  return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, steps: dist[stairs.y * w + stairs.x] };
+  return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, steps: dist[stairs.y * w + stairs.x] };
 }
