@@ -162,5 +162,21 @@ run('Enemy types and hunger', async ({ open, check }) => {
     check('a food shelf gives food when searched', shelf && shelf.got >= 1 && shelf.opened, JSON.stringify(shelf));
 
 
+    // 17b. Armor goes over clothing: a helmeted enemy never also wears a hat, hood or bandana, and bosses with a crown or hat do not show the helm under it.
+    const looks = await page.evaluate(() => {
+      const bad = [], types = ['goblin', 'bandit', 'archer', 'brute', 'bouncer', 'skeleton', 'mguard', 'captain', 'iceknight'], stats = { helmets: 0, hats: 0, vests: 0 };
+      for (const type of types) for (let seed = 1; seed <= 60; seed++) {
+        const e = new Enemy({ x: 5, y: 5, route: [{ x: 5, y: 5 }, { x: 5, y: 5 }], seed, type }, game.floor);
+        if (e.look.helmet && e.look.hat) bad.push(`${type} ${seed}: hat on helmet`);
+        if (e.look.clothOverArmor) bad.push(`${type} ${seed}: clothing over armor`);
+        stats.helmets += e.look.helmet ? 1 : 0; stats.hats += e.look.hat ? 1 : 0; stats.vests += e.look.vest ? 1 : 0;
+      }
+      for (const dress of ['innkeeper', 'king', 'warlord', 'frost', 'fungus', 'golem']) {
+        const e = new Enemy({ x: 5, y: 5, route: [{ x: 5, y: 5 }, { x: 5, y: 5 }], seed: 3, boss: true, dress }, game.floor);
+        if (e.look.helmet && e.look.hat) bad.push(`boss ${dress}: hat on helmet`);
+      }
+      return { bad, stats };
+    });
+    check('no enemy wears a hat on top of a helmet, or clothing over armor', looks.bad.length === 0 && looks.stats.helmets > 20 && looks.stats.hats > 20, looks.bad.slice(0, 3).join('; ') || JSON.stringify(looks.stats));
     await page.close();
 });

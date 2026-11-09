@@ -35,7 +35,7 @@ function hasLOS(floor, x0, z0, x1, z1) {
 // 4-way BFS over open tiles (the stairwell tile is off limits). Returns tiles after the start tile.
 function findPath(floor, sx, sy, tx, ty) {
   const { w, h } = floor, st = floor.stairs;
-  const blocked = (x, y) => wallAt(floor, x, y) || (x === st.x && y === st.y) || floor.blocked[y * w + x] === 1;
+  const up = floor.up, blocked = (x, y) => wallAt(floor, x, y) || (x === st.x && y === st.y) || (up && x === up.x && y === up.y) || floor.blocked[y * w + x] === 1;   // the stairwell and the stairs up are off limits
   if (blocked(tx, ty)) {   // target is inside furniture or the stairwell: aim for an open tile beside it instead
     const side = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => !blocked(tx + dx, ty + dy));
     if (!side) return [];
@@ -72,6 +72,14 @@ function iconTexture(text, color) {
   return new THREE.CanvasTexture(c);
 }
 let ICONS = null;
+
+// Rounded body parts (the goblin rig used to be all boxes): a tapered cylinder for limbs, an ellipsoid for heads and
+// hands, and an elliptical cylinder for a torso. Armor and clothing stay boxy, like plates and cloth.
+const ROUND_SEGS = 12;
+function cylPart(rTop, rBot, h, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, ROUND_SEGS), mat); p.position.set(x, y, z); parent.add(p); return p; }
+function ellPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, ROUND_SEGS, 9), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
+function torsoPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.44, 1, 14), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
+let SHADOW_GEO = null, SHADOW_MAT = null;   // a soft dark disc under each creature, so it sits on the floor instead of floating
 
 const collider = { radius: 0.4, props: [] };   // borrows Player.blocked for wall collision
 
@@ -160,6 +168,9 @@ class Enemy {
     const bare = this.T.noGear || this.quad;     // cooks and animals wear no armor
     const helmet = plate ? heavy('helmet') : bare ? null : piece('helmet', 0.4), vest = plate ? heavy('chest') : bare ? null : piece('chest', 0.4), boots = plate ? heavy('boots') : bare ? null : piece('boots', 0.35);
     const hood = !helmet && rg() < 0.4;
+    // Armor goes over clothing, never under it: a helmet replaces any hat, hood or bandana, a vest covers the torso cloth
+    // and its trimmings, and bosses whose dress is a crown or hat wear that instead of showing the helmet (it still protects).
+    const crowned = this.boss && ['innkeeper', 'king', 'warlord', 'frost', 'fungus'].includes(this.spec.dress);
     const kind = this.boss ? 'mace' : this.T.weapon || (rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace');
     this.weaponKind = kind;
     const weapon = { type: 'weapon', base: kind, tier: this.boss ? 3 : tierOf() };
@@ -178,7 +189,7 @@ class Enemy {
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.legs = [-1, 1].map(s => {
       const g = new THREE.Group(); g.position.set(s * 0.15, 0.7, 0);
-      box(0.2, 0.7, 0.22, skin, 0, -0.35, 0, g);
+      cylPart(0.115, 0.095, 0.7, skin, 0, -0.35, 0, g);
       box(0.25, 0.2, 0.32, boots ? metalFor(boots) : leather, 0, -0.6, -0.04, g);                // boot
       if (boots && boots.cls >= 1) box(0.23, 0.3, 0.25, metalFor(boots), 0, -0.4, 0, g);          // greave
       if (boots && boots.cls === 2) box(0.27, 0.1, 0.27, metalFor(boots), 0, -0.12, 0, g);        // knee plate
@@ -190,23 +201,26 @@ class Enemy {
     // upper y > 0 turns the right shoulder forward.
     const up = this.upper = new THREE.Group(); up.position.y = 0.7; m.add(up);
     const part = (w, h, d, mat, x, y, z) => box(w, h, d, mat, x, y, z, up);
-    part(0.55, 0.7, 0.32, cloth, 0, 0.35, 0);                                                    // torso
+    torsoPart(0.56, 0.7, 0.34, cloth, 0, 0.35, 0, up);                                           // torso
     part(0.58, 0.08, 0.35, leather, 0, 0.1, 0);                                                  // belt
     part(0.1, 0.08, 0.02, metal, 0, 0.1, -0.18);                                                 // buckle
     part(0.46, 0.3, 0.05, cloth, 0, -0.04, -0.17);                                               // loincloth
     if (vest) {
       const vm = metalFor(vest);
-      part(0.5, 0.38, 0.05, vm, 0, 0.45, -0.19); part(0.58, 0.05, 0.34, leather, 0, 0.62, 0);   // jerkin / chainmail / plate front
+      part(0.62, 0.46, 0.4, vm, 0, 0.46, 0);                                                      // the armor wraps the whole chest, over the cloth torso
+      part(0.5, 0.38, 0.05, vm, 0, 0.45, -0.21); part(0.58, 0.05, 0.34, leather, 0, 0.66, 0);   // jerkin / chainmail / plate front
       if (vest.cls >= 1) part(0.58, 0.5, 0.06, vm, 0, 0.4, 0.18);                                  // back piece
       if (vest.cls === 2) for (const s of [-1, 1]) part(0.22, 0.12, 0.3, vm, s * 0.38, 0.72, 0);   // pauldrons
     }
-    if (rg() < 0.6) part(0.28, 0.12, 0.28, leather, -0.38, 0.74, 0);                             // shoulder pad
+    this.look = { helmet: !!helmet && !crowned, hat: (!helmet && (hood || ['bandit', 'archer'].includes(this.type))) || crowned, vest: !!vest, clothOverArmor: false };   // what is drawn, for the tests
+    const pad = rg() < 0.6;
+    if (pad && !vest) part(0.28, 0.12, 0.28, leather, -0.38, 0.74, 0);                            // shoulder pad (clothing, so not under armor)
     if (rg() < 0.5) { part(0.04, 0.12, 0.04, bone, 0.38, 0.86, -0.05); part(0.04, 0.1, 0.04, bone, 0.38, 0.84, 0.07); }   // bone spikes
     if (rg() < 0.4) { part(0.36, 0.3, 0.2, leather, 0, 0.4, 0.28); part(0.08, 0.06, 0.08, bone, 0, 0.58, 0.28); }       // loot sack on the back
     // head: heavy brow, pointed ears, tusks, a big nose and two angry eyes
-    part(0.36, 0.34, 0.34, skin, 0, 0.88, 0);
+    ellPart(0.4, 0.38, 0.38, skin, 0, 0.88, 0, up);                                               // head
     part(0.34, 0.06, 0.06, dark, 0, 0.99, -0.17);                                                // brow
-    part(0.09, 0.13, 0.14, skin, 0, 0.84, -0.23);                                                // nose
+    ellPart(0.1, 0.14, 0.15, skin, 0, 0.84, -0.22, up);                                          // nose
     for (const s of [-1, 1]) {
       const ear = part(0.2, 0.07, 0.04, skin, s * 0.27, 0.95, 0); ear.rotation.z = s * 0.45;      // ears
       part(0.06, 0.05, 0.04, dark, s * 0.36, 1.0, 0);
@@ -216,7 +230,7 @@ class Enemy {
     }
     part(0.2, 0.03, 0.02, black, 0, 0.78, -0.175);                                               // mouth
     for (let i = 0; i < 2; i++) part(0.03, 0.03, 0.03, dark, (rg() - 0.5) * 0.25, 0.8 + rg() * 0.15, -0.175);   // warts
-    if (helmet) {
+    if (helmet && !crowned) {
       const hm = metalFor(helmet);
       if (helmet.cls === 0) { part(0.4, 0.12, 0.4, hm, 0, 1.07, 0); part(0.41, 0.05, 0.41, hm, 0, 1.0, 0); }   // leather cap
       else {
@@ -224,13 +238,13 @@ class Enemy {
         part(0.04, 0.16, 0.03, hm, 0, 0.92, -0.2); part(0.05, 0.08, 0.05, leather, 0, 1.17, 0);              // dome, rim, nasal guard, crest
         if (helmet.cls === 2) { part(0.42, 0.3, 0.42, hm, 0, 0.95, 0); part(0.2, 0.04, 0.03, black, 0, 0.93, -0.22); part(0.06, 0.2, 0.06, bone, 0, 1.25, 0); }   // great helm: full face, visor slit, plume
       }
-    } else if (hood) {
+    } else if (hood && !helmet) {
       part(0.41, 0.16, 0.41, cloth, 0, 1.06, 0); part(0.4, 0.34, 0.07, cloth, 0, 0.9, 0.2);
-    } else part(0.1, 0.13, 0.26, black, 0, 1.1, 0);                                               // tuft
+    } else if (!helmet) part(0.1, 0.13, 0.26, black, 0, 1.1, 0);                                  // tuft
     this.arms = [-1, 1].map(s => {
       const g = new THREE.Group(); g.position.set(s * 0.38, 0.68, 0);
-      box(0.16, 0.6, 0.18, skin, 0, -0.3, 0, g);
-      box(0.17, 0.14, 0.17, dark, 0, -0.64, 0, g);                                                // hand
+      cylPart(0.09, 0.075, 0.6, skin, 0, -0.3, 0, g);
+      ellPart(0.19, 0.17, 0.19, dark, 0, -0.65, 0, g);                                            // hand
       box(0.19, 0.1, 0.2, leather, 0, -0.5, 0, g);                                                // wristband
       up.add(g); return g;
     });
@@ -262,10 +276,10 @@ class Enemy {
     if (this.type === 'cook') {
       part(0.5, 0.62, 0.05, lam(0xf2efe6), 0, 0.35, -0.2); part(0.36, 0.3, 0.36, lam(0xf2efe6), 0, 1.2, 0); part(0.4, 0.06, 0.4, lam(0xf2efe6), 0, 1.04, 0);   // apron and chef's hat
     } else if (this.type === 'bandit') {
-      part(0.4, 0.09, 0.4, lam(0x8a1f1f), 0, 1.04, 0); part(0.1, 0.12, 0.05, lam(0x8a1f1f), 0.18, 0.99, 0.2);   // red bandana
+      if (!helmet) { part(0.4, 0.09, 0.4, lam(0x8a1f1f), 0, 1.04, 0); part(0.1, 0.12, 0.05, lam(0x8a1f1f), 0.18, 0.99, 0.2); }   // red bandana (a helmet replaces it)
       box(0.1, 0.3, 0.1, lam(0x2f6a3a), 0, -0.58, -0.1, this.arms[0]); box(0.06, 0.1, 0.06, lam(0x2f6a3a), 0, -0.4, -0.1, this.arms[0]);   // a bottle in the off hand
     } else if (this.type === 'archer') {
-      part(0.42, 0.3, 0.42, lam(0x3a5a2a), 0, 1.04, 0); part(0.4, 0.34, 0.07, lam(0x3a5a2a), 0, 0.9, 0.2);                    // a green hood
+      if (!helmet) { part(0.42, 0.3, 0.42, lam(0x3a5a2a), 0, 1.04, 0); part(0.4, 0.34, 0.07, lam(0x3a5a2a), 0, 0.9, 0.2); }  // a green hood (a helmet replaces it)
       part(0.13, 0.42, 0.13, leather, 0.18, 0.55, 0.22); for (const x of [0.14, 0.19, 0.24]) part(0.03, 0.12, 0.03, bone, x, 0.8, 0.22);   // a quiver of arrows
     } else if (this.T.robe) {                                                                                                   // casters: shaman, scholar, warden, librarian, cultist
       const robe = lam(this.T.robe);
@@ -273,7 +287,7 @@ class Enemy {
       part(0.44, 0.34, 0.44, robe, 0, 1.0, 0); part(0.4, 0.34, 0.07, robe, 0, 0.9, 0.2);                                          // a deep hood
       part(0.3, 0.06, 0.04, new THREE.MeshBasicMaterial({ color: this.T.orb || 0xb060ff }), 0, 0.9, -0.2);                                       // glowing eyes in the hood
     } else if (this.type === 'brute') {
-      part(0.95, 0.24, 0.5, lam(0x4a3a28), 0, 0.64, 0);                                                                           // a fur mantle
+      if (!vest) part(0.95, 0.24, 0.5, lam(0x4a3a28), 0, 0.64, 0);                                                                // a fur mantle (not over armor)
       part(0.2, 0.2, 0.06, bone, 0, 0.12, -0.2);                                                                                  // a skull on the belt
       for (const s of [-1, 1]) { part(0.05, 0.2, 0.05, bone, s * 0.42, 0.9, 0); part(0.05, 0.14, 0.05, bone, s * 0.34, 0.9, 0.1); }  // shoulder spikes
     } else if (this.type === 'scarecrow') {
@@ -281,7 +295,7 @@ class Enemy {
       part(0.08, 1.7, 0.08, lam(0x4a3018), 0, 0.2, 0.22);                                                          // the pole it is tied to
       for (const s of [-1, 1]) part(0.1, 0.22, 0.04, lam(0xe0c870), s * 0.3, 0.66, -0.17);                          // straw sticking out
     } else if (this.type === 'skeleton') {
-      for (let i = 0; i < 3; i++) part(0.5, 0.04, 0.34, bone, 0, 0.25 + i * 0.14, 0);                              // ribs
+      if (!vest) for (let i = 0; i < 3; i++) part(0.5, 0.04, 0.34, bone, 0, 0.25 + i * 0.14, 0);                  // ribs (hidden under armor)
       part(0.1, 0.1, 0.04, black, -0.08, 0.92, -0.18); part(0.1, 0.1, 0.04, black, 0.08, 0.92, -0.18);            // empty eye sockets
     } else if (this.type === 'thief') {
       part(0.42, 0.34, 0.42, lam(0x20302a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x20302a), 0, 0.9, 0.2);        // a dark hood
@@ -295,13 +309,13 @@ class Enemy {
     } else if (this.type === 'fungbrute') {
       for (const [x, y, z] of [[-0.4, 0.85, 0], [0.4, 0.8, 0.1], [0.1, 1.1, 0.1]]) { part(0.1, 0.12, 0.1, lam(0xd8c8f0), x, y, z); part(0.26, 0.08, 0.26, lam(0xa05ad0), x, y + 0.1, z); }   // mushrooms
     } else if (this.type === 'bouncer') {
-      part(0.9, 0.22, 0.46, lam(0x202020), 0, 0.62, 0); part(0.7, 0.55, 0.38, lam(0x2a2a2e), 0, 0.38, 0);        // wide shoulders and a black jacket
+      if (!vest) { part(0.9, 0.22, 0.46, lam(0x202020), 0, 0.62, 0); part(0.7, 0.55, 0.38, lam(0x2a2a2e), 0, 0.38, 0); }   // wide shoulders and a black jacket (not over armor)
       part(0.38, 0.1, 0.38, metal, 0, 0.76, 0);                                                                     // spiked collar
       for (const sx of [-0.3, -0.1, 0.1, 0.3]) part(0.05, 0.1, 0.05, bone, sx, 0.84, -0.18);
     }
     if (this.boss && this.spec.dress) {                                                                                           // each theme's boss has its own look
       const d = this.spec.dress, gold = lam(0xe8c040);
-      if (d === 'innkeeper') { part(0.56, 0.7, 0.06, lam(0xf2efe6), 0, 0.35, -0.2); part(0.42, 0.26, 0.42, lam(0xf2efe6), 0, 1.3, 0); part(0.2, 0.2, 0.06, gold, 0, 0.2, -0.24); }
+      if (d === 'innkeeper') { part(0.42, 0.26, 0.42, lam(0xf2efe6), 0, 1.3, 0); part(0.2, 0.2, 0.06, gold, 0, 0.2, -0.24); }   // a chef's hat in place of the helm (and no apron over his plate)
       else if (d === 'king') { part(0.4, 0.14, 0.4, gold, 0, 1.12, 0); for (const x of [-0.14, 0, 0.14]) part(0.06, 0.14, 0.06, gold, x, 1.24, 0); part(0.7, 0.9, 0.06, lam(0x8a2a2a), 0, 0.3, 0.22); }
       else if (d === 'golem') { for (const [x, y] of [[-0.15, 0.5], [0.18, 0.3], [0, 0.85], [-0.1, 0.1]]) part(0.06, 0.2, 0.02, new THREE.MeshBasicMaterial({ color: 0xff8a30 }), x, y, -0.19); part(0.7, 0.3, 0.5, lam(0x6a6a70), 0, 0.7, 0); }
       else if (d === 'fungus') { for (const [x, y, z] of [[-0.4, 0.9, 0], [0.4, 0.85, 0.1], [0.1, 1.2, 0.1], [-0.2, 1.15, 0.1]]) { part(0.14, 0.16, 0.14, lam(0xd8c8f0), x, y, z); part(0.34, 0.1, 0.34, lam(0xa05ad0), x, y + 0.12, z); } }
@@ -309,6 +323,10 @@ class Enemy {
       else if (d === 'frost') { for (const x of [-0.18, -0.06, 0.06, 0.18]) part(0.06, 0.3, 0.06, lam(0xd8f0ff), x, 1.26, 0); for (const s of [-1, 1]) part(0.1, 0.35, 0.1, lam(0xd8f0ff), s * 0.4, 0.95, 0); }
     }
     }
+    if (!SHADOW_GEO) { SHADOW_GEO = new THREE.CircleGeometry(1, 20); SHADOW_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }); }
+    this.shadow = new THREE.Mesh(SHADOW_GEO, SHADOW_MAT);
+    this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
+    this.shadow.renderOrder = 1; m.add(this.shadow);
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
     this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
@@ -335,10 +353,10 @@ class Enemy {
     this.mats = [fur, belly, dark, pink];
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     const body = this.body = new THREE.Group(); body.position.y = 0.5; m.add(body);
-    box(0.4, 0.38, 0.9, fur, 0, 0.15, 0, body);                                  // torso
+    ellPart(0.46, 0.4, 1.0, fur, 0, 0.15, 0, body);                              // torso
     box(0.3, 0.1, 0.8, belly, 0, -0.02, 0, body);                                // pale belly
-    box(0.3, 0.28, 0.32, fur, 0, 0.3, -0.62, body);                              // head
-    box(0.16, 0.13, 0.24, belly, 0, 0.23, -0.84, body);                          // snout
+    ellPart(0.32, 0.3, 0.36, fur, 0, 0.3, -0.62, body);                          // head
+    ellPart(0.17, 0.14, 0.26, belly, 0, 0.23, -0.84, body);                      // snout
     box(0.06, 0.05, 0.04, dark, 0, 0.3, -0.97, body);                            // nose
     for (const s of [-1, 1]) {
       box(0.07, 0.15, 0.05, fur, s * 0.1, 0.5, -0.56, body);                     // ears
@@ -349,7 +367,7 @@ class Enemy {
     if (this.type === 'puffer') { box(0.5, 0.2, 0.5, lam(0xd05a9a), 0, 0.42, 0.05, body); for (const [x, z] of [[-0.15, 0], [0.15, 0.15]]) box(0.12, 0.12, 0.12, lam(0xf0c0e0), x, 0.58, z, body); }   // mushroom caps on its back
     const tail = box(0.07, 0.07, this.type === 'rat' ? 0.75 : 0.5, this.type === 'rat' ? pink : fur, 0, 0.26, 0.7, body); tail.rotation.x = -0.45;
     this.legs = [[-1, -0.32], [1, -0.32], [-1, 0.32], [1, 0.32]].map(([sx, z]) => {   // front pair, then back pair
-      const g = new THREE.Group(); g.position.set(sx * 0.15, 0.42, z); box(0.1, 0.42, 0.1, fur, 0, -0.21, 0, g); box(0.11, 0.05, 0.14, dark, 0, -0.42, -0.02, g); m.add(g); return g;
+      const g = new THREE.Group(); g.position.set(sx * 0.15, 0.42, z); cylPart(0.06, 0.045, 0.42, fur, 0, -0.21, 0, g); ellPart(0.12, 0.06, 0.16, dark, 0, -0.41, -0.02, g); m.add(g); return g;
     });
     this.arms = [new THREE.Group(), new THREE.Group()];                          // unused, keeps shared code safe
     this.qp = [0, 0];                                                            // eased pose: [body pitch, lunge offset]
@@ -707,6 +725,7 @@ class Enemy {
   sync(dt) {
     const m = this.mesh;
     m.position.set(this.x, 0, this.z); m.rotation.y = this.yaw;
+    this.shadow.visible = !this.dead;
     if (this.dead) {   // tip over backward, then stay down
       const k = Math.min(1, this.deadT / 0.4);
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;

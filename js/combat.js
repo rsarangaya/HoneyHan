@@ -60,8 +60,8 @@ function findMeleeTarget(player, eyeY, enemies, floor, reach) {
 // Procedural first-person weapon models (stand-ins until real art).
 function buildWeaponModel(id) {
   const g = new THREE.Group();
-  const steel = new THREE.MeshLambertMaterial({ color: 0xb8bcc4 });
-  const wood = new THREE.MeshLambertMaterial({ color: 0x5a3a20 });
+  const steel = new THREE.MeshPhongMaterial({ color: 0x9aa0aa, shininess: 70, specular: 0x9a9a9a });   // metal that catches the lantern
+  const wood = new THREE.MeshPhongMaterial({ color: 0x5a3a20, shininess: 8, specular: 0x222222 });
   const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); g.add(m); return m; };
   if (id === 'sword') {
     add(new THREE.BoxGeometry(0.07, 0.8, 0.02), steel, 0, 0.5, 0);

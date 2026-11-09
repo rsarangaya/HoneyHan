@@ -116,9 +116,9 @@ run('Wands and Hanahan\'s Rage', async ({ open, check }) => {
     out.enraged = A.rageT > 0 && B.rageT > 0; out.bossImmune = !(boss.rageT > 0); out.farImmune = !(far.rageT > 0);
     out.charges = rec.charges;
     const hp0 = game.inv.hp;
-    await T.until(() => A.hp < 500 || B.hp < 500, 15000); out.brawl = A.hp < 500 || B.hp < 500;
+    await T.until(() => A.hp < 500 || B.hp < 500, 40000); out.brawl = A.hp < 500 || B.hp < 500;
     out.playerSafe = game.inv.hp === hp0;
-    await T.until(() => A.rageT <= 0 && B.rageT <= 0, 15000);
+    await T.until(() => A.rageT <= 0 && B.rageT <= 0, 45000);   // guards advance at most 0.05 s per frame, so a slow machine needs real time
     out.calmed = A.rageT <= 0 && B.rageT <= 0;
     // second play breaks the recorder
     A.dead || (A.hp = 500); game.pst.clear(); game.cb.rageCd = 0;

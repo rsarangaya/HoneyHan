@@ -7,6 +7,7 @@ const theme = makeRng(runSeed).pick(THEMES);     // one theme per run, picked fr
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;   // a filmic curve instead of hard clipping
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 80);
 camera.rotation.order = 'YXZ';
@@ -24,9 +25,10 @@ const hud = {
 const mctx = hud.mini.getContext('2d');
 
 const player = new Player();
-let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null;
+let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null, upBox = null, upLight = null;
+const floorCache = {};      // floors you have left, kept exactly as they were (guards, opened chests, bodies, explored map)
 const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) has room
-const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5;
+const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5, UP_RISE = 1.4;   // the way down sinks 1.5 m; the way back up rises 1.4 m
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
 const PATCH_KINDS = ['puddle', 'grass', 'glowcap', 'bell', 'ice'];
@@ -34,19 +36,73 @@ const HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the 
 const THEME_HINT = { 'The Sunken Tavern': 'Shallow puddles splash when you step in them, even when you creep.', 'The Moonlit Orchard': 'Tall grass hides a crouching player. Scarecrows are not all scenery.', 'The Clockwork Library': 'The library is eerily silent: every sound you make carries 40% farther.', 'The Mushroom Cellar': 'Glowing spores light you up: guards see you from farther in them.', 'The Goblin Market': 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.', 'The Frozen Chapel': 'Patches of ice make you slide.' };
 const shopFloor = makeRng((runSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);   // the one floor of this stage with a shop (not the boss arena); the player is not told which
 
-function noiseTexture(base) {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, 64, 64);
-  for (let i = 0; i < 700; i++) {
-    g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.16)' : 'rgba(255,255,255,0.07)';
-    g.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 2, 2);
-  }
+// Procedural textures. Smooth filtering with mipmaps (no chunky pixels), a seeded pattern per colour so a theme looks
+// the same every run: brick walls, plank or flagstone floors, a dark plank ceiling.
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function finishTexture(c, repeatX = 1, repeatY = 1) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.magFilter = THREE.NearestFilter;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  t.repeat.set(repeatX, repeatY);
   return t;
 }
+const shade = (col, k) => `rgb(${Math.max(0, Math.min(255, Math.round(col.r * 255 * k)))},${Math.max(0, Math.min(255, Math.round(col.g * 255 * k)))},${Math.max(0, Math.min(255, Math.round(col.b * 255 * k)))})`;
+function speckle(g, S, n, rng) {   // fine grain on top of a pattern
+  for (let i = 0; i < n; i++) { g.fillStyle = rng() < 0.5 ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.05)'; g.fillRect(rng() * S, rng() * S, 1 + rng() * 1.5, 1 + rng() * 1.5); }
+}
+// Walls: 6 bricks across a 3 m tile, 12 rows over 3.6 m, every other row offset, each brick its own tint, mortar between,
+// and a gentle darkening at the top and bottom (a soft ambient-occlusion look).
+function wallTexture(base) {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), rng = makeRng(hashStr(base)), col = new THREE.Color(base);
+  g.fillStyle = shade(col, 0.45); g.fillRect(0, 0, S, S);                       // mortar
+  const rows = 12, bw = S / 6, bh = S / rows;
+  for (let r = 0; r < rows; r++) for (let b = -1; b < 6; b++) {
+    const off = r % 2 ? bw / 2 : 0, x = b * bw + off, y = r * bh, k = 0.68 + rng() * 0.28;
+    g.fillStyle = shade(col, k); g.fillRect(x + 1.5, y + 1.5, bw - 3, bh - 3);
+    g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(x + 1.5, y + 1.5, bw - 3, 2);   // a lit top edge
+    g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(x + 1.5, y + bh - 3.5, bw - 3, 2);     // a shaded bottom edge
+    for (let i = 0; i < 5; i++) { g.fillStyle = `rgba(0,0,0,${0.04 + rng() * 0.06})`; g.fillRect(x + 3 + rng() * (bw - 8), y + 3 + rng() * (bh - 8), 2 + rng() * 5, 1 + rng() * 2); }   // pits and chips
+  }
+  speckle(g, S, 1400, rng);
+  const grad = g.createLinearGradient(0, 0, 0, S); grad.addColorStop(0, 'rgba(0,0,0,0.30)'); grad.addColorStop(0.12, 'rgba(0,0,0,0)'); grad.addColorStop(0.86, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.42)');
+  g.fillStyle = grad; g.fillRect(0, 0, S, S);
+  return finishTexture(c);
+}
+// Floors: planks (6 across a 3 m tile with butt joints and grain) or irregular flagstones, depending on the theme.
+function floorTexture(base, planks) {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), rng = makeRng(hashStr(base + 'f')), col = new THREE.Color(base);
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  if (planks) {
+    const pw = S / 6;
+    for (let p = 0; p < 6; p++) {
+      let y = -rng() * 60;
+      while (y < S) {
+        const len = 70 + rng() * 90, k = 0.78 + rng() * 0.3;
+        g.fillStyle = shade(col, k); g.fillRect(p * pw + 1.5, y + 1.5, pw - 3, len - 3);
+        for (let l = 0; l < 6; l++) { g.strokeStyle = `rgba(0,0,0,${0.05 + rng() * 0.07})`; g.beginPath(); const gx = p * pw + 4 + rng() * (pw - 8); g.moveTo(gx, y + 3); g.lineTo(gx + (rng() - 0.5) * 3, y + len - 3); g.stroke(); }   // grain
+        g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(p * pw + 1.5, y + 1.5, pw - 3, 2);
+        y += len;
+      }
+    }
+  } else {
+    const n = 3, sw = S / n;
+    for (let r = 0; r < n; r++) for (let q = 0; q < n; q++) {
+      const x = q * sw + (r % 2 ? sw * 0.35 : 0), y = r * sw, k = 0.8 + rng() * 0.3;
+      for (const dx of [0, -sw]) { g.fillStyle = shade(col, k); g.fillRect(x + dx + 2, y + 2, sw - 4, sw - 4); g.fillStyle = 'rgba(255,255,255,0.06)'; g.fillRect(x + dx + 2, y + 2, sw - 4, 2); }
+    }
+  }
+  speckle(g, S, 1600, rng);
+  return finishTexture(c);
+}
+function ceilingTexture(base) {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), rng = makeRng(hashStr(base + 'c')), col = new THREE.Color(base);
+  g.fillStyle = shade(col, 0.9); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 8; i++) { g.fillStyle = shade(col, 0.7 + rng() * 0.4); g.fillRect(0, i * 16 + 1, S, 14); }
+  speckle(g, S, 500, rng);
+  return finishTexture(c, 1, 1);
+}
+const PLANK_THEMES = new Set(['The Sunken Tavern', 'The Clockwork Library', 'The Goblin Market', 'The Moonlit Orchard']);
 
 function buildFloor() {
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
@@ -68,9 +124,9 @@ function buildFloor() {
     for (let dy = -1; dy <= 1 && !touches; dy++) for (let dx = -1; dx <= 1; dx++) if (!solid(x + dx, y + dy)) { touches = true; break; }
     if (touches) wallPos.push([x, y]);
   }
-  const wallTex = noiseTexture(theme.wall);
+  const wallTex = wallTexture(theme.wall);
   const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(TILE, WALL_H, TILE),
-    new THREE.MeshLambertMaterial({ map: wallTex }), wallPos.length);
+    new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 }), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
   const m = new THREE.Matrix4();
   wallPos.forEach(([x, y], i) => { m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE); walls.setMatrixAt(i, m); });
   group.add(walls);
@@ -85,11 +141,11 @@ function buildFloor() {
   hole.moveTo(stairBox.x0, -stairBox.z0); hole.lineTo(stairBox.x0, -stairBox.z1);
   hole.lineTo(stairBox.x1, -stairBox.z1); hole.lineTo(stairBox.x1, -stairBox.z0);
   floorShape.holes.push(hole);
-  const floorTex = noiseTexture(theme.floor); floorTex.repeat.set(1 / TILE, 1 / TILE);
-  const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), new THREE.MeshLambertMaterial({ map: floorTex }));
+  const floorTex = floorTexture(theme.floor, PLANK_THEMES.has(theme.name)); floorTex.repeat.set(1 / TILE, 1 / TILE);
+  const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 }));
   fl.rotation.x = -Math.PI / 2;
-  const ceilTex = noiseTexture(theme.ceil); ceilTex.repeat.set(w, h);
-  const ce = new THREE.Mesh(planeGeo, new THREE.MeshLambertMaterial({ map: ceilTex }));
+  const ceilTex = ceilingTexture(theme.ceil); ceilTex.repeat.set(w, h);
+  const ce = new THREE.Mesh(planeGeo, new THREE.MeshPhongMaterial({ map: ceilTex, shininess: 2, specular: 0x050505 }));
   ce.rotation.x = Math.PI / 2; ce.position.set(w * TILE / 2, WALL_H, h * TILE / 2);
   group.add(fl, ce);
 
@@ -115,9 +171,32 @@ function buildFloor() {
   stairsLight.position.set(sx, 0.6, sz);
   group.add(stairsLight);
 
+  // the stairs back up (floors 2 and deeper): a flight of steps on the start tile, rising from the open side
+  upBox = null; upLight = null; floor.up = null;
+  if (floorNum > 1) {
+    const st = floor.start, open = (x, y) => floor.tiles[y * w + x] === T_FLOOR || floor.tiles[y * w + x] === T_START;
+    const dir = open(st.x, st.y + 1) && !floor.blocked[(st.y + 1) * w + st.x] ? 1 : -1;      // which side you step on from
+    const ux = (st.x + 0.5) * TILE, uz = (st.y + 0.5) * TILE;
+    upBox = { x0: ux - STAIR_HALF_W, x1: ux + STAIR_HALF_W, z0: uz - STAIR_HALF_L, z1: uz + STAIR_HALF_L, dir };
+    floor.up = { x: st.x, y: st.y, dir };
+    const base = dir > 0 ? upBox.z1 : upBox.z0, steps = 6, ulen = STAIR_HALF_L * 2, uw = STAIR_HALF_W * 2;
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x8a8478 }), edgeMat = new THREE.MeshLambertMaterial({ color: 0xa8a294 });
+    for (let i = 0; i < steps; i++) {
+      const hgt = (i + 1) * UP_RISE / steps, zc = base - dir * ((i + 0.5) * ulen / steps);
+      const s = new THREE.Mesh(new THREE.BoxGeometry(uw, hgt, ulen / steps), stoneMat); s.position.set(ux, hgt / 2, zc); group.add(s);
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.06, 0.05, 0.1), edgeMat); lip.position.set(ux, hgt + 0.01, zc + dir * (ulen / steps / 2 - 0.05)); group.add(lip);   // a lighter nosing on each step
+    }
+    for (const side of [-1, 1]) {                                                           // low stone cheeks on both sides
+      const ch = new THREE.Mesh(new THREE.BoxGeometry(0.16, UP_RISE + 0.5, ulen), stoneMat); ch.position.set(ux + side * (STAIR_HALF_W + 0.08), (UP_RISE + 0.5) / 2, uz); group.add(ch);
+    }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.3, 0.3, 0.3), new THREE.MeshLambertMaterial({ color: 0x15120e })); top.position.set(ux, UP_RISE + 0.6, base - dir * ulen); group.add(top);   // a dark opening at the top
+    upLight = new THREE.PointLight(0xa8c8ff, 0.3, 9); upLight.position.set(ux, 1.8, uz); group.add(upLight);                // a cool light from above
+  }
+
   propObjs = floor.props.map(p => makeProp(p));
   propObjs.forEach(o => group.add(o.mesh));
   floor.solids = [{ x: sx, z: sz, r: 1.5 }, ...propObjs.map(o => ({ x: o.x, z: o.z, r: o.r }))];   // what guards cannot walk through: stairwell, props, furniture
+  if (floor.up) floor.solids.push({ x: (floor.up.x + 0.5) * TILE, z: (floor.up.y + 0.5) * TILE, r: 1.5 });   // and the stairs up
   decorObjs = floor.decor.map(makeDecor);
   for (const o of decorObjs) {
     group.add(o.mesh);
@@ -778,8 +857,8 @@ function updateHud() {
   el('line').innerHTML = line;
 }
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-const torch = new THREE.PointLight(theme.light, 1.0, 16, 1.6);   // player lantern, brighter than the ambient so rooms read
+const ambient = new THREE.HemisphereLight(0xfff0dc, 0x2a2018, 0.62);   // warm from above, dark from below: faces get a little shape
+const torch = new THREE.PointLight(theme.light, 0.75, 16, 1.6);   // player lantern, brighter than the ambient so rooms read
 scene.add(ambient);
 camera.add(torch);
 
@@ -787,7 +866,51 @@ camera.add(torch);
 const armoryFloor = makeRng((runSeed ^ 0x5bd1e995) >>> 0).int(1, MAX_FLOOR - 1);   // never the boss floor, which has no rooms
 let respawnT = Infinity, baseGuards = 0;
 
+function disposeGroup(g) {   // free a floor's GPU memory: geometry, materials and their textures
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
+}
+// Keep the floor you are on so you can come back to it exactly as you left it.
+function saveFloor() {
+  arrows.forEach(a => group.remove(a.mesh)); arrows.length = 0;
+  floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, explored, WALL_H, baseGuards, respawnT };
+  scene.remove(group);
+}
+function loadFloor(n, c) {
+  floorNum = n; delete floorCache[n];
+  ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, explored, WALL_H, baseGuards, respawnT } = c);
+  scene.add(group);
+  enemies.forEach(e => { e.cone.visible = dev.on; });
+  Enemy.all = enemies; player.props = propObjs; player.mobs = enemies;
+}
+// Put the player beside the stairs they came by: 'down' = came down, so appear by the stairs up; 'up' = came up, by the stairs down.
+function arriveBy(dir) {
+  const anchor = dir === 'up' ? floor.stairs : floor.start, w = floor.w;
+  const ok = (x, y) => floor.tiles[y * w + x] === T_FLOOR && !floor.blocked[y * w + x];
+  const pref = dir === 'down' && floor.up ? [[0, floor.up.dir], [0, -floor.up.dir], [1, 0], [-1, 0]] : [[0, 1], [0, -1], [1, 0], [-1, 0]];
+  const nb = pref.find(([dx, dy]) => ok(anchor.x + dx, anchor.y + dy));
+  if (!nb) { player.place(floor); return; }
+  player.x = (anchor.x + nb[0] + 0.5) * TILE; player.z = (anchor.y + nb[1] + 0.5) * TILE;
+  player.vx = player.vz = 0; player.pitch = 0;
+  player.yaw = Math.atan2(-nb[0], -nb[1]);                     // face away from the stairs
+}
+function floorBanner(n) {
+  el('boss').firstElementChild.textContent = bossNameFor(theme.name);
+  if (n === 1 && THEME_HINT[theme.name]) addLog(THEME_HINT[theme.name], '#9ac8ff');
+  hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
+}
+
+// A brand new floor n (also what the dev keys and the tests use): any old copy of it is thrown away.
 function startFloor(n) {
+  if (floorCache[n]) { disposeGroup(floorCache[n].group); delete floorCache[n]; }
+  generateAndEnter(n, n > 1 ? 'down' : null);
+  const locked = floor.doors.map(d => d.room).join(', ');
+  if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
+  else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
+}
+function generateAndEnter(n, arrive) {
   floorNum = n;
   floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
@@ -801,15 +924,29 @@ function startFloor(n) {
   search = null;
   arrows.length = 0;                                  // the old floor's group (and its arrows) is gone
   cb.draw = null;
-  player.place(floor);
+  if (arrive) arriveBy(arrive); else player.place(floor);
   baseGuards = floor.enemies.length;
   respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
-  el('boss').firstElementChild.textContent = bossNameFor(theme.name);
-  if (n === 1 && THEME_HINT[theme.name]) addLog(THEME_HINT[theme.name], '#9ac8ff');
-  hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
-  const locked = floor.doors.map(d => d.room).join(', ');
-  if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
-  else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
+  floorBanner(n);
+}
+
+// Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
+// dir: 'down' (you go to floor n and arrive by its stairs up) or 'up' (you arrive by its stairs down).
+function changeFloor(n, dir) {
+  saveFloor();
+  search = null; cb.draw = null; cb.eat = null;
+  const c = floorCache[n];
+  if (c) {
+    loadFloor(n, c); arriveBy(dir); floorBanner(n);
+    flash(`${dir === 'up' ? 'You climb back up to' : 'Back down on'} floor ${n}.`);
+  } else {
+    group = null;                                     // the floor we left is cached: buildFloor must not dispose it
+    generateAndEnter(n, dir);
+    const locked = floor.doors.map(d => d.room).join(', ');
+    if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
+    else flash(`Floor ${n}. Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
+  }
+  hunger.fight = 0;
 }
 
 // Floors 3 and deeper: every 35 to 70 seconds a guard appears in a room you cannot see, up to 1.5x the floor's guard count.
@@ -859,7 +996,7 @@ function drawMinimap() {
   for (let y = 0; y < floor.h; y++) for (let x = 0; x < floor.w; x++) {
     if (!explored[y * floor.w + x]) continue;
     const t = floor.tiles[y * floor.w + x];
-    mctx.fillStyle = t === T_WALL ? '#2a2a33' : t === T_STAIRS ? '#ffd24a' : t === T_DOOR ? '#c0702a' : '#6a6a78';
+    mctx.fillStyle = t === T_WALL ? '#2a2a33' : t === T_STAIRS ? '#ffd24a' : t === T_START && floor.up ? '#5aa0ff' : t === T_DOOR ? '#c0702a' : '#6a6a78';   // gold: the way down, blue: the way back up
     mctx.fillRect(x * S, y * S, S + 0.5, S + 0.5);
   }
   if (dev.on) for (const e of enemies) {
@@ -891,7 +1028,14 @@ function stairProgress() {
   if (player.x < b.x0 || player.x > b.x1 || player.z < b.z0 || player.z > b.z1) return 0;
   return Math.max(0.02, (player.z - b.z0) / (b.z1 - b.z0));
 }
-function eyeY() { return player.eye - stairProgress() * STAIR_DEPTH; }
+// 0 off the stairs up, 1 at the top step; the eye rises as you climb
+function upProgress() {
+  const b = upBox;
+  if (!b || player.x < b.x0 || player.x > b.x1 || player.z < b.z0 || player.z > b.z1) return 0;
+  const t = b.dir > 0 ? (b.z1 - player.z) / (b.z1 - b.z0) : (player.z - b.z0) / (b.z1 - b.z0);
+  return Math.max(0.02, Math.min(1, t));
+}
+function eyeY() { return player.eye - stairProgress() * STAIR_DEPTH + upProgress() * UP_RISE; }
 
 let sealedMsgT = 0;
 function checkStairs() {
@@ -900,8 +1044,9 @@ function checkStairs() {
     if (performance.now() - sealedMsgT > 2500) { sealedMsgT = performance.now(); flash('The way down is sealed until the boss falls.'); }
     return;
   }
+  if (upProgress() >= 0.85 && floorNum > 1) { changeFloor(floorNum - 1, 'up'); return; }   // climbed back up
   if (stairProgress() < 0.85) return;
-  if (floorNum < MAX_FLOOR) startFloor(floorNum + 1);
+  if (floorNum < MAX_FLOOR) changeFloor(floorNum + 1, 'down');
   else finishRun();
 }
 function finishRun() {
@@ -1027,7 +1172,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, hunger, arrows, shopFloor, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, hunger, arrows, floorCache, shopFloor, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
