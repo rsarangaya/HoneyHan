@@ -3,7 +3,7 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
   bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
@@ -155,6 +155,11 @@ function makeDecor(d) {
       B(inner, 0.1, 0.75, 1.1, wood, -1.0, 0.45, 0);                                                 // headboard
       B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, 0.5); B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, -0.5);
       if (rg() < 0.5) B(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
+      break;
+    }
+    case 'puddle': {                                               // a flat, glossy patch of shallow water
+      const pm = new THREE.MeshBasicMaterial({ color: 0x3a6a9a, transparent: true, opacity: 0.55 });
+      for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.5 + rg() * 0.5, 14), pm); d.rotation.x = -Math.PI / 2; d.position.set((rg() - 0.5) * 0.9, 0.012 + i * 0.001, (rg() - 0.5) * 0.9); inner.add(d); }
       break;
     }
     case 'counter': {                                              // the merchant's counter: planks, coins, scales and a lantern

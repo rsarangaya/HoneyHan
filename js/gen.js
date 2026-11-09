@@ -434,6 +434,17 @@ function layoutFloor(seed, floorNum, opts) {
     }
   }
 
+  // ---- the Sunken Tavern's gimmick: shallow puddles that splash when you step in them (no collision, flat decals) ----
+  if (opts.themeName === 'The Sunken Tavern') {
+    const wet = rooms.filter(r => !r.locked && r.theme !== 'shop'), taken = new Set();
+    for (let i = 4 + rng.int(0, 3), tries = 0; i > 0 && tries < 80; tries++) {
+      const r = rng.pick(wet), x = rng.int(r.x, r.x + r.w - 1), y = rng.int(r.y, r.y + r.h - 1), k = y * w + x;
+      if (at(x, y) !== T_FLOOR || blocked[k] || taken.has(k) || (x === start.x && y === start.y)) continue;
+      taken.add(k); i--;
+      decor.push({ kind: 'puddle', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+    }
+  }
+
   // ---- ceiling decor (no collision): a chandelier over the centre of most rooms (always in halls, libraries,
   // shrines and rich locked rooms), a couple more in big rooms, and wooden beams across rooms of 6+ tiles ----
   const always = new Set(['barracks', 'messhall', 'library', 'shrine', 'armory', 'vault', 'shop']);

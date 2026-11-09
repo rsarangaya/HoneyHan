@@ -14,10 +14,16 @@ const ENEMY_TYPES = {
   bandit:  { name: 'Drunk Bandit', zones: [0.2, 0.5, 0.3], weapon: 'dagger', hpMul: 0.9, dmgMul: 0.9, vis: 0.65, hear: 0.5, shout: 1.4, sway: true },
   rat:     { name: 'Giant Rat',    zones: [0, 0.2, 0.8], model: 'quad', hpMul: 0.2, dmgMul: 0.35, speed: 1.1, reach: 0.6, windMul: 0.6, r: 0.25, scale: 0.5, height: 0.45, vis: 0.8, hear: 1.4, fur: 0x6a5a48 },
   wolf:    { name: 'Tamed Wolf',   zones: [0, 0.5, 0.5], model: 'quad', hpMul: 0.7, dmgMul: 0.8, speed: 1.3, reach: 1.3, windMul: 0.6, cdMul: 0.85, r: 0.4, scale: 1, height: 0.95, vis: 0.6, smell: 7, shout: 1.4, sneakCap: 2, fur: 0x7a7e86 },
+  // Generic specials, used in every theme. ranged: { kind, min, max (metres it likes to shoot from), wind (s), cd (s), speed (m/s) }.
+  archer:  { name: 'Goblin Archer', zones: [0.3, 0.7, 0], weapon: 'mace', look: 'bow', hpMul: 0.8, dmgMul: 0.8, speed: 1.1, vis: 1.15, hear: 0.9,
+             ranged: { kind: 'arrow', min: 5, max: 13, wind: 0.85, cd: 2.0, speed: 24 } },
+  shaman:  { name: 'Goblin Shaman', zones: [0.3, 0.5, 0.2], weapon: 'sword', look: 'staff', noGear: true, hpMul: 0.7, dmgMul: 0.6, vis: 0.6, hear: 1.5, shout: 1.2,
+             ranged: { kind: 'hex', min: 5, max: 11, wind: 0.9, cd: 3.0, speed: 12, healAt: 0.6, healAmt: 18, healR: 10, healCd: 6, healWind: 1.0 } },
+  brute:   { name: 'Brute',        zones: [0.4, 0.5, 0.1], weapon: 'mace', hpMul: 3, dmgMul: 2, speed: 0.8, reach: 1.25, windMul: 1.7, cdMul: 1.3, r: 0.6, scale: 1.5, noStagger: true, sneakCap: 2, skin: 0x8a7a5a },
   bouncer: { name: 'Bouncer',      zones: [0.3, 0.5, 0.2], weapon: 'mace', hpMul: 2.2, dmgMul: 1.5, speed: 0.9, reach: 1.15, windMul: 1.3, r: 0.55, scale: 1.3, noStagger: true, sneakCap: 2.5, skin: 0x7d8672 },
 };
 for (const t of Object.values(ENEMY_TYPES)) {   // fill the defaults so the rest of the code never checks for undefined
-  Object.assign(t, { model: 'biped', hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
+  Object.assign(t, { model: 'biped', look: null, ranged: null, hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
 }
 
 // Natives per theme: common natives fill most of the population, the elite shows up on floors 3 and 4.
@@ -47,12 +53,22 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
   const guards = f.enemies.filter(e => !e.boss);
   const seedOf = () => (rng() * 4294967296) >>> 0;
   // Wolves keep a goblin handler (from floor 2, up to 3). Reserve the handlers first so natives never take them.
-  const wolves = floorNum >= 2 ? Math.min(3, floorNum - 1) : 0;
+  const wolves = floorNum >= 2 ? (floorNum === 5 ? 2 : Math.min(3, floorNum - 1)) : 0;   // fewer in the arena, where the rim has few guards
   const handlers = rng.shuffle(f.enemies.map((e, i) => i).filter(i => !f.enemies[i].boss)).slice(0, wolves);
   const reserved = new Set(handlers.map(i => f.enemies[i]));
+
+  // Generic specials in every theme (assigned first, from the guards that are not wolf handlers): archers from floor 2,
+  // a shaman from floor 3, one brute on floor 4 and in the arena. At least one plain goblin always remains.
+  const keep = roster && floorNum < 5 ? 2 : 1;
+  const plain = () => guards.filter(g => !g.type && !reserved.has(g));
+  const special = (type, n) => { for (let i = 0; i < n; i++) { const p = plain(); if (p.length <= keep) return; rng.pick(p).type = type; } };   // keep a couple of plain guards for the natives
+  special('brute', floorNum === 4 || floorNum === 5 ? 1 : 0);
+  special('shaman', floorNum >= 3 ? 1 : 0);
+  special('archer', floorNum >= 4 ? 2 : floorNum >= 2 ? 1 : 0);
+
   if (roster) {
     const commons = rng.shuffle(roster.commons.slice()).slice(0, MAX_NATIVE_TYPES - (roster.elite && floorNum >= 3 && floorNum <= 4 ? 1 : 0));
-    const free = guards.filter(g => !reserved.has(g));
+    const free = guards.filter(g => !reserved.has(g) && !g.type);
     const share = Math.min(1, NATIVE_SHARE[Math.min(floorNum, 5) - 1] * guards.length / Math.max(1, free.length));   // reserved handlers stay goblins, so the rest carry the share
     const solo = commons.filter(t => ENEMY_TYPES[t].model !== 'quad');
     let eliteLeft = roster.elite && floorNum >= 3 && floorNum <= 4 ? 1 : 0;
@@ -63,7 +79,7 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
       g.type = solo[weightedIndex(rng, weights)];
     }
     if (eliteLeft) { const g = free.find(e => e.type !== roster.elite); if (g) g.type = roster.elite; }   // the elite always turns up on floors 3 and 4
-    if (!guards.some(g => !g.type)) { const g = guards.find(g => g.type !== roster.elite); if (g) delete g.type; }   // always leave at least one plain goblin
+    if (!guards.some(g => !g.type)) { const g = guards.find(g => roster.commons.includes(g.type)); if (g) delete g.type; }   // always leave at least one plain goblin
     if (commons.includes('rat')) {                                                           // rat packs of 3, in a storeroom if there is one
       const packs = floorNum >= 3 ? 2 : 1, homes = f.rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop');
       for (let p = 0; p < packs && homes.length; p++) {
@@ -96,3 +112,7 @@ function respawnType(themeName, floorNum, rnd) {
 function linkHandlers(list) {
   list.forEach(e => { if (e.spec.handler !== undefined) e.handlerRef = list[e.spec.handler] || null; });
 }
+
+// The boss's name depends on the theme (the Sunken Tavern's is its innkeeper).
+const THEME_BOSS = { 'The Sunken Tavern': 'Giant Innkeeper' };
+const bossNameFor = themeName => THEME_BOSS[themeName] || 'Cave Warlord';

@@ -340,6 +340,26 @@ function playRage(it) {
   if (--it.charges <= 0) { inv.remove(it); addLog("The recorder's speakers blow out.", '#ff9a2a'); }
 }
 
+// ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
+function spawnEnemyShot(s) {
+  const gravity = s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
+  const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
+  const jitter = () => (Math.random() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
+  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh('#b060ff') };
+  a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
+}
+function enemyShotHit(a) {
+  if (a.kind === 'hex') {                                                            // a hex slows or dazes, and no block stops it
+    hitReaction(4);
+    const s = Math.random() < 0.5 ? 'slow' : 'daze';
+    if (pst.apply(s, 4)) discover('status:' + s, STATUS[s].name);
+    mark('HEXED', '#c58aff'); addLog(`Hexed: ${STATUS[s].name}!`, '#c58aff');
+    return;
+  }
+  const zone = a.y > player.eye - 0.4 ? 'head' : a.y > 0.65 ? 'body' : 'legs';       // where it landed, by your height
+  resolveEnemyAttack(a.from, zone, true);
+}
+
 // ---- bow: hold attack to draw, release to fire. One arrow per shot, found arrows can be picked up again ----
 const arrows = [];          // flying and stuck arrows
 function startDraw(w) {
@@ -371,6 +391,14 @@ function updateArrows(dt) {
     const a = arrows[i];
     if (a.stuck) {
       if (a.kind !== 'wand' && Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
+      continue;
+    }
+    if (a.owner === 'enemy') {
+      const ev = stepArrow(a, dt, floor, enemies, player);
+      a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
+      if (a.kind === 'arrow') a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+      if (ev && ev.type === 'player') enemyShotHit(a);
+      if (ev || a.life <= 0) { group.remove(a.mesh); arrows.splice(i, 1); }
       continue;
     }
     if (a.kind === 'wand') {                                                       // a wand bolt: no drop, no recovery, hits anything alive
@@ -416,7 +444,7 @@ function makeCorpse(e, sneak) {
   });
 }
 
-function resolveEnemyAttack(e, zone) {
+function resolveEnemyAttack(e, zone, ranged = false) {
   const w = wstats();
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
@@ -431,10 +459,10 @@ function resolveEnemyAttack(e, zone) {
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
     else if (cb.blockT <= bs.parryWin) {
-      e.stun = 1.0; e.winding = false; e.atkCd = 0.6;
-      mark('PARRY', '#7fe8ff'); loud(5); return;
+      if (!ranged) { e.stun = 1.0; e.winding = false; e.atkCd = 0.6; }            // parrying a blow staggers the attacker, an arrow just stops
+      mark(ranged ? 'ARROW BLOCKED' : 'PARRY', '#7fe8ff'); loud(5); return;
     } else if (bs.cost > 0) {
-      if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); mark('BLOCKED', '#cfe'); loud(5); return; }
+      if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); mark(ranged ? 'ARROW BLOCKED' : 'BLOCKED', '#cfe'); loud(5); return; }
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
   }
@@ -727,8 +755,10 @@ let respawnT = Infinity, baseGuards = 0;
 
 function startFloor(n) {
   floorNum = n;
-  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor });
+  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
+  if (floor.boss) { const b = floor.enemies.find(e => e.boss); if (b && theme.name === 'The Sunken Tavern') b.innkeeper = true; }   // the Tavern's boss is its giant innkeeper
+  floor.puddles = new Set(floor.decor.filter(d => d.kind === 'puddle').map(d => d.y * floor.w + d.x));   // shallow water: splashes carry sound
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
@@ -740,6 +770,7 @@ function startFloor(n) {
   player.place(floor);
   baseGuards = floor.enemies.length;
   respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
+  el('boss').firstElementChild.textContent = bossNameFor(theme.name);
   hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
   const locked = floor.doors.map(d => d.room).join(', ');
   if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
@@ -915,8 +946,13 @@ function frame(now) {
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse }); rings.push({ x: player.x, z: player.z, r: pulse, t: 0 }); }
     if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: player.noiseRadius });
+    if (player.noiseRadius > 0 && floor.puddles.size && floor.puddles.has(player.tileY * floor.w + player.tileX)) {   // shallow water: a moving step splashes, even a crouched one
+      const r = player.crouching ? 4 : 8;
+      events.push({ x: player.x, z: player.z, r }); rings.push({ x: player.x, z: player.z, r, t: 0 });
+      if (discover('item:puddle', 'Shallow water')) flash('Splash! Shallow water carries sound.');
+    }
     pulse = 0;
-    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
+    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }

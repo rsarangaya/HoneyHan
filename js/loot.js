@@ -158,6 +158,9 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
   if (kind === 'corpse') {
     if (type === 'cook' && rng() < 0.8) { out.push({ type: 'food', kind: rng() < 0.3 ? 'stew' : rollFoodKind(rng), n: 1 }); return out; }   // a cook carries food
     if (type === 'rat') { if (rng() < 0.25 + bonus) out.push({ type: 'gold', n: rng.int(1, 4) }); return out; }   // rats carry next to nothing
+    if (type === 'archer' && rng() < 0.7) { out.push({ type: 'arrows', n: rng.int(3, 6) }); return out; }                  // archers carry arrows
+    if (type === 'shaman') { if (rng() < 0.1) out.push({ type: 'wand', kind: rollWandKind(rng) }); else if (rng() < 0.5) out.push(potion()); return out; }
+    if (type === 'brute') { if (rng() < 0.6) out.push(rollEquipment(floorNum, rng, { minTier: 2 })); out.push({ type: 'gold', n: rng.int(8, 20) }); return out; }
     if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
     if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(10, 25) }); return out; }   // the elite always pays
     if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(8, 25) }); return out; }          // robbers carry gold

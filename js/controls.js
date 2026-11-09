@@ -63,7 +63,7 @@ function discoverEnemiesInView() {
   for (const e of enemies) {
     const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
     if (d > 16 || (dx * fx + dz * fz) / (d || 1) < 0.5 || !hasLOS(floor, player.x, player.z, e.x, e.z)) continue;
-    discover(e.boss ? 'enemy:boss' : 'enemy:' + e.type, e.boss ? 'Cave Warlord' : e.T.name);
+    discover(e.boss ? 'enemy:boss' : 'enemy:' + e.type, e.boss ? bossNameFor(theme.name) : e.T.name);
   }
 }
 

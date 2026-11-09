@@ -41,10 +41,14 @@ for (let s = 1; s <= N; s++) {
   for (let n = 1; n <= 5; n++) {
     const boss = n === 5, armory = n === 1 + (s % 4);
     const where = `seed ${seed} floor ${n}`;
-    const f = G.generateFloor(seed, n, { armory, boss });
+    const tavern = s % 2 === 1, f = G.generateFloor(seed, n, { armory, boss, themeName: tavern ? 'The Sunken Tavern' : undefined });
     checked++;
     const closed = flood(f, false), open = flood(f, true), guardOpen = flood(f, true, true), at = (x, y) => y * f.w + x;
     if (!touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');
+    const puddles = f.decor.filter(d => d.kind === 'puddle');
+    if (tavern && !boss && (puddles.length < 3 || puddles.length > 7)) fail(where, `${puddles.length} puddles on a Tavern floor`);
+    if (!tavern && puddles.length) fail(where, 'puddles outside the Tavern');
+    for (const d of puddles) if (f.tiles[d.y * f.w + d.x] === G.T_WALL || f.blocked[d.y * f.w + d.x] || (d.x === f.start.x && d.y === f.start.y)) fail(where, 'a puddle on a wall, furniture or the start tile');
     if (armory && !f.rooms.some(r => r.theme === 'armory')) fail(where, 'armory missing');
     for (const p of f.props) if (!touchable(f, open, p.x, p.y)) fail(where, `${p.kind} at ${p.x},${p.y} unreachable`);
     for (const e of f.enemies) for (const p of [{ x: e.x, y: e.y }, ...e.route])
@@ -64,7 +68,7 @@ for (let s = 1; s <= N; s++) {
     }
     if (f.props.some(p => p.kind === 'pantry') === false && f.rooms.some(r => r.theme === 'messhall')) fail(where, 'a mess hall without a food shelf');
     if (!boss && s % 2 === 0) {                                              // the same floor with a shop in it
-      const g = G.generateFloor(seed, n, { armory, boss: false, shop: true }), wh = where + ' (shop)';
+      const g = G.generateFloor(seed, n, { armory, boss: false, shop: true, themeName: tavern ? 'The Sunken Tavern' : undefined }), wh = where + ' (shop)';
       const gc = flood(g, false), go = flood(g, true, true), gp = flood(g, true), at2 = (x, y) => y * g.w + x;
       if (!g.shop) fail(wh, 'no shop was made');
       else {
