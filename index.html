@@ -46,6 +46,19 @@
 </style>
 </head>
 <body>
+<div id="loadError" style="display:none;position:fixed;left:0;right:0;top:0;z-index:99;background:#400;color:#fff;font:14px/1.4 system-ui,sans-serif;padding:10px 14px;white-space:pre-wrap"></div>
+<script>
+// If a script fails to load or crashes, say so on screen instead of leaving a black page.
+(function () {
+  var box = document.getElementById('loadError'), n = 0;
+  function show(msg) { if (n++ > 4) return; box.style.display = 'block'; box.textContent += (box.textContent ? '\n' : 'HoneyHan could not start. ') + msg; }
+  addEventListener('error', function (e) {
+    if (e.target && e.target.src) show('Missing or blocked file: ' + e.target.src + ' (upload every file in js/ and lib/, and hard refresh with Ctrl+Shift+R)');
+    else show((e.message || 'Script error') + (e.filename ? ' in ' + e.filename.split('/').slice(-2).join('/') + ':' + e.lineno : ''));
+  }, true);
+  if (!document.createElement('canvas').getContext('webgl')) show('WebGL is not available in this browser, so the 3D view cannot draw.');
+})();
+</script>
 <canvas id="game"></canvas>
 <div class="hud" id="top"><b id="floor"></b><span id="theme"></span><span id="seed"></span></div>
 <canvas id="mini" width="176" height="176"></canvas>
