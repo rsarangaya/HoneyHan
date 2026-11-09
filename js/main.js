@@ -197,7 +197,7 @@ function mark(text, color = '#fff') {
 function startAttack() {
   const w = wstats();
   if (w.ranged) { flash('The bow is not usable yet'); return; }
-  if (cb.atk || cb.block || inv.swapT > 0 || (cb.stamina < w.stam && !dev.on)) return;
+  if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
   spend(w.stam);
   cb.atk = { t: 0, hit: false };
 }
@@ -214,12 +214,18 @@ function playerHit() {
   const killed = e.hurt(dmg, player);
   loud(sneak && killed ? 2 : w.noise);            // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); }
-  else mark(`${t.zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}`, t.zone === 'head' ? '#ff9a3a' : '#fff');
+  else {
+    const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples
+    const proc = pr && pr.zone === t.zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
+    if (proc) discover('status:' + pr.status, STATUS[pr.status].name);
+    mark(`${t.zone.toUpperCase()}${sneak ? ' SNEAK' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, t.zone === 'head' ? '#ff9a3a' : '#fff');
+  }
 }
 
 // The boss always leaves a body holding: one Epic piece (small chance of Legendary), one more rolled
 // piece of equipment (Rare or better) and gold.
 function bossDefeated(e) {
+  e.corpseDone = true;
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
   const epic = rollEquipment(floorNum, rng, {});
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
@@ -233,6 +239,7 @@ function bossDefeated(e) {
 
 // A dead enemy leaves a lootable body only if its drop roll gave something.
 function makeCorpse(e, sneak) {
+  e.corpseDone = true;
   const bonus = sneak ? 0.15 : 0;
   if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear).length) return;
   propObjs.push({
@@ -254,16 +261,27 @@ function resolveEnemyAttack(e, zone) {
       mark('PARRY', '#7fe8ff'); loud(5); return;
     } else if (w.blockCost > 0) {
       if (cb.stamina >= w.blockCost || dev.on) { spend(w.blockCost); mark('BLOCKED', '#cfe'); loud(5); return; }
-      cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); return;
+      cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
   }
   cb.atk = null;
   damage(full);
+  hitStatuses(e, zone);
+}
+// What a landed hit does besides damage: leg hits slow (the boss cripples), head hits daze, a dagger bleeds.
+function hitStatuses(e, zone) {
+  const add = n => { if (pst.apply(n)) { discover('status:' + n, STATUS[n].name); addLog(STATUS[n].name + '!', STATUS[n].color); } };
+  if (zone === 'legs') add(e.boss ? 'cripple' : 'slow');
+  else if (zone === 'head') add('daze');
+  else if (e.weaponKind === 'dagger') add('bleed');
 }
 
 function updateCombat(dt) {
   // gear and potions feed the player and the guards' senses
-  player.speedMul = (dev.on ? 5 : 1) * (inv.buffs.swift > 0 ? 1.35 : 1);
+  player.speedMul = (dev.on ? 5 : 1) * (inv.buffs.swift > 0 ? 1.35 : 1) * pst.moveMul();
+  const bleed = pst.update(dt);
+  if (bleed > 0 && !dev.on && inv.hp > 1) inv.hp = Math.max(1, inv.hp - bleed);   // bleeding never kills on its own
+  if (pst.has('daze')) spend(STATUS.daze.drain * dt);
   player.noiseBonus = inv.armorNoise();
   player.stealthMul = inv.buffs.shadow > 0 ? 0.5 : 1;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
@@ -282,7 +300,7 @@ function updateCombat(dt) {
     if (!cb.atk.hit && cb.atk.t >= w.dur * w.hitAt) { cb.atk.hit = true; playerHit(); }
     if (cb.atk.t >= w.dur) cb.atk = null;
   }
-  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !wstats().ranged && (cb.stamina > 0 || dev.on);
+  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !wstats().ranged && (cb.stamina > 0 || dev.on);
   if (canBlock) { if (!cb.block) { cb.block = true; cb.blockT = 0; } else cb.blockT += dt; } else cb.block = false;
 
   if (markTimer > 0) { markTimer -= dt; if (markTimer <= 0) document.getElementById('hitmark').style.opacity = 0; }
@@ -437,7 +455,8 @@ function updateHud() {
   }).join('');
   const w = inv.equip.weapon;
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
-  const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`).join(' &middot; ');
+  const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
+    .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
   const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
@@ -627,7 +646,7 @@ addEventListener('contextmenu', e => e.preventDefault());
 
 startFloor(1);
 if (params.has('dev')) setDev(true);
-let last = performance.now(), frameNo = 0;
+let last = performance.now(), frameNo = 0, dazeOn = false;
 function frame(now) {
   const dt = (now - last) / 1000; last = now;
   if (state === 'play') {
@@ -645,6 +664,7 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
+    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog('A guard bled out.', '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
@@ -658,6 +678,9 @@ function frame(now) {
     camera.rotation.x += (Math.random() - 0.5) * 2 * s; camera.rotation.y += (Math.random() - 0.5) * 2 * s; camera.rotation.z += (Math.random() - 0.5) * 3 * s;
     camera.position.y -= s * 2;
   }
+  const dazed = pst.has('daze');
+  if (dazed !== dazeOn) { dazeOn = dazed; canvas.style.filter = dazed ? 'blur(2.5px)' : ''; }
+  if (dazed) camera.rotation.z += Math.sin(now / 180) * 0.035;
   stairsLight.intensity = 0.35 + Math.sin(now / 300) * 0.08;
   updateViewmodel(dt);
   updateTorches(now);
@@ -670,7 +693,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

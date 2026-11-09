@@ -21,9 +21,9 @@ const TUNE = {
 // blockCost: stamina per blocked hit (0 means the weapon cannot block normally).
 // spd: attack speed stat. Swing time is dur / (spd x the wielder's attack speed), so 1.35 swings 35% faster.
 const WSTATS = {
-  sword:  { dmg: 20, dur: 0.50, spd: 1.0,  hitAt: 0.45, reach: 2.3, stam: 12, sneak: 3,   noise: 6, parryWin: 0.20, blockCost: 15 },
-  dagger: { dmg: 12, dur: 0.30, spd: 1.35, hitAt: 0.40, reach: 1.8, stam: 7,  sneak: 99,  noise: 3, parryWin: 0.15, blockCost: 0 },
-  mace:   { dmg: 32, dur: 0.85, spd: 0.8,  hitAt: 0.55, reach: 2.1, stam: 22, sneak: 2.5, noise: 8, parryWin: 0.0,  blockCost: 25 },
+  sword:  { proc: { zone: 'legs', status: 'cripple', chance: 0.25 }, dmg: 20, dur: 0.50, spd: 1.0,  hitAt: 0.45, reach: 2.3, stam: 12, sneak: 3,   noise: 6, parryWin: 0.20, blockCost: 15 },
+  dagger: { proc: { zone: 'body', status: 'bleed', chance: 1 }, dmg: 12, dur: 0.30, spd: 1.35, hitAt: 0.40, reach: 1.8, stam: 7,  sneak: 99,  noise: 3, parryWin: 0.15, blockCost: 0 },
+  mace:   { proc: { zone: 'head', status: 'stun', chance: 1, dur: 1.6 }, dmg: 32, dur: 0.85, spd: 0.8,  hitAt: 0.55, reach: 2.1, stam: 22, sneak: 2.5, noise: 8, parryWin: 0.0,  blockCost: 25 },
   bow:    { ranged: true },
 };
 

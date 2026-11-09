@@ -1,7 +1,7 @@
 # Status
 
 Project: Prototype Test (working name), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-09
+Last updated: 2026-11-09 (branch `impatience`: steps 2 to 8 of the build order, each tested)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
@@ -102,6 +102,11 @@ Read `DESIGN.md` for the full design. At the end of each work block, update this
     - `node tests/game.test.js`: headless Chromium through Playwright (`npm i -D playwright`, then `npx playwright install chromium`), about 30 s. Floors 1 to 5 build on 3 seeds, the stairs lead down, a swarm keeps apart and out of the player, the player cannot walk through a guard, dagger sneak kill, sword parry, death screen, no page errors. With the collision fix switched off it fails the three collision checks, so it does catch that bug.
     - Run both after every change.
   - Checked: both test files pass. Not checked: how guard spacing feels in a real fight (a ring of guards round you may now be easier to read and block, or may box you in), boss spacing in the arena.
+
+## Branch `impatience` (2026-11-09): build order steps 2 to 8, built in one go, none of it play-tested by a real player
+Run `node tests/run-all.js` after every change (gen test, status test, game test).
+
+- Step 2, statuses (`js/status.js`, `tests/status.test.js`): slow, cripple, bleed, stun, daze for the player (`pst`) and every enemy (`e.st`). Strongest movement effect wins, no stacking, a refresh keeps the longer time, cripple recovers gradually and cannot be chained (4 s immunity), stun has a 3 s immunity. Weapon passives (`proc` in `WSTATS`): dagger bleeds on body hits, mace stuns on head hits (1.6 s), sword cripples on 25% of leg hits. Guards: leg hits slow you (the boss cripples), head hits daze (blur, sway, stamina drain), a dagger guard's body hit bleeds. Bleed never takes the player below 1 HP and a Healing Potion stops it. An enemy that bleeds to death leaves a body. The boss cannot be stunned. Enemies tint by status. The HUD shows active statuses and the glossary has a Statuses tab. All numbers are in the tuning panel (storage key `prototype-test-tune-5`).
 
 ## Decisions made
 - Name: Prototype Test (placeholder).

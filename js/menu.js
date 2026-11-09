@@ -69,6 +69,11 @@ const pauseMenu = (() => {
     ];
   }
 
+  function statusCards() {
+    const src = { slow: 'Leg hits from guards, and some wands and bows.', cripple: 'Sword leg hits (sometimes) and the boss\'s leg hits.', bleed: 'A dagger\'s body hits.', stun: 'A mace\'s head hits and some wands. The boss cannot be stunned.', daze: 'Head hits from guards.' };
+    return Object.keys(STATUS).map(k => card('status:' + k, STATUS[k].name, STATUS[k].color, [STATUS[k].desc, 'Comes from: ' + src[k], 'Works the same on you and on enemies (daze only affects you).']));
+  }
+
   // ---- rendering ----
   function controlsHtml() {
     const rows = CONTROL_LABELS.map(([a, label]) =>
@@ -78,7 +83,7 @@ const pauseMenu = (() => {
       <p><button data-act="reset">Reset all to defaults</button></p>`;
   }
   function glossaryHtml() {
-    const sections = { items: 'Items', equipment: 'Equipment', enemies: 'Enemies' };
+    const sections = { items: 'Items', equipment: 'Equipment', enemies: 'Enemies', statuses: 'Statuses' };
     const tabs = Object.entries(sections).map(([k, v]) => `<button data-g="${k}" class="${gtab === k ? 'on' : ''}">${v}</button>`).join(' ');
     let body, total, got;
     if (gtab === 'items') { const c = itemCards(); body = `<div class="cards">${c.join('')}</div>`; total = c.length; got = c.filter(x => !x.includes('card locked')).length; }
@@ -86,7 +91,8 @@ const pauseMenu = (() => {
       const e = equipCards(), all = [...e.weapons, ...e.armor, ...e.tiers];
       body = `<h3>Weapons</h3><div class="cards">${e.weapons.join('')}</div><h3>Armor</h3><div class="cards">${e.armor.join('')}</div><h3>Tiers</h3><div class="cards">${e.tiers.join('')}</div>`;
       total = all.length; got = all.filter(x => !x.includes('card locked')).length;
-    } else { const c = enemyCards(); body = `<div class="cards">${c.join('')}</div>`; total = c.length; got = c.filter(x => !x.includes('card locked')).length; }
+    } else if (gtab === 'statuses') { const c = statusCards(); body = `<div class="cards">${c.join('')}</div>`; total = c.length; got = c.filter(x => !x.includes('card locked')).length; }
+    else { const c = enemyCards(); body = `<div class="cards">${c.join('')}</div>`; total = c.length; got = c.filter(x => !x.includes('card locked')).length; }
     return `<div class="tabs">${tabs}<span class="dim" style="margin-left:auto;align-self:center">Discovered ${got} / ${total}</span></div>${body}`;
   }
   function render() {

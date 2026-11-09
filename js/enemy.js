@@ -119,6 +119,7 @@ class Enemy {
     this.last = null; this.path = []; this.pk = ''; this.rp = 0;
     this.wait = 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
     this.seen = false;
+    this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.seed = spec.seed;
     this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp; this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
@@ -146,6 +147,7 @@ class Enemy {
     const helmet = this.boss ? heavy('helmet') : piece('helmet', 0.4), vest = this.boss ? heavy('chest') : piece('chest', 0.4), boots = this.boss ? heavy('boots') : piece('boots', 0.35);
     const hood = !helmet && rg() < 0.4;
     const kind = this.boss ? 'mace' : rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace';
+    this.weaponKind = kind;
     const weapon = { type: 'weapon', base: kind, tier: this.boss ? 3 : tierOf() };
     this.spdRoll = this.boss ? 0.7 : WSTATS[kind].spd * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
     this.gear = [helmet, vest, boots, weapon].filter(Boolean);
@@ -253,6 +255,7 @@ class Enemy {
 
   // Walk toward a world point along a BFS path. Returns the straight-line distance left.
   goTo(tx, tz, speed, dt) {
+    speed *= this.st.moveMul();                  // slow and cripple
     const T = TILE, key = Math.floor(tx / T) + ',' + Math.floor(tz / T);
     if (key !== this.pk || this.rp <= 0) {
       this.path = findPath(this.floor, Math.floor(this.x / T), Math.floor(this.z / T), Math.floor(tx / T), Math.floor(tz / T));
@@ -296,10 +299,20 @@ class Enemy {
 
   set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; } }
 
+  die() { this.dead = true; this.winding = false; this.icon.visible = false; this.cone.visible = false; }
+
+  // Start a status. The boss cannot be stunned (only a parry staggers it). Returns whether it took hold.
+  addStatus(n, dur) {
+    if (n === 'stun' && this.boss) return false;
+    const ok = this.st.apply(n, dur);
+    if (ok && n === 'stun') { this.stun = Math.max(this.stun, dur || STATUS.stun.dur); this.winding = false; }
+    return ok;
+  }
+
   // Returns true if the enemy died from this hit.
   hurt(dmg, player) {
     this.hp -= dmg; this.hitT = 0.14;
-    if (this.hp <= 0) { this.dead = true; this.winding = false; this.icon.visible = false; this.cone.visible = false; return true; }
+    if (this.hp <= 0) { this.die(); return true; }
     if (!this.boss) { this.stun = 0.35; this.winding = false; }     // the boss shrugs hits off (only a parry staggers it)
     this.last = { x: player.x, z: player.z };
     if (this.state !== 'alerted') this.set('alerted');
@@ -310,6 +323,8 @@ class Enemy {
   // Returns the zone ('head' | 'body' | 'legs') of an attack that lands this frame, else null.
   update(dt, player, noise) {
     if (this.dead) { this.deadT += dt; this.sync(dt); return null; }
+    const bleed = this.st.update(dt);
+    if (bleed > 0) { this.hp -= bleed; if (this.hp <= 0) { this.die(); this.sync(dt); return null; } }   // bled out: main.js leaves the body
     const f = this.floor;
     const dx = player.x - this.x, dz = player.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
     if (this.boss && this.dormant) {   // waits in the middle of the arena and ignores sights and sounds until you are close
@@ -431,7 +446,7 @@ class Enemy {
     this.arms[1].rotation.x = p[2]; this.arms[0].rotation.x = p[3];
     // hit flash
     this.hitT = Math.max(0, this.hitT - dt);
-    for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : 0x000000);
+    for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : this.st.tint());
 
     const show = this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;

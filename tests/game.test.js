@@ -39,7 +39,7 @@ const HELPERS = () => {
       game.startFloor(1);
       for (const e of game.enemies) e.mesh.parent && e.mesh.parent.remove(e.mesh);
       game.enemies.length = 0;
-      game.inv.hp = game.inv.maxHp; game.cb.stamina = 100; game.cb.atk = null; game.cb.want = false;
+      game.inv.hp = game.inv.maxHp; game.cb.stamina = 100; game.cb.atk = null; game.cb.want = false; game.pst.clear();
       const P = game.player, f = game.floor;
       let best = 0, yaw = 0;
       for (let k = 0; k < 16; k++) {
@@ -94,7 +94,7 @@ const HELPERS = () => {
       await page.close();
     }
 
-    const page = await open(7);
+    let page = await open(7);
 
     // 2. The stairwell leads to the next floor.
     const floorText = await page.evaluate(async () => {
@@ -173,6 +173,84 @@ const HELPERS = () => {
       return { state: game.state, text: document.getElementById('overlayText').innerText };
     });
     check('death ends the run', death.state === 'dead' && /You died/.test(death.text), death.state);
+
+    // ---- statuses (a fresh page: the death test above leaves the game stopped) ----
+    await page.close(); page = await open(7);
+    // 8. Weapon passives: a mace head hit stuns, a sword leg hit cripples, a dagger body hit bleeds.
+    const procs = await page.evaluate(async () => {
+      const out = {};
+      const swing = async (base, pitch, status) => {
+        T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base, tier: 0 });
+        const e = T.guard(1.2, 'toward', true); e.hp = e.maxHp = 500;
+        game.player.pitch = pitch; Math.random = () => 0;       // chance rolls always succeed
+        await T.sleep(100); game.cb.press = true;
+        const got = await T.until(() => e.st.has(status), 4000);
+        return { got, hp: e.hp, e };
+      };
+      out.mace = (await swing('mace', 0, 'stun')).got;
+      const sw = await swing('sword', -0.95, 'cripple'); out.sword = sw.got;
+      const dg = await swing('dagger', -0.3, 'bleed'); out.dagger = dg.got;
+      const hp0 = dg.e.hp; await T.sleep(1500); out.bleedLoss = hp0 - dg.e.hp;
+      return out;
+    });
+    check('mace head hit stuns', procs.mace);
+    check('sword leg hit cripples', procs.sword);
+    check('dagger body hit bleeds', procs.dagger);
+    check('bleed drains health over time', procs.bleedLoss > 1, procs.bleedLoss.toFixed(1) + ' HP in 1.5 s');
+
+    // 9. A slowed or crippled guard moves slower; a guard that bleeds to death leaves a body.
+    const move = await page.evaluate(async () => {
+      T.reset(); game.inv.hp = 1e9;
+      const run = async (status) => {
+        const e = T.guard(5, 'toward', false); e.update = Enemy.prototype.update;
+        e.route = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+        if (status) e.st.apply(status, 30);
+        const x0 = e.x, z0 = e.z; e.last = { x: game.player.x, z: game.player.z };
+        const t0 = performance.now(); let walked = 0;
+        const px = e.x, pz = e.z;
+        for (let i = 0; i < 30; i++) { e.goTo(game.player.x - Math.sin(game.player.yaw) * 20, game.player.z - Math.cos(game.player.yaw) * 20, 4, 0.05); }
+        return Math.hypot(e.x - px, e.z - pz);
+      };
+      const normal = await run(null), slow = await run('slow'), crip = await run('cripple');
+      T.reset();
+      const e = T.guard(3, 'away', false); e.hp = 2; e.addStatus('bleed', 10);
+      await T.until(() => e.dead, 5000); await T.sleep(100);
+      return { normal, slow, crip, dead: e.dead, body: e.corpseDone };
+    });
+    check('slow moves a guard slower', move.slow < move.normal * 0.85, `${move.slow.toFixed(2)} vs ${move.normal.toFixed(2)} m`);
+    check('cripple nearly stops a guard', move.crip < move.normal * 0.4, `${move.crip.toFixed(2)} m`);
+    check('a guard can bleed to death and leaves a body', move.dead && move.body);
+
+    // 10. Hits on the player: a leg hit slows, a head hit dazes, a dagger body hit bleeds, a stun locks out attacking.
+    const hurt = await page.evaluate(async () => {
+      const out = {};
+      const take = async (zone, kind) => {
+        T.reset(); game.inv.hp = 1e9;
+        const e = T.guard(1.3, 'toward', true); if (kind) e.weaponKind = kind;
+        const upd = e.update; e.update = function (...a) { if (this.winding) this.zone = zone; return upd.apply(this, a); };
+        const names = zone === 'legs' ? 'slow' : zone === 'head' ? 'daze' : 'bleed';
+        return await T.until(() => game.pst.has(names), 8000);
+      };
+      out.slow = await take('legs'); await T.sleep(150); out.mulSlow = game.player.speedMul;
+      out.daze = await take('head');
+      out.bleed = await take('body', 'dagger');
+      T.reset(); game.pst.apply('stun', 5); game.cb.press = true; await T.sleep(300);
+      out.stunSwing = !!game.cb.atk;
+      T.reset(); game.inv.hp = 50; game.pst.apply('bleed', 30); await T.sleep(2500);
+      out.hpAfterBleed = game.inv.hp;
+      game.inv.hp = 1; await T.sleep(1500); out.floor = game.inv.hp;
+      T.reset(); game.inv.hp = 50; game.pst.apply('bleed', 30);
+      game.inv.pack.push(makeItem({ type: 'potion', kind: 'heal', n: 1 })); game.inv.drink(game.inv.pack[game.inv.pack.length - 1]);
+      out.cured = !game.pst.has('bleed');
+      return out;
+    });
+    check('a leg hit slows the player', hurt.slow && hurt.mulSlow < 1, 'speed x' + (hurt.mulSlow || 0).toFixed(2));
+    check('a head hit dazes the player', hurt.daze);
+    check('a dagger body hit makes the player bleed', hurt.bleed);
+    check('a stunned player cannot swing', !hurt.stunSwing);
+    check('bleeding costs HP but never kills', hurt.hpAfterBleed < 50 && hurt.floor >= 1, `hp ${hurt.hpAfterBleed.toFixed(1)}, floor ${hurt.floor}`);
+    check('a healing potion stops bleeding', hurt.cured);
+
     await page.close();
 
     check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

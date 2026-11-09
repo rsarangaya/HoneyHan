@@ -88,7 +88,8 @@ function itemLines(it) {
     if (s.ranged) return ['Ranged. Not usable yet.'];
     return [`Damage ${s.dmg.toFixed(1)}`, `Attack speed x${s.atkSpd.toFixed(2)} (swing ${s.dur.toFixed(2)} s), reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
       s.sneak >= 99 ? 'Sneak attack: instant kill' : `Sneak attack x${s.sneak}`,
-      s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block'];
+      s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block']
+      .concat(s.proc ? [`${STATUS[s.proc.status].name} on ${s.proc.zone} hits${s.proc.chance < 1 ? ` (${Math.round(s.proc.chance * 100)}% chance)` : ''}`] : []);
   }
   if (it.type === 'armor') {
     const a = armorStats(it);
@@ -220,6 +221,7 @@ class Inventory {
     if (k === 'heal') {
       if (this.hp >= this.maxHp) return 'Already at full health';
       this.hp = Math.min(this.maxHp, this.hp + POTION_HEAL);
+      pst.clear('bleed');                                   // a healing potion closes wounds
     } else {
       if (k === 'stamina') this.refillStamina = true;
       this.buffs[POTION_BUFF[k]] = BUFF_TIME[POTION_BUFF[k]];
