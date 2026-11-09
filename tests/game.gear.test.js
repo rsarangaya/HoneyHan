@@ -23,7 +23,7 @@ run('Bow, shield and other gear', async ({ open, check }) => {
       let e = await shoot(8, 1.65);                                  // a sneak headshot
       out.headDamage = 500 - e.hp; out.arrowsLeft = game.inv.arrows;
       e = await shoot(8, 1.0); out.bodyDamage = 500 - e.hp;
-      e = await shoot(5, 0.3); out.legSlow = e.st.has('slow');
+      e = await shoot(5, 0.4); out.legSlow = e.st.has('slow');
       // an early release does nothing
       T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'bow', tier: 0 }); game.inv.arrows = 5;
       game.player.keys[KEYS.attack] = true; game.cb.press = true; await T.until(() => !!game.cb.draw, 2000);

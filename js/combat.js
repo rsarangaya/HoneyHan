@@ -74,6 +74,11 @@ function buildWeaponModel(id) {
   } else if (id === 'mace') {
     add(new THREE.BoxGeometry(0.06, 0.7, 0.06), wood, 0, 0.3, 0);
     add(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshLambertMaterial({ color: 0x6a6e76 }), 0, 0.72, 0);
+  } else if (id.startsWith('wand:')) {   // a short wand with a glowing tip in the wand's colour
+    const c = new THREE.Color(WANDS[id.slice(5)].color);
+    add(new THREE.BoxGeometry(0.035, 0.5, 0.035), wood, 0, 0.2, 0);
+    add(new THREE.BoxGeometry(0.07, 0.07, 0.07), new THREE.MeshBasicMaterial({ color: c }), 0, 0.5, 0);
+    add(new THREE.BoxGeometry(0.13, 0.13, 0.13), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.35 }), 0, 0.5, 0);
   } else {   // bow
     add(new THREE.BoxGeometry(0.04, 0.9, 0.04), wood, 0, 0.35, 0);
     add(new THREE.BoxGeometry(0.01, 0.9, 0.01), new THREE.MeshLambertMaterial({ color: 0xddd8c0 }), 0.05, 0.35, 0);

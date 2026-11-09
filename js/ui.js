@@ -34,8 +34,8 @@ const invUI = (() => {
   let note = '';
 
   const selected = () => !sel ? null : sel.src === 'pack' ? inv.find(sel.id) : inv.equip[sel.slot];
-  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : ''}</span>`;
-  const sub = it => it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : 'Key';
+  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : it.type === 'wand' || it.type === 'rage' ? ' (' + it.charges + ')' : ''}</span>`;
+  const sub = it => it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : it.type === 'wand' ? `Wand · ${it.charges}/${WANDS[it.kind].charges} charges` : it.type === 'rechargewand' ? 'Recharge wand' : it.type === 'rage' ? `Legendary recorder · ${it.charges} plays` : 'Key';
   const slotBox = (slot, label) => {
     const it = inv.equip[slot];
     const on = sel && sel.src === 'equip' && sel.slot === slot ? ' sel' : '';
@@ -79,10 +79,15 @@ const invUI = (() => {
       const btn = (act, label) => `<button data-act="${act}">${label}</button>`;
       let buttons = '';
       if (fromPack) {
-        if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield') buttons += btn('equip', 'Equip');
+        if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' || it.type === 'wand') buttons += btn('equip', 'Equip');
+        if (it.type === 'rage') buttons += btn('play', 'Play it');
+        if (it.type === 'rechargewand') {                                              // pick which wand to recharge
+          const wands = [inv.equip.weapon, ...inv.pack].filter(i => i.type === 'wand');
+          buttons += wands.length ? wands.map(wd => btn('rech' + wd.id, `Recharge ${itemName(wd)} (${wd.charges}/${WANDS[wd.kind].charges})`)).join('') : '<span class="dim">You have no wand to recharge.</span>';
+        }
         if (it.type === 'potion') buttons += btn('drink', 'Drink');
         if (it.type === 'food') buttons += btn('eat', 'Eat');
-        if (it.type === 'weapon' || it.type === 'potion' || it.type === 'food') buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
+        if (['weapon', 'potion', 'food', 'wand', 'rechargewand', 'rage'].includes(it.type)) buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
         if (it.type !== 'key') buttons += btn('drop', 'Drop');
       } else if (it.type === 'armor' || it.type === 'shield') buttons += btn('unequip', 'Unequip');
       else buttons += '<span class="dim">Equipped. Equip another from the pack to swap.</span>';
@@ -109,9 +114,11 @@ const invUI = (() => {
     note = '';
     if (a === 'close') return close();
     if (!it) return;
-    if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' ? 'weapon' : it.slot }; }
+    if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' || it.type === 'wand' ? 'weapon' : it.slot }; }
     else if (a === 'unequip') { if (inv.unequip(sel.slot)) sel = null; else note = 'Pack is full.'; }
     else if (a === 'drink') { note = inv.drink(it); if (!inv.find(it.id)) sel = null; }
+    else if (a === 'play') { inv.rageReq = it; sel = null; return close(); }
+    else if (/^rech\d+$/.test(a)) { const tgt = [inv.equip.weapon, ...inv.pack].find(i => i.id === +a.slice(4)); note = inv.recharge(it, tgt); if (!inv.find(it.id)) sel = null; }
     else if (a === 'eat') { inv.eatReq = it; sel = null; return close(); }
     else if (a === 'drop') { inv.remove(it); sel = null; }
     else if (/^q\d$/.test(a)) inv.assignQuick(+a[1], it);

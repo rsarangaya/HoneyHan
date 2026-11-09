@@ -122,6 +122,7 @@ function buildFloor() {
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
   buildTorches();
   enemies = floor.enemies.map(s => new Enemy(s, floor));
+  Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
 
@@ -182,7 +183,7 @@ function setDev(on) {
 }
 
 // ---- combat: stamina, melee attacks, block and parry (numbers live in combat.js) ----
-const cb = { draw: null, bashCd: 0, bash: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
+const cb = { draw: null, bashCd: 0, bash: 0, rageCd: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
@@ -202,6 +203,7 @@ function startAttack() {
   if (cb.block && shield()) return bash();            // a shield bash: attack while blocking
   if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
   spend(w.stam); hunger.fight = 3;
+  if (w.wand) { cb.atk = { t: 0, hit: true }; castWand(w); return; }   // a wand fires at once; the swing timer is just its recovery
   cb.atk = { t: 0, hit: false };
 }
 
@@ -252,6 +254,69 @@ function bash() {
   mark(stunned ? 'BASH +STUN' : 'BASH', '#7fe8ff');
 }
 
+// ---- wands: attack fires a bolt that ignores armor and hit zones; a charge per cast, and the wand breaks at 0 ----
+function castWand(w) {
+  const it = inv.equip.weapon, W = WANDS[it.kind];
+  const cp = Math.cos(player.pitch), dx = -Math.sin(player.yaw) * cp, dy = Math.sin(player.pitch), dz = -Math.cos(player.yaw) * cp;
+  const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * WAND.speed, vy: dy * WAND.speed, vz: dz * WAND.speed, gravity: 0, life: WAND.range / WAND.speed, owner: 'player', kind: 'wand', wand: it.kind, stuck: false, mesh: makeBoltMesh(W.color) };
+  a.mesh.position.set(a.x, a.y, a.z);
+  group.add(a.mesh); arrows.push(a);
+  loud(W.noise);
+  discover('wand:' + it.kind, W.name);
+  if (--it.charges <= 0) breakWand(it);
+  else if (it.charges === 1) flash(`The ${W.name} is nearly spent (1 charge).`);
+}
+function breakWand(w) {
+  const best = inv.pack.filter(i => i.type === 'weapon').sort((a, b) => weaponStats(b).dmg - weaponStats(a).dmg)[0];
+  if (best) { inv.equipItem(best); inv.remove(w); }                          // equipItem put the wand in the pack: it is gone
+  else inv.equip.weapon = makeItem({ type: 'weapon', base: 'dagger', tier: 0 });
+  inv.quick = inv.quick.map(id => id === w.id ? null : id);
+  cb.atk = null;
+  flash(`The ${WANDS[w.kind].name} crumbles to dust.` + (best ? '' : ' You pull out a dagger.'));
+}
+function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
+  const killed = e.hurt(dmg, player);
+  if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); }
+  return killed;
+}
+function applyWand(kind, e) {
+  const W = WANDS[kind], tag = s => { discover('status:' + s, STATUS[s].name); };
+  if (kind === 'fire') { hurtByWand(e, W.dmg); mark(`FIRE ${W.dmg}`, '#ff9a3a'); }
+  else if (kind === 'frost') { if (!hurtByWand(e, W.dmg) && e.addStatus('slow', W.slow)) tag('slow'); mark('FROST +SLOW', '#7fd8ff'); }
+  else if (kind === 'lightning') {
+    if (!hurtByWand(e, W.dmg) && e.addStatus('stun', W.stun)) tag('stun');
+    const o = nearestOther(e, enemies, W.chain);
+    if (o && !hurtByWand(o, W.chainDmg) && o.addStatus('stun', W.chainStun)) tag('stun');
+    mark(o ? 'LIGHTNING ARCS' : 'LIGHTNING +STUN', '#ffe84a');
+  } else if (kind === 'force') {
+    const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
+    let moved = 0, hitWall = false;
+    if (!e.boss) {
+      collider.props = floor.solids;
+      for (; moved < W.push; moved += 0.25) {
+        const nx = e.x + dx / d * 0.25, nz = e.z + dz / d * 0.25;
+        if (Player.prototype.blocked.call(collider, floor, nx, nz)) { hitWall = true; break; }
+        e.x = nx; e.z = nz;
+      }
+      e.rp = 0;
+    }
+    hurtByWand(e, W.dmg + (hitWall ? W.wallDmg : 0));
+    mark(hitWall ? 'FORCE: SLAMMED' : 'FORCE', '#c58aff');
+  } else if (kind === 'sleep') { if (e.sleep(W.sleep)) mark('ASLEEP', '#8a9aff'); else mark('IT WILL NOT SLEEP', '#aaa'); }
+}
+
+// ---- Hanahan's Rage: nearby enemies fight each other for a while ----
+const SPEAK = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
+function playRage(it) {
+  if (cb.rageCd > 0) { flash('The recorder is still rewinding.'); return; }
+  cb.rageCd = RAGE.cd; loud(RAGE.noise);
+  const victims = rageVictims(enemies, player.x, player.z).filter(e => e.enrage(RAGE.dur, player.x, player.z));
+  discover('item:rage', "Hanahan's Rage");
+  try { if (SPEAK) { SPEAK.cancel(); const u = new SpeechSynthesisUtterance(RAGE_LINES[Math.floor(Math.random() * RAGE_LINES.length)]); u.pitch = 0.55; u.rate = 1.15; SPEAK.speak(u); } } catch (err) {}
+  flash(victims.length ? `Hanahan's Rage! ${victims.length} ${victims.length === 1 ? 'enemy turns' : 'enemies turn'} on each other.` : "Hanahan's Rage plays... but nobody is close enough to hear it.");
+  if (--it.charges <= 0) { inv.remove(it); addLog("The recorder's speakers blow out.", '#ff9a2a'); }
+}
+
 // ---- bow: hold attack to draw, release to fire. One arrow per shot, found arrows can be picked up again ----
 const arrows = [];          // flying and stuck arrows
 function startDraw(w) {
@@ -282,7 +347,14 @@ function updateArrows(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     if (a.stuck) {
-      if (Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
+      if (a.kind !== 'wand' && Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
+      continue;
+    }
+    if (a.kind === 'wand') {                                                       // a wand bolt: no drop, no recovery, hits anything alive
+      const ev = stepArrow(a, dt, floor, enemies, player);
+      a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
+      if (ev && ev.type === 'hit') applyWand(a.wand, ev.e);
+      if (ev || a.life <= 0) { group.remove(a.mesh); arrows.splice(i, 1); }
       continue;
     }
     const sp = Math.hypot(a.vx, a.vz) || 1; a.dirx = a.vx / sp; a.dirz = a.vz / sp;
@@ -304,7 +376,7 @@ function bossDefeated(e) {
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
   const extra = rollEquipment(floorNum, rng, { boost: 1, minTier: 2 });
   propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left: [epic, extra, { type: 'gold', n: rng.int(120, 200) }] },
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left: [epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : [])] },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
   flash('The boss falls! Loot its body. The way down is open.');
@@ -404,6 +476,8 @@ function updateCombat(dt) {
   player.canSprint = cb.canSprint && hunger.canSprint() && !cb.eat;
 
   if (cb.bashCd > 0) cb.bashCd -= dt;
+  if (cb.rageCd > 0) cb.rageCd -= dt;
+  if (inv.rageReq) { playRage(inv.rageReq); inv.rageReq = null; }
   if (cb.bash > 0) cb.bash -= dt;
   if (cb.press) { startAttack(); cb.press = false; }
   if (cb.draw) {                                    // drawing the bow: slow, release to fire, block cancels
@@ -425,7 +499,7 @@ function updateCombat(dt) {
     if (!cb.atk.hit && cb.atk.t >= w.dur * w.hitAt) { cb.atk.hit = true; playerHit(); }
     if (cb.atk.t >= w.dur) cb.atk = null;
   }
-  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !cb.eat && !wstats().ranged && (cb.stamina > 0 || dev.on);
+  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !cb.eat && !wstats().ranged && !wstats().wand && (cb.stamina > 0 || dev.on);
   if (canBlock) { if (!cb.block) { cb.block = true; cb.blockT = 0; } else cb.blockT += dt; } else cb.block = false;
 
   if (markTimer > 0) { markTimer -= dt; if (markTimer <= 0) document.getElementById('hitmark').style.opacity = 0; }
@@ -602,7 +676,7 @@ function updateHud() {
   el('hungerFill').style.background = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' }[hunger.stage];
   const slots = inv.quick.map((_, i) => {
     const it = inv.quickItem(i);
-    const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : itemName(it);
+    const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : it.type === 'wand' || it.type === 'rage' ? `${itemName(it)} (${it.charges})` : itemName(it);
     const c = it ? itemColor(it) : '#fff5';
     return `<div class="slot" style="border-color:${c}"><i>${i + 1}</i><span style="color:${c}">${name || '&nbsp;'}</span></div>`;
   }).join('');
@@ -610,7 +684,7 @@ function updateHud() {
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
   const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
     .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
-  const line = `<span style="color:${itemColor(w)}">${itemName(w)}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
+  const line = `<span style="color:${itemColor(w)}">${itemName(w)}${w.type === 'wand' ? ` (${w.charges})` : ''}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
   hudKey = key;
@@ -821,7 +895,7 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }) };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
-    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} bled out.`, '#ff6a6a'); }
+    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();

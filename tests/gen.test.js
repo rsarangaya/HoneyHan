@@ -7,7 +7,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
-for (const f of ['js/gen.js', 'js/loot.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['js/gen.js', 'js/loot.js', 'js/wands.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS })', ctx);
 
 const N = parseInt(process.argv[2], 10) || 300;

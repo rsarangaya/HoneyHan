@@ -51,6 +51,9 @@ function discoverItem(d, silent) {
   else if (d.type === 'potion') discover('potion:' + d.kind, nm(POTIONS[d.kind].name));
   else if (d.type === 'food') discover('food:' + d.kind, nm(FOOD[d.kind].name));
   else if (d.type === 'weapon') { discover('weapon:' + d.base, nm(WEAPON_NAMES[d.base])); discover('tier:' + d.tier, nm(TIERS[d.tier].name + ' tier')); }
+  else if (d.type === 'wand') discover('wand:' + d.kind, nm(WANDS[d.kind].name));
+  else if (d.type === 'rechargewand') discover('item:recharge', nm('Recharge Wand'));
+  else if (d.type === 'rage') discover('item:rage', nm("Hanahan's Rage"));
   else if (d.type === 'shield') { discover('equip:shield', nm('Shield')); discover('tier:' + d.tier, nm(TIERS[d.tier].name + ' tier')); }
   else if (d.type === 'armor') { discover(`armor:${d.slot}:${d.cls}`, nm(ARMOR_NAMES[d.slot][d.cls])); discover('tier:' + d.tier, nm(TIERS[d.tier].name + ' tier')); }
 }

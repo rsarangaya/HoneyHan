@@ -74,6 +74,9 @@ function makeItem(d) {
     case 'armor':  return { id, type: 'armor', slot: d.slot, cls: d.cls, tier: d.tier };
     case 'potion': return { id, type: 'potion', kind: d.kind, n: d.n || 1 };
     case 'key':    return { id, type: 'key', lock: d.lock, label: d.label };
+    case 'wand':   return { id, type: 'wand', base: 'wand', kind: d.kind, charges: d.charges !== undefined ? d.charges : WANDS[d.kind].charges };
+    case 'rechargewand': return { id, type: 'rechargewand', full: !!d.full };
+    case 'rage':   return { id, type: 'rage', tier: 4, charges: d.charges !== undefined ? d.charges : RAGE.charges };
     case 'shield': return { id, type: 'shield', slot: 'offhand', tier: d.tier };
     case 'food':   return { id, type: 'food', kind: d.kind, n: d.n || 1 };
   }
@@ -82,16 +85,20 @@ function makeItem(d) {
 function itemName(it) {
   if (it.type === 'weapon') return it.tier === 4 ? LEGENDARY_NAMES[it.base] : `${TIER_ADJ[it.tier]} ${WEAPON_NAMES[it.base]}`;
   if (it.type === 'armor') return `${it.tier === 4 ? 'Ancient' : TIER_ADJ[it.tier]} ${ARMOR_NAMES[it.slot][it.cls]}`;
+  if (it.type === 'wand') return WANDS[it.kind].name;
+  if (it.type === 'rechargewand') return it.full ? 'Grand Recharge Wand' : 'Recharge Wand';
+  if (it.type === 'rage') return "Hanahan's Rage";
   if (it.type === 'shield') return it.tier === 4 ? 'Aegis of Dawn' : `${TIER_ADJ[it.tier]} Shield`;
   if (it.type === 'potion') return POTIONS[it.kind].name;
   if (it.type === 'food') return FOOD[it.kind].name;
   return it.label;
 }
-const itemColor = it => it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
+const itemColor = it => it.type === 'wand' ? WANDS[it.kind].color : it.type === 'rechargewand' ? '#7fe8d8' : it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
 const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
+  if (it.type === 'wand') return { wand: true, ranged: false, dmg: 0, stam: WAND.stam, noise: WANDS[it.kind].noise, dur: WAND.cd, hitAt: 99, reach: 0, sneak: 1, parryWin: 0, blockCost: 0, spd: 1, atkSpd: 1 };
   const b = WSTATS[it.base];
   return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
 }
@@ -112,6 +119,9 @@ function itemLines(it) {
     return [`Cuts ${Math.round(a.red * 100)}% of damage to the ${ARMOR_ZONE[it.slot]}`,
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
+  if (it.type === 'wand') return [WANDS[it.kind].desc, `Charges ${it.charges}/${WANDS[it.kind].charges}. Breaks at 0.`, `Stamina ${WAND.stam} per cast, noise ${WANDS[it.kind].noise} m`, 'Equip it like a weapon and attack to fire. Ignores armor and hit zones. A recharge wand tops it up.'];
+  if (it.type === 'rechargewand') return [it.full ? 'Refills a wand completely, then crumbles.' : `Restores ${WAND.rechargeGain} charges to a wand, then crumbles.`, 'Works on an empty wand too. Use it from a quickslot (it picks your held wand, or the emptiest in the pack) or choose a wand in the inventory.'];
+  if (it.type === 'rage') return ['Plays a recording of Hanahan talking mad smack. Enemies get angry and ragebaited into attacking each other.', `Enemies within ${RAGE.radius} m fight each other for ${RAGE.dur} s, then come looking for you. Bosses ignore it. Very loud (${RAGE.noise} m).`, `Plays left: ${it.charges}. The recorder breaks after the last.`];
   if (it.type === 'shield') return [`Block costs ${Math.round(SHIELD.cost / TIERS[it.tier].mul)} stamina (less at higher tiers)`, `Parry window ${SHIELD.parryWin} s`, `Covers leg sweeps: only ${Math.round(SHIELD.legsTake * 100)}% of the hit gets through and no slow`, `Bash: attack while blocking. Stuns for ${SHIELD.bashStun} s and shoves, ${SHIELD.bashStam} stamina`, 'Lets a dagger block properly. Stowed while a bow is out.'];
   if (it.type === 'potion') return [POTIONS[it.kind].desc, `You have ${it.n}`];
   if (it.type === 'food') return [FOOD[it.kind].desc, `Takes ${FOOD[it.kind].time} s to eat. Food feeds you, it does not heal.`, `You have ${it.n}`];
@@ -160,11 +170,17 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
     if (rng() < 0.65) out.push({ type: 'arrows', n: rng.int(4, 8) });
     if (rng() < 0.4) out.push(potion());
     if (rng() < 0.12) out.push({ type: 'food', kind: rollFoodKind(rng, 1), n: 1 });
+    if (rng() < 0.05) out.push({ type: 'wand', kind: rollWandKind(rng) });
+    if (rng() < 0.015) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
+    if (rng() < 0.006) out.push({ type: 'rage' });
     if (rng() < 0.4) out.push(rollEquipment(floorNum, rng));
   } else if (kind === 'vaultchest') {
     out.push({ type: 'gold', n: rng.int(40, 90) + floorNum * 10 });
     if (rng() < 0.7) out.push(potion());
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1 }));
+    if (rng() < 0.3) out.push({ type: 'wand', kind: rollWandKind(rng) });
+    if (rng() < 0.08) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
+    if (rng() < 0.04) out.push({ type: 'rage' });
   } else if (kind === 'rack') {
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1, kind: rng() < 0.5 ? 'weapon' : 'armor' }));   // armory: weapon or armor, nothing below uncommon
   } else if (kind === 'pantry') {
@@ -191,11 +207,12 @@ class Inventory {
     this.quick = [null, null, null, null];                // item ids; the item stays in the pack (or is the old weapon after a swap)
     this.swapT = 0;
     this.buffs = {};                                      // name -> seconds left
+    this.rageReq = null;                                  // Hanahan's Rage: main.js plays it
     this.eatReq = null;                                   // food the player wants to eat; main.js starts the eating
     this.refillStamina = false;                           // set by the vigor potion, read by main
   }
 
-  get weapon() { return this.equip.weapon.base; }         // base id, so WSTATS lookups still work
+  get weapon() { const w = this.equip.weapon; return w.type === 'wand' ? 'wand:' + w.kind : w.base; }         // base id, so WSTATS lookups still work
 
   find(id) { return this.pack.find(i => i.id === id) || null; }
   quickItem(i) { const it = this.quick[i] && this.find(this.quick[i]); if (!it) this.quick[i] = null; return it || null; }
@@ -228,7 +245,7 @@ class Inventory {
 
   // Equip from the pack. The item that was in that slot goes back to the pack, in the same spot.
   equipItem(it) {
-    const slot = it.type === 'weapon' ? 'weapon' : it.slot;
+    const slot = it.type === 'weapon' || it.type === 'wand' ? 'weapon' : it.slot;
     const idx = this.pack.indexOf(it);
     if (idx < 0 || !slot) return;
     const old = this.equip[slot];
@@ -265,7 +282,7 @@ class Inventory {
   use(i) {
     const it = this.quickItem(i);
     if (!it || this.swapT > 0) return '';
-    if (it.type === 'weapon') {
+    if (it.type === 'weapon' || it.type === 'wand') {
       const old = this.equip.weapon;
       this.equipItem(it);
       this.quick[i] = old.id;
@@ -274,7 +291,21 @@ class Inventory {
     }
     if (it.type === 'potion') return this.drink(it);
     if (it.type === 'food') { this.eatReq = it; return ''; }
+    if (it.type === 'rechargewand') return this.recharge(it);
+    if (it.type === 'rage') { this.rageReq = it; return "Playing Hanahan's Rage..."; }
     return '';
+  }
+
+  // Use a recharge wand on target (default: the held wand, else the emptiest wand in the pack). Returns a message.
+  recharge(it, target) {
+    const frac = w => w.charges / WANDS[w.kind].charges;
+    const t = target || (this.equip.weapon.type === 'wand' ? this.equip.weapon : this.pack.filter(i => i.type === 'wand').sort((a, b) => frac(a) - frac(b))[0]);
+    if (!t) return 'You have no wand to recharge.';
+    const max = WANDS[t.kind].charges;
+    if (t.charges >= max) return `The ${itemName(t)} is already full.`;
+    t.charges = rechargedTo(t, it.full);
+    this.remove(it);
+    return `Recharged the ${itemName(t)} (${t.charges}/${max}). The recharge wand crumbles.`;
   }
 
   // 0 to 0.8 share of damage cut for a body zone ('head' | 'body' | 'legs').

@@ -47,3 +47,11 @@ function nearestOther(e, list, maxD, skip) {
 }
 // Who gets enraged when the recorder plays at (x, z): living, non-boss enemies within the radius.
 const rageVictims = (list, x, z) => list.filter(o => !o.dead && !o.boss && Math.hypot(o.x - x, o.z - z) <= RAGE.radius);
+
+const rollWandKind = rng => { const ks = Object.keys(WANDS), w = [25, 25, 15, 20, 15]; let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < ks.length; i++) { r -= w[i]; if (r < 0) return ks[i]; } return ks[0]; };
+function makeBoltMesh(color) {
+  const g = new THREE.Group(), c = new THREE.Color(color);
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), new THREE.MeshBasicMaterial({ color: c })));
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.35 })));
+  return g;
+}

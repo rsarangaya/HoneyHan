@@ -31,7 +31,7 @@ function stepArrow(a, dt, floor, enemies, player) {
   const steps = Math.max(1, Math.ceil(Math.hypot(a.vx, a.vy, a.vz) * dt / 0.2)), h = dt / steps;
   for (let i = 0; i < steps; i++) {
     a.px = a.x; a.pz = a.z;
-    a.vy -= BOW.gravity * h; a.x += a.vx * h; a.y += a.vy * h; a.z += a.vz * h;
+    a.vy -= (a.gravity === undefined ? BOW.gravity : a.gravity) * h; a.x += a.vx * h; a.y += a.vy * h; a.z += a.vz * h;
     if (a.y <= 0) { a.y = 0; return { type: 'ground' }; }
     if (a.y >= WALL_H || wallAt(floor, Math.floor(a.x / TILE), Math.floor(a.z / TILE))) return { type: 'wall' };
     if (a.owner === 'player') {

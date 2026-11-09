@@ -125,6 +125,9 @@ class Enemy {
     this.wait = 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
+    this.sleepT = 0;                    // asleep (a sleep wand): sees and hears nothing, any damage wakes it
+    this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
+    this.cause = 'died';
     this.seed = spec.seed;
     this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp * this.T.hpMul; this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
@@ -371,9 +374,58 @@ class Enemy {
     return ok;
   }
 
+  // A sleep wand: it drops to unaware, blind and deaf, for sec seconds or until it is damaged. Bosses never sleep.
+  sleep(sec) {
+    if (this.boss || this.dead) return false;
+    this.sleepT = sec; this.winding = false; this.stun = 0; this.rageT = 0;
+    this.set('unaware'); this.aware = 0; this.last = null; this.seen = false;
+    return true;
+  }
+
+  // Hanahan's Rage: for dur seconds it hunts the nearest other enemy and ignores the player, then comes looking
+  // for where the recording was played. Bosses are immune.
+  enrage(dur, fx, fz) {
+    if (this.boss || this.dead) return false;
+    this.rageT = dur; this.rageFrom = { x: fx, z: fz }; this.rageTarget = null;
+    this.sleepT = 0; this.winding = false; this.stun = 0;
+    this.set('alerted'); this.shouted = true;
+    return true;
+  }
+
+  updateRage(dt, noise) {
+    this.rageT -= dt;
+    if (this.rageT <= 0) {                                              // calm again, and curious about the noise
+      this.rageT = 0; this.rageTarget = null; this.winding = false; this.shouted = false;
+      this.last = this.rageFrom; this.aware = 0.6; this.set('suspicious');
+      this.sync(dt); return null;
+    }
+    if (!this.rageTarget || this.rageTarget.dead) this.rageTarget = nearestOther(this, Enemy.all, 30);
+    const t = this.rageTarget;
+    if (!t) { this.lookAround(dt); this.sync(dt); return null; }
+    const dx = t.x - this.x, dz = t.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
+    this.atkCd -= dt;
+    if (this.winding) {
+      this.windT += dt;
+      if (this.windT < this.windT_) this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 4 * dt);
+      if (this.windT >= this.windT_ + STRIKE_T) {
+        this.winding = false; this.atkCd = this.cooldown;
+        noise.emit(this.x, this.z, CLASH_R, this);
+        if (dist <= this.reach + 0.5) {                                 // the blow lands on the other enemy
+          const zone = this.zone, dmg = TUNE.enemyDmg * this.dmgMul * ZONE_MUL[zone] * (t.resist[zone] || 1);
+          if (t.hurt(dmg, this)) t.cause = 'was beaten down by its own side';
+          else if (t.rageT <= 0 && t.enrage(this.rageT, this.rageFrom.x, this.rageFrom.z)) t.rageTarget = this;   // and it hits back
+        }
+      }
+    } else {
+      if (dist > this.reach * 0.8) this.goTo(t.x, t.z, this.chase, dt); else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
+      if (dist < this.reach && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(this.T.zones); }
+    }
+    this.sync(dt); return null;
+  }
+
   // Returns true if the enemy died from this hit.
   hurt(dmg, player) {
-    this.hp -= dmg; this.hitT = 0.14;
+    this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0;
     if (this.hp <= 0) { this.die(); return true; }
     if (!this.boss && !this.T.noStagger) { this.stun = 0.35; this.winding = false; }     // the boss and the bouncer shrug hits off (only a parry staggers them)
     this.last = { x: player.x, z: player.z };
@@ -386,7 +438,9 @@ class Enemy {
   update(dt, player, noise) {
     if (this.dead) { this.deadT += dt; this.sync(dt); return null; }
     const bleed = this.st.update(dt);
-    if (bleed > 0) { this.hp -= bleed; if (this.hp <= 0) { this.die(); this.sync(dt); return null; } }   // bled out: main.js leaves the body
+    if (bleed > 0) { this.hp -= bleed; if (this.hp <= 0) { this.cause = 'bled out'; this.die(); this.sync(dt); return null; } }   // bled out: main.js leaves the body
+    if (this.sleepT > 0) { this.sleepT -= dt; this.aware = 0; this.seen = false; this.sync(dt); return null; }
+    if (this.rageT > 0) return this.updateRage(dt, noise);
     const f = this.floor;
     const dx = player.x - this.x, dz = player.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
     if (this.boss && this.dormant) {   // waits in the middle of the arena and ignores sights and sounds until you are close
@@ -518,10 +572,11 @@ class Enemy {
     this.upper.rotation.x = p[0]; this.upper.rotation.y = p[1]; this.upper.position.y = 0.7 - p[4];
     this.arms[1].rotation.x = p[2]; this.arms[0].rotation.x = p[3];
     }
+    m.rotation.x = this.sleepT > 0 ? 0.35 : 0;                                                              // slumped while asleep
     if (this.T.sway && !this.stun) m.rotation.z = Math.sin(this.walkT * 0.5 + this.seed) * (this.state === 'alerted' ? 0.04 : 0.1);   // a drunk's roll
     // hit flash
     this.hitT = Math.max(0, this.hitT - dt);
-    for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : this.st.tint());
+    for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : this.rageT > 0 ? 0x701010 : this.st.tint());
 
     const show = this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;
@@ -534,3 +589,5 @@ class Enemy {
     this.cone.material.color.setHex(this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30);
   }
 }
+
+Enemy.all = [];   // the current floor's enemies (set by main.js), for rage targeting
