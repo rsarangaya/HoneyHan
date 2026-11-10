@@ -6,7 +6,7 @@ const { WANDS, WAND, RAGE, newWand, rechargedTo, nearestOther, rageVictims } = v
 let fails = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? '  (' + detail + ')' : ''}`); if (!ok) fails++; };
 
-check('five wand kinds', Object.keys(WANDS).join() === 'fire,frost,lightning,force,sleep');
+check('five ordinary wands plus the legendary Aj\'s Bust', Object.keys(WANDS).join() === 'fire,frost,lightning,force,sleep,bust' && WANDS.bust.legendary && !Object.values(WANDS).slice(0, 5).some(w => w.legendary));
 check('every wand has a name, colour, charges, noise and description', Object.values(WANDS).every(w => w.name && /^#/.test(w.color) && w.charges > 0 && w.noise >= 0 && w.desc));
 check('frost is near silent, lightning very loud', WANDS.frost.noise <= 1 && WANDS.lightning.noise >= 10 && WANDS.lightning.noise > WANDS.fire.noise);
 check('a new wand starts full', newWand('frost').charges === WANDS.frost.charges && newWand('frost').type === 'wand');

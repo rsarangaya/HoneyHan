@@ -3,12 +3,12 @@
 //   price = base x tier multiplier, rounded to the nearest 5 gold (minimum 5). The merchant buys your pack items
 //   back at 35% of the buy price, rounded down. Keys, gold and arrows are not sold.
 const TIER_PRICE = [1, 2, 3.5, 6, 12];                              // Common to Legendary (price rises faster than power)
-const WEAPON_PRICE = { dagger: 30, sword: 45, mace: 50, bow: 40 };
+const WEAPON_PRICE = { dagger: 30, sword: 45, mace: 50, bow: 40, spear: 120 };
 const ARMOR_CLASS_PRICE = [20, 45, 80];                             // light, medium, heavy
 const ARMOR_SLOT_FACTOR = { helmet: 0.8, chest: 1.4, boots: 0.8 };
 const POTION_PRICE = { heal: 20, stamina: 25, swift: 30, might: 40, stoneskin: 40, shadow: 45 };
 const FOOD_PRICE = { bread: 8, cheese: 10, jerky: 14, apple: 5, stew: 30 };
-const WAND_PRICE = { fire: 90, frost: 80, lightning: 110, force: 95, sleep: 85 };   // for a full wand
+const WAND_PRICE = { fire: 90, frost: 80, lightning: 110, force: 95, sleep: 85, bust: 700 };   // for a full wand
 const OTHER_PRICE = { shield: 40, rechargewand: 60, grandrecharge: 140, rage: 1200, arrows: 2 };
 const SELL_SHARE = 0.35, FEATURED_MARKUP = 1.25, ARROW_PACK = 5;
 const MAX_SHOP_TIER = 3;                                            // the shop never stocks Legendary (Epic is the top)

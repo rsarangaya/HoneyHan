@@ -90,7 +90,7 @@ const tunePanel = (() => {
   function spawnBox() {
     const opts = [];   // [label, descriptor builder taking (tier)]
     for (const b of ['dagger', 'sword', 'mace', 'bow']) opts.push([WEAPON_NAMES[b], t => ({ type: 'weapon', base: b, tier: t })]);
-    opts.push(['Shield', t => ({ type: 'shield', tier: t })]);
+    opts.push(['Shield', t => ({ type: 'shield', tier: t })], ["Ian's Hog (Legendary)", () => ({ type: 'weapon', base: 'spear', tier: 4 })], ["AK's Dumbass (Legendary)", () => ({ type: 'armor', slot: 'helmet', cls: 0, tier: 4, unique: 'dunce' })]);
     for (const k of Object.keys(WANDS)) opts.push([WANDS[k].name, () => ({ type: 'wand', kind: k })]);
     opts.push(['Recharge Wand', () => ({ type: 'rechargewand' })], ['Grand Recharge Wand', () => ({ type: 'rechargewand', full: true })], ["Hanahan's Rage", () => ({ type: 'rage' })]);
     for (const s of ARMOR_SLOTS) ARMOR_NAMES[s].forEach((n, cls) => opts.push([n, t => ({ type: 'armor', slot: s, cls, tier: t })]));

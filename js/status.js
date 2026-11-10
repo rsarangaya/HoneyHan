@@ -6,6 +6,7 @@ const STATUS = {
   cripple: { name: 'Cripple', color: '#ff9a3a', dur: 2.5, move: 0.25, bleed: 1.5, immune: 4, desc: 'Almost cannot move for a couple of seconds, then recovers gradually. Bleeds lightly while it lasts. Cannot be chained: a short immunity follows.' },
   bleed:   { name: 'Bleed',   color: '#ff4a4a', dur: 4,   dps: 3,    desc: 'Loses health over time. It never kills a player on its own (stops at 1 HP). A Healing Potion stops it.' },
   stun:    { name: 'Stun',    color: '#ffe14a', dur: 1,    immune: 3, desc: 'Locked out: cannot attack, block or move properly. A short immunity follows so it cannot be chained.' },
+  stuck:   { name: 'Stuck',   color: '#f4f4ee', dur: 1e9, move: 0, desc: "Glued in place by Aj's Bust. It cannot move at all until it dies, though it can still swing at anything within reach (and archers still shoot). Does not wear off." },
   daze:    { name: 'Daze',    color: '#c58aff', dur: 2.5, drain: 10, desc: 'Blurred, swaying vision and drained stamina. Head hits cause it.' },
 };
 
@@ -47,11 +48,12 @@ class Statuses {
       m = Math.min(m, STATUS.cripple.move + (1 - STATUS.cripple.move) * f);
     }
     if (this.has('stun')) m = Math.min(m, 0.15);
+    if (this.has('stuck')) m = 0;
     return m;
   }
   list() { return Object.keys(this.t).map(n => [n, this.t[n]]); }
   // Colour for tinting an enemy model, or 0 for none.
-  tint() { return this.has('stun') ? 0x555500 : this.has('cripple') ? 0x5a3008 : this.has('bleed') ? 0x3a0606 : this.has('slow') ? 0x0a2a5a : 0; }
+  tint() { return this.has('stuck') ? 0x42423c : this.has('stun') ? 0x555500 : this.has('cripple') ? 0x5a3008 : this.has('bleed') ? 0x3a0606 : this.has('slow') ? 0x0a2a5a : 0; }
 }
 
 const pst = new Statuses();   // the player's statuses

@@ -25,6 +25,9 @@ const WSTATS = {
   dagger: { proc: { zone: 'body', status: 'bleed', chance: 1 }, dmg: 12, dur: 0.30, spd: 1.35, hitAt: 0.40, reach: 1.8, stam: 7,  sneak: 99,  noise: 3, parryWin: 0.15, blockCost: 0 },
   mace:   { proc: { zone: 'head', status: 'stun', chance: 1, dur: 1.6 }, dmg: 32, dur: 0.85, spd: 0.8,  hitAt: 0.55, reach: 2.1, stam: 22, sneak: 2.5, noise: 8, parryWin: 0.0,  blockCost: 25 },
   // bow: dmg is a full-draw body hit (about 65% of a same-tier sword hit). draw: seconds to full draw. A sneak shot is x2.5.
+  // Ian's Hog (Legendary only, one per run): a spear three times as long as the sword, with a sword's Legendary damage
+  // (20 x 1.75). `kills`: it goes limp after that many kills and only a recharge wand stiffens it again.
+  spear:  { kills: 3, dmg: 20, dur: 0.60, spd: 0.9,  hitAt: 0.50, reach: 6.9, stam: 14, sneak: 3,   noise: 5, parryWin: 0.0,  blockCost: 0 },
   bow:    { ranged: true, proc: { zone: 'legs', status: 'slow', chance: 1 }, dmg: 13, draw: 0.8, stam: 10, noise: 4, sneak: 2.5, parryWin: 0, blockCost: 0 },
 };
 
@@ -74,8 +77,30 @@ function buildWeaponModel(id) {
   } else if (id === 'mace') {
     add(new THREE.BoxGeometry(0.06, 0.7, 0.06), wood, 0, 0.3, 0);
     add(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshLambertMaterial({ color: 0x6a6e76 }), 0, 0.72, 0);
+  } else if (id === 'spear' || id === 'spear:limp') {
+    // Ian's Hog. Held pointing forward (the viewmodel tilts it). Ready: a straight ash shaft, a long leaf blade and a red
+    // tassel. Limp: the same spear gone soft, its shaft sagging in segments to a hanging, greyed-out tip.
+    const limp = id === 'spear:limp';
+    const shaftMat = new THREE.MeshPhongMaterial({ color: limp ? 0x8a7a72 : 0x7a5530, shininess: limp ? 2 : 14, specular: 0x222222 });
+    const bladeMat = new THREE.MeshPhongMaterial({ color: limp ? 0x8e8a92 : 0xd8dce4, shininess: limp ? 4 : 120, specular: 0xffffff });
+    const gold = new THREE.MeshPhongMaterial({ color: limp ? 0x8a8068 : 0xd9a830, shininess: 60, specular: 0x886622 });
+    const red = new THREE.MeshLambertMaterial({ color: limp ? 0x8a6068 : 0xc02a2a });
+    const SEGS = limp ? 5 : 1, LEN = 2.0 / SEGS, BEND = -0.42;
+    let parent = g, y0 = -0.1;
+    for (let i = 0; i < SEGS; i++) {                                                      // nested segments: each bends a little more
+      const seg = new THREE.Group(); seg.position.y = y0; seg.rotation.x = i === 0 ? 0 : BEND; parent.add(seg);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.03, LEN, 8), shaftMat); m.position.y = LEN / 2; seg.add(m);
+      parent = seg; y0 = LEN;
+    }
+    const tip = new THREE.Group(); tip.position.y = y0; tip.rotation.x = limp ? BEND : 0; parent.add(tip);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.06, 8), gold); collar.position.y = 0.02; tip.add(collar);
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.4, 4), bladeMat); blade.position.y = 0.25; blade.scale.set(1, 1, 0.35); tip.add(blade);
+    const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 6), red); tassel.position.y = -0.1; tassel.rotation.x = Math.PI; tip.add(tassel);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.3, 8), new THREE.MeshLambertMaterial({ color: 0x3a2412 })); grip.position.y = 0.2; g.add(grip);
+    const butt = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 6), bladeMat); butt.rotation.x = Math.PI; butt.position.y = -0.16; g.add(butt);
   } else if (id.startsWith('wand:')) {   // a short wand with a glowing tip in the wand's colour
     const c = new THREE.Color(WANDS[id.slice(5)].color);
+    if (id === 'wand:bust') for (const [dy, r] of [[0.42, 0.045], [0.34, 0.03], [0.27, 0.022]]) add(new THREE.SphereGeometry(r, 8, 6), new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 100 }), 0.025, dy, 0.02);   // drips of white goo
     add(new THREE.BoxGeometry(0.035, 0.5, 0.035), wood, 0, 0.2, 0);
     add(new THREE.BoxGeometry(0.07, 0.07, 0.07), new THREE.MeshBasicMaterial({ color: c }), 0, 0.5, 0);
     add(new THREE.BoxGeometry(0.13, 0.13, 0.13), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.35 }), 0, 0.5, 0);

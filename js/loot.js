@@ -14,8 +14,32 @@ const TIERS = [
   { name: 'Legendary', color: '#ff9a2a', mul: 1.75 },
 ];
 const TIER_ADJ = ['Worn', 'Sturdy', 'Fine', 'Masterwork', ''];
-const WEAPON_NAMES = { dagger: 'Dagger', sword: 'Sword', mace: 'Mace', bow: 'Bow' };
-const LEGENDARY_NAMES = { dagger: 'Nightfang', sword: 'Dawnsplitter', mace: 'Skullmaul', bow: 'Windsong' };
+const WEAPON_NAMES = { dagger: 'Dagger', sword: 'Sword', mace: 'Mace', bow: 'Bow', spear: "Ian's Hog" };
+const LEGENDARY_NAMES = { dagger: 'Nightfang', sword: 'Dawnsplitter', mace: 'Skullmaul', bow: 'Windsong', spear: "Ian's Hog" };
+
+// ---- one-of-a-kind Legendaries: each exists once per run (a flag is set when one is rolled; main.js clears them on a new run) ----
+//   Ian's Hog (spear), Aj's Bust (wand), AK's Dumbass (helmet).
+const UNIQUES = { hog: false, bust: false, dunce: false };
+const resetUniques = () => { for (const k in UNIQUES) UNIQUES[k] = false; };
+const UNIQUE_NAMES = { dunce: "AK's Dumbass" };
+// A Legendary weapon or helmet roll may turn into a unique (about one in three) if it has not turned up yet this run.
+let uniqueDry = false;                                                                 // a dry run (does this body hold anything?) must not use a unique up
+const dryRoll = fn => { uniqueDry = true; try { return fn(); } finally { uniqueDry = false; } };
+function rollUniqueGear(rng, isWeapon) {
+  const r = rng(), key = isWeapon ? 'hog' : 'dunce';
+  if (r >= 0.35 || UNIQUES[key] || uniqueDry) return null;
+  UNIQUES[key] = true;
+  return isWeapon ? { type: 'weapon', base: 'spear', tier: 4 } : { type: 'armor', slot: 'helmet', cls: 0, tier: 4, unique: 'dunce' };
+}
+// The wand is rolled apart from ordinary loot: a small chance per container (p), once per run.
+function rollBust(rng, p) {
+  if (rng() >= p || UNIQUES.bust || uniqueDry) return null;
+  UNIQUES.bust = true;
+  return { type: 'wand', kind: 'bust' };
+}
+// Charges: a wand's remaining casts, or Ian's Hog's remaining kills (chargeMax is in wands.js). A limp Hog is a spear at 0.
+const isLimp = it => !!it && it.type === 'weapon' && it.base === 'spear' && it.charges <= 0;
+const rechargeable = it => it.type === 'wand' || (it.type === 'weapon' && it.base === 'spear');
 
 // Armor: three slots, three weight classes. Heavier protects more but is louder to move in.
 const ARMOR_SLOTS = ['helmet', 'chest', 'boots'];
@@ -82,8 +106,8 @@ let nextItemId = 1;
 function makeItem(d) {
   const id = nextItemId++;
   switch (d.type) {
-    case 'weapon': return { id, type: 'weapon', base: d.base, tier: d.tier };
-    case 'armor':  return { id, type: 'armor', slot: d.slot, cls: d.cls, tier: d.tier };
+    case 'weapon': return d.base === 'spear' ? { id, type: 'weapon', base: 'spear', tier: 4, charges: d.charges !== undefined ? d.charges : WSTATS.spear.kills } : { id, type: 'weapon', base: d.base, tier: d.tier };
+    case 'armor':  return { id, type: 'armor', slot: d.slot, cls: d.cls, tier: d.tier, ...(d.unique ? { unique: d.unique } : {}) };
     case 'potion': return { id, type: 'potion', kind: d.kind, n: d.n || 1 };
     case 'key':    return { id, type: 'key', lock: d.lock, label: d.label };
     case 'wand':   return { id, type: 'wand', base: 'wand', kind: d.kind, charges: d.charges !== undefined ? d.charges : WANDS[d.kind].charges };
@@ -96,6 +120,7 @@ function makeItem(d) {
 
 function itemName(it) {
   if (it.type === 'weapon') return it.tier === 4 ? LEGENDARY_NAMES[it.base] : `${TIER_ADJ[it.tier]} ${WEAPON_NAMES[it.base]}`;
+  if (it.type === 'armor' && it.unique) return UNIQUE_NAMES[it.unique];
   if (it.type === 'armor') return `${it.tier === 4 ? 'Ancient' : TIER_ADJ[it.tier]} ${ARMOR_NAMES[it.slot][it.cls]}`;
   if (it.type === 'wand') return WANDS[it.kind].name;
   if (it.type === 'rechargewand') return it.full ? 'Grand Recharge Wand' : 'Recharge Wand';
@@ -105,13 +130,14 @@ function itemName(it) {
   if (it.type === 'food') return FOOD[it.kind].name;
   return it.label;
 }
-const itemColor = it => it.type === 'wand' ? WANDS[it.kind].color : it.type === 'rechargewand' ? '#7fe8d8' : it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
+const itemColor = it => it.type === 'wand' ? (WANDS[it.kind].legendary ? TIERS[4].color : WANDS[it.kind].color) : it.type === 'rechargewand' ? '#7fe8d8' : it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
 const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
   if (it.type === 'wand') return { wand: true, ranged: false, dmg: 0, stam: WAND.stam, noise: WANDS[it.kind].noise, dur: WAND.cd, hitAt: 99, reach: 0, sneak: 1, parryWin: 0, blockCost: 0, spd: 1, atkSpd: 1 };
   const b = WSTATS[it.base];
+  if (it.base === 'spear') return { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd), limp: it.charges <= 0 };
   return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
 }
 const armorStats = it => ({ red: Math.min(0.6, ARMOR_RED[it.cls] * TIERS[it.tier].mul), noise: ARMOR_NOISE[it.cls] });
@@ -121,6 +147,8 @@ function itemLines(it) {
   if (it.type === 'weapon') {
     const s = weaponStats(it);
     if (s.ranged) return [`Damage ${s.dmg.toFixed(1)} at a full draw (a body hit, about 65% of a sword)`, `Hold attack to draw, release to fire. Full draw ${s.draw} s, and you move slowly while drawing`, `Uses an arrow per shot. Stamina ${s.stam}, noise ${s.noise} m`, `Sneak shot x${s.sneak}, headshots hit hard, leg hits slow`, 'Right click while drawing cancels. A shield is stowed while the bow is out.'];
+    if (it.base === 'spear') return [it.charges <= 0 ? "LIMP. It has gone soft and cannot attack. A Recharge Wand stiffens it again." : `Kills left before it goes limp: ${it.charges}/${s.kills}`,
+      `Damage ${s.dmg.toFixed(1)} (the same as a Legendary sword), thrust speed x${s.atkSpd.toFixed(2)}`, `Reach ${s.reach.toFixed(1)} m: three times the sword's ${WSTATS.sword.reach} m`, `Stamina ${s.stam}, noise ${s.noise} m`, `Sneak attack x${s.sneak}`, 'No block of its own (a shield lets it block). Only kills tire it, not misses.', 'One of a kind: only one Ian\'s Hog exists per run.'];
     return [`Damage ${s.dmg.toFixed(1)}`, `Attack speed x${s.atkSpd.toFixed(2)} (swing ${s.dur.toFixed(2)} s), reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
       s.sneak >= 99 ? 'Sneak attack: instant kill' : `Sneak attack x${s.sneak}`,
       s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block']
@@ -128,11 +156,12 @@ function itemLines(it) {
   }
   if (it.type === 'armor') {
     const a = armorStats(it);
+    if (it.unique === 'dunce') return [`Cuts ${Math.round(a.red * 100)}% of damage to the head`, 'Silent', 'A tall, floppy paper cone with a big letter D on it. Nobody has ever looked cool in it.', 'One of a kind: only one exists per run.'];
     return [`Cuts ${Math.round(a.red * 100)}% of damage to the ${ARMOR_ZONE[it.slot]}`,
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
-  if (it.type === 'wand') return [WANDS[it.kind].desc, `Charges ${it.charges}/${WANDS[it.kind].charges}. Breaks at 0.`, `Stamina ${WAND.stam} per cast, noise ${WANDS[it.kind].noise} m`, 'Equip it like a weapon and attack to fire. Ignores armor and hit zones. A recharge wand tops it up.'];
-  if (it.type === 'rechargewand') return [it.full ? 'Refills a wand completely, then crumbles.' : `Restores ${WAND.rechargeGain} charges to a wand, then crumbles.`, 'Works on an empty wand too. Use it from a quickslot (it picks your held wand, or the emptiest in the pack) or choose a wand in the inventory.'];
+  if (it.type === 'wand') return [WANDS[it.kind].desc, `Charges ${it.charges}/${WANDS[it.kind].charges}. Breaks at 0.`, `Stamina ${WAND.stam} per cast, noise ${WANDS[it.kind].noise} m`, 'Equip it like a weapon and attack to fire. Ignores armor and hit zones. A recharge wand tops it up.'].concat(WANDS[it.kind].legendary ? ['One of a kind: only one exists per run.'] : []);
+  if (it.type === 'rechargewand') return [it.full ? 'Refills a wand completely, then crumbles.' : `Restores ${WAND.rechargeGain} charges to a wand, then crumbles.`, 'Also stiffens a limp Ian\'s Hog. Works on an empty wand too. Use it from a quickslot (it picks your held wand, or the emptiest in the pack) or choose a wand in the inventory.'];
   if (it.type === 'rage') return ['Plays a recording of Hanahan talking mad smack. Enemies get angry and ragebaited into attacking each other.', `Enemies within ${RAGE.radius} m fight each other for ${RAGE.dur} s, then come looking for you. Bosses ignore it. Very loud (${RAGE.noise} m).`, `Plays left: ${it.charges}. The recorder breaks after the last.`];
   if (it.type === 'shield') return [`Block costs ${Math.round(SHIELD.cost / TIERS[it.tier].mul)} stamina (less at higher tiers)`, `Parry window ${SHIELD.parryWin} s`, `Covers leg sweeps: only ${Math.round(SHIELD.legsTake * 100)}% of the hit gets through and no slow`, `Bash: attack while blocking. Stuns for ${SHIELD.bashStun} s and shoves, ${SHIELD.bashStam} stamina`, 'Lets a dagger block properly. Stowed while a bow is out.'];
   if (it.type === 'potion') return [POTIONS[it.kind].desc, `You have ${it.n}`];
@@ -154,11 +183,17 @@ function rollTier(floorNum, rng, boost = 0) {
 const rollPotionKind = rng => Object.keys(POTIONS)[weighted(rng, Object.values(POTIONS).map(p => p.weight))];
 function rollEquipment(floorNum, rng, { boost = 0, minTier = 0, kind } = {}) {
   const tier = Math.max(minTier, rollTier(floorNum, rng, boost));
-  if (kind === 'weapon' || (!kind && rng() < 0.35)) {
+  const isWeapon = kind === 'weapon' || (!kind && rng() < 0.35);
+  if (tier === 4 && (isWeapon || kind === 'armor' || !kind)) {                          // Legendary: maybe one of the one-of-a-kind pieces
+    const slot = isWeapon ? null : rng.pick(ARMOR_SLOTS);
+    const u = (isWeapon || slot === 'helmet') ? rollUniqueGear(rng, isWeapon) : null;
+    if (u) return u;
+    if (!isWeapon) return { type: 'armor', slot, cls: weighted(rng, [50, 35, 15]), tier };
+  } else if (!isWeapon) return { type: 'armor', slot: rng.pick(ARMOR_SLOTS), cls: weighted(rng, [50, 35, 15]), tier };
+  if (isWeapon) {
     if (rng() < 0.2) return { type: 'shield', tier };                                       // shields come with the weapons
     return { type: 'weapon', base: rng.pick(['dagger', 'sword', 'mace', 'bow']), tier };
   }
-  return { type: 'armor', slot: rng.pick(ARMOR_SLOTS), cls: weighted(rng, [50, 35, 15]), tier };
 }
 
 // Returns a list of drop descriptors. rng is seeded per prop so a seed repeats.
@@ -189,6 +224,7 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', ti
     if (rng() < 0.05 + 0.05 * t) out.push({ type: 'wand', kind: rollWandKind(rng) });
     if (rng() < 0.015 + 0.012 * t) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
     if (rng() < 0.006 + (t >= 3 ? 0.03 : 0)) out.push({ type: 'rage' });
+    const bust = rollBust(rng, 0.004 + (t >= 3 ? 0.02 : 0)); if (bust) out.push(bust);
     if (rng() < [0.4, 0.5, 0.75, 1, 1][t]) out.push(rollEquipment(floorNum, rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
   } else if (kind === 'vaultchest') {
     out.push({ type: 'gold', n: rng.int(40, 90) + floorNum * 10 });
@@ -197,6 +233,7 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', ti
     if (rng() < 0.3) out.push({ type: 'wand', kind: rollWandKind(rng) });
     if (rng() < 0.08) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
     if (rng() < 0.04) out.push({ type: 'rage' });
+    const bust = rollBust(rng, 0.03); if (bust) out.push(bust);
   } else if (kind === 'rack') {
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1, kind: rng() < 0.5 ? 'weapon' : 'armor' }));   // armory: weapon or armor, nothing below uncommon
   } else if (kind === 'pantry') {
@@ -314,13 +351,14 @@ class Inventory {
 
   // Use a recharge wand on target (default: the held wand, else the emptiest wand in the pack). Returns a message.
   recharge(it, target) {
-    const frac = w => w.charges / WANDS[w.kind].charges;
-    const t = target || (this.equip.weapon.type === 'wand' ? this.equip.weapon : this.pack.filter(i => i.type === 'wand').sort((a, b) => frac(a) - frac(b))[0]);
-    if (!t) return 'You have no wand to recharge.';
-    const max = WANDS[t.kind].charges;
+    const frac = w => w.charges / chargeMax(w);
+    const t = target || (rechargeable(this.equip.weapon) ? this.equip.weapon : this.pack.filter(rechargeable).sort((a, b) => frac(a) - frac(b))[0]);
+    if (!t) return 'You have no wand or spear to recharge.';
+    const max = chargeMax(t), wasLimp = isLimp(t);
     if (t.charges >= max) return `The ${itemName(t)} is already full.`;
     t.charges = rechargedTo(t, it.full);
     this.remove(it);
+    if (t.type === 'weapon') return `${itemName(t)} stiffens and stands tall again (${t.charges}/${max} kills).${wasLimp ? ' It is ready to fight.' : ''} The recharge wand crumbles.`;
     return `Recharged the ${itemName(t)} (${t.charges}/${max}). The recharge wand crumbles.`;
   }
 

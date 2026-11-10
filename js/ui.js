@@ -24,6 +24,7 @@ const invUI = (() => {
     #invScreen .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
     #invScreen .sum { margin-top: 10px; opacity: .8; font-size: 12px; }
     #invScreen .dim { opacity: .5; }
+    #invScreen .icon { float: right; margin: 0 0 4px 8px; }
   `;
   document.head.appendChild(css);
   const root = document.createElement('div');
@@ -34,18 +35,30 @@ const invUI = (() => {
   let note = '';
 
   const selected = () => !sel ? null : sel.src === 'pack' ? inv.find(sel.id) : inv.equip[sel.slot];
-  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : it.type === 'wand' || it.type === 'rage' ? ' (' + it.charges + ')' : ''}</span>`;
-  const sub = it => it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : it.type === 'wand' ? `Wand · ${it.charges}/${WANDS[it.kind].charges} charges` : it.type === 'rechargewand' ? 'Recharge wand' : it.type === 'rage' ? `Legendary recorder · ${it.charges} plays` : 'Key';
+  const nameHtml = it => `<span style="color:${itemColor(it)}">${itemName(it)}${it.type === 'potion' || it.type === 'food' ? ' x' + it.n : it.type === 'wand' || it.type === 'rage' ? ' (' + it.charges + ')' : it.base === 'spear' ? (isLimp(it) ? ' (LIMP)' : ' (' + it.charges + ')') : ''}</span>`;
+  const sub = it => it.base === 'spear' ? (isLimp(it) ? 'Legendary spear · LIMP' : `Legendary spear · ${it.charges}/${WSTATS.spear.kills} kills left`) : it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '') : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : it.type === 'wand' ? `${WANDS[it.kind].legendary ? 'Legendary wand' : 'Wand'} · ${it.charges}/${WANDS[it.kind].charges} charges` : it.type === 'rechargewand' ? 'Recharge wand' : it.type === 'rage' ? `Legendary recorder · ${it.charges} plays` : 'Key';
   const slotBox = (slot, label) => {
     const it = inv.equip[slot];
     const on = sel && sel.src === 'equip' && sel.slot === slot ? ' sel' : '';
     return `<div class="box${on}" data-equip="${slot}">${it ? `${nameHtml(it)}<small>${label} · ${sub(it)}</small>` : `<span class="dim">${label}: empty</span>`}</div>`;
   };
 
+  // Little drawn pictures of the three one-of-a-kind pieces. Ian's Hog is drawn standing tall, or limp and sagging.
+  function itemIcon(it) {
+    const svg = inner => `<svg class="icon" width="74" height="96" viewBox="0 0 74 96">${inner}</svg>`;
+    if (it.base === 'spear') {
+      if (isLimp(it)) return svg('<path d="M14 90 C 24 50, 36 36, 52 30 C 62 28, 64 40, 60 56" fill="none" stroke="#8a7a72" stroke-width="5" stroke-linecap="round"/><polygon points="55,54 65,54 60,82" fill="#8e8a92"/><rect x="54" y="50" width="12" height="5" fill="#8a8068"/><path d="M60 46 l-3 -8 M60 46 l3 -8" stroke="#8a6068" stroke-width="3"/><text x="4" y="12" fill="#e8908a" font-size="11" font-weight="700">LIMP</text>');
+      return svg('<line x1="37" y1="92" x2="37" y2="26" stroke="#7a5530" stroke-width="5" stroke-linecap="round"/><polygon points="37,2 45,26 29,26" fill="#d8dce4" stroke="#fff" stroke-width="1"/><rect x="32" y="26" width="10" height="5" fill="#d9a830"/><path d="M37 34 l-4 12 h8 z" fill="#c02a2a"/>');
+    }
+    if (it.unique === 'dunce') return svg('<polygon points="37,4 62,84 12,84" fill="#f4f1e4" stroke="#bbb" stroke-width="2"/><ellipse cx="37" cy="86" rx="28" ry="6" fill="#e6e2d0" stroke="#bbb"/><text x="37" y="66" text-anchor="middle" fill="#c02a2a" font-size="30" font-weight="900" font-family="serif">D</text><circle cx="37" cy="5" r="4" fill="#c02a2a"/>');
+    if (it.kind === 'bust') return svg('<rect x="33" y="30" width="6" height="60" rx="3" fill="#5a3a20" transform="rotate(12 36 60)"/><circle cx="26" cy="26" r="10" fill="#fff" stroke="#ddd"/><ellipse cx="22" cy="42" rx="4" ry="8" fill="#fff"/><ellipse cx="32" cy="46" rx="3" ry="6" fill="#fff"/><ellipse cx="18" cy="28" rx="3" ry="5" fill="#fff"/>');
+    return '';
+  }
+
   // How a pack item compares to what you are wearing or holding.
   function compare(it) {
     if (it.type === 'weapon') {
-      const a = weaponStats(it), b = weaponStats(inv.equip.weapon);
+      const a = weaponStats(it), b = weaponStats(inv.equip.weapon.type === 'wand' ? { type: 'weapon', base: 'dagger', tier: 0 } : inv.equip.weapon);
       if (a.ranged || b.ranged) return a.ranged && b.ranged ? `vs equipped: damage ${a.dmg - b.dmg >= 0 ? '+' : ''}${(a.dmg - b.dmg).toFixed(1)}` : 'A bow is a different style: slow, ranged, uses arrows.';
       const d = a.dmg - b.dmg;
       return `vs equipped: damage ${d >= 0 ? '+' : ''}${d.toFixed(1)}, swing ${a.dur >= b.dur ? '+' : ''}${(a.dur - b.dur).toFixed(2)} s`;
@@ -82,8 +95,8 @@ const invUI = (() => {
         if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' || it.type === 'wand') buttons += btn('equip', 'Equip');
         if (it.type === 'rage') buttons += btn('play', 'Play it');
         if (it.type === 'rechargewand') {                                              // pick which wand to recharge
-          const wands = [inv.equip.weapon, ...inv.pack].filter(i => i.type === 'wand');
-          buttons += wands.length ? wands.map(wd => btn('rech' + wd.id, `Recharge ${itemName(wd)} (${wd.charges}/${WANDS[wd.kind].charges})`)).join('') : '<span class="dim">You have no wand to recharge.</span>';
+          const wands = [inv.equip.weapon, ...inv.pack].filter(rechargeable);
+          buttons += wands.length ? wands.map(wd => btn('rech' + wd.id, `Recharge ${itemName(wd)} (${isLimp(wd) ? 'LIMP' : wd.charges + '/' + chargeMax(wd)})`)).join('') : '<span class="dim">You have no wand or spear to recharge.</span>';
         }
         if (it.type === 'potion') buttons += btn('drink', 'Drink');
         if (it.type === 'food') buttons += btn('eat', 'Eat');
@@ -91,7 +104,7 @@ const invUI = (() => {
         if (it.type !== 'key') buttons += btn('drop', 'Drop');
       } else if (it.type === 'armor' || it.type === 'shield') buttons += btn('unequip', 'Unequip');
       else buttons += '<span class="dim">Equipped. Equip another from the pack to swap.</span>';
-      detail = `<div class="nm">${nameHtml(it)}</div><div class="dim">${sub(it)}${fromPack ? '' : ' · equipped'}</div>
+      detail = `${itemIcon(it)}<div class="nm">${nameHtml(it)}</div><div class="dim">${sub(it)}${fromPack ? '' : ' · equipped'}</div>
         <ul>${lines}</ul>${fromPack && compare(it) ? `<div class="cmp">${compare(it)}</div>` : ''}${buttons}`;
     }
     const arm = ['head', 'body', 'legs'].map(z => `${z} ${Math.round(inv.armorRed(z) * 100)}%`).join(', ');

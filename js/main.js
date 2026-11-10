@@ -295,7 +295,7 @@ function setDev(on) {
 }
 
 // ---- combat: stamina, melee attacks, block and parry (numbers live in combat.js) ----
-const cb = { draw: null, bashCd: 0, bash: 0, rageCd: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
+const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, rageCd: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
@@ -313,6 +313,7 @@ function startAttack() {
   const w = wstats();
   if (w.ranged) return startDraw(w);
   if (cb.block && shield()) return bash();            // a shield bash: attack while blocking
+  if (isLimp(inv.equip.weapon)) { if (!cb.atk && cb.limpMsg <= 0) { flash("Ian's Hog has gone limp. It needs a Recharge Wand."); cb.limpMsg = 1.2; } return; }
   if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
   spend(w.stam); hunger.fight = 3;
   if (w.wand) { cb.atk = { t: 0, hit: true }; castWand(w); return; }   // a wand fires at once; the swing timer is just its recovery
@@ -336,13 +337,21 @@ function dealHit(e, zone, base, w, noise) {
     * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1);
   const killed = e.hurt(dmg, player);
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
-  if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); }
+  if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
   else {
     const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples, bow slows
     const proc = pr && pr.zone === zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
     if (proc) discover('status:' + pr.status, STATUS[pr.status].name);
     mark(`${zone.toUpperCase()}${sneak ? ' SNEAK' : ''}${guarded ? ' GUARDED' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, zone === 'head' ? '#ff9a3a' : '#fff');
   }
+}
+
+// Ian's Hog: every kill with it uses up a charge. At 0 it goes limp (see isLimp) until a recharge wand stiffens it.
+function hogKill() {
+  const it = inv.equip.weapon;
+  if (!it || it.base !== 'spear' || it.charges <= 0) return;
+  it.charges--;
+  flash(it.charges <= 0 ? "Ian's Hog goes limp! Find a Recharge Wand to stiffen it again." : `Ian's Hog: ${it.charges} kill${it.charges === 1 ? '' : 's'} left before it goes limp.`);
 }
 
 // ---- shield: blocks properly (even with a dagger), covers leg sweeps, and bashes ----
@@ -363,7 +372,7 @@ function bash() {
   const stunned = e.addStatus('stun', SHIELD.bashStun);
   if (stunned) discover('status:stun', 'Stun');
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;       // shove it back if there is room
-  if (!e.boss && !Player.wallHit(floor, e.x + dx / d * SHIELD.bashPush, e.z + dz / d * SHIELD.bashPush, e.r)) { e.x += dx / d * SHIELD.bashPush; e.z += dz / d * SHIELD.bashPush; }
+  if (!e.boss && !e.st.has('stuck') && !Player.wallHit(floor, e.x + dx / d * SHIELD.bashPush, e.z + dz / d * SHIELD.bashPush, e.r)) { e.x += dx / d * SHIELD.bashPush; e.z += dz / d * SHIELD.bashPush; }
   mark(stunned ? 'BASH +STUN' : 'BASH', '#7fe8ff');
 }
 
@@ -404,7 +413,7 @@ function applyWand(kind, e) {
   } else if (kind === 'force') {
     const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
     let moved = 0, hitWall = false;
-    if (!e.boss) {
+    if (!e.boss && !e.st.has('stuck')) {
       collider.props = floor.solids;
       for (; moved < W.push; moved += 0.25) {
         const nx = e.x + dx / d * 0.25, nz = e.z + dz / d * 0.25;
@@ -415,6 +424,10 @@ function applyWand(kind, e) {
     }
     hurtByWand(e, W.dmg + (hitWall ? W.wallDmg : 0));
     mark(hitWall ? 'FORCE: SLAMMED' : 'FORCE', '#c58aff');
+  } else if (kind === 'bust') {
+    if (e.elite) mark('TOO BIG TO STICK', '#aaa');                                // elites and bosses shrug it off
+    else if (e.st.has('stuck')) mark('ALREADY STUCK', '#aaa');
+    else if (e.addStatus('stuck')) { tag('stuck'); mark('STUCK FAST', '#ffffff'); }
   } else if (kind === 'sleep') { if (e.sleep(W.sleep)) mark('ASLEEP', '#8a9aff'); else mark('IT WILL NOT SLEEP', '#aaa'); }
 }
 
@@ -537,9 +550,11 @@ function bossDefeated(e) {
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
   const epic = rollEquipment(floorNum, rng, {});
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
+  const uniq = epic.tier === 4 ? rollUniqueGear(rng, rng() < 0.5) : null, bust = rollBust(rng, 0.12);    // a Legendary body may hold a one-of-a-kind piece
+  const left = [uniq || epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : []), ...(bust ? [bust] : [])];
   const extra = rollEquipment(floorNum, rng, { boost: 1, minTier: 2 });
   propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left: [epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : [])] },
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
   flash('The boss falls! Loot its body. The way down is open.');
@@ -549,7 +564,7 @@ function bossDefeated(e) {
 function makeCorpse(e, sneak) {
   e.corpseDone = true;
   const bonus = sneak ? 0.15 : 0;
-  if (!rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type).length && !e.loot) return;
+  if (!dryRoll(() => rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot) return;
   propObjs.push({
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot ? [{ type: 'gold', n: e.loot }] : undefined },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
@@ -648,6 +663,7 @@ function updateCombat(dt) {
 
   if (cb.bashCd > 0) cb.bashCd -= dt;
   if (cb.rageCd > 0) cb.rageCd -= dt;
+  if (cb.limpMsg > 0) cb.limpMsg -= dt;
   if (inv.rageReq) { playRage(inv.rageReq); inv.rageReq = null; }
   if (cb.bash > 0) cb.bash -= dt;
   if (cb.press) { startAttack(); cb.press = false; }
@@ -700,10 +716,12 @@ function buildShieldModel(it) {
   return g;
 }
 function updateViewmodel(dt) {
-  if (vm.id !== inv.weapon) {
+  const wkey = inv.weapon + (isLimp(inv.equip.weapon) ? ':limp' : '');                // a limp Ian's Hog is a different model
+  if (vm.id !== wkey) {
     if (vm.model) vm.group.remove(vm.model);
-    vm.model = buildWeaponModel(inv.weapon); vm.group.add(vm.model); vm.id = inv.weapon;
+    vm.model = buildWeaponModel(wkey); vm.group.add(vm.model); vm.id = wkey;
   }
+  const spear = inv.weapon === 'spear', limp = isLimp(inv.equip.weapon);
   const sh = shield();                                     // the off-hand shield, raised while blocking, thrust forward on a bash
   if ((sh && sh.id) !== vm.shieldId) {
     while (vm.shield.children.length) vm.shield.remove(vm.shield.children[0]);
@@ -719,19 +737,22 @@ function updateViewmodel(dt) {
     vm.shield.rotation.y += ((cb.block ? 0.05 : 0.4) - vm.shield.rotation.y) * k2;
   }
   let x = 0.38, y = -0.5, z = -0.7, rx = -0.15, rz = 0.15;
+  if (spear) { x = 0.32; y = -0.62; z = -0.5; rx = limp ? -0.85 : -1.2; rz = 0.04; }   // a spear is held pointing forward, a limp one sags
   if (cb.draw) { const f = Math.min(1, cb.draw.t / wstats().draw); x = 0.2; y = -0.38; z = -0.8 + 0.18 * f; rx = 0.05; rz = 0.02; }   // the bow is raised and the string drawn back
   if (cb.block) { x = 0.05; y = -0.36; z = -0.62; rx = -0.05; rz = 0; }
   if (inv.swapT > 0) y -= 0.5 * Math.sin(inv.swapT / SWAP_TIME * Math.PI);
   let k = 1 - Math.exp(-16 * dt);
   if (cb.atk) {
     const w = wstats(), p = Math.min(1, cb.atk.t / w.dur), s = Math.sin(p * Math.PI);
-    x -= 0.6 * s; z -= 0.25 * s; rx -= 1.25 * s; rz += 0.7 * s;
+    if (spear) { x -= 0.08 * s; z -= 0.9 * s; y += 0.06 * s; }              // a thrust, not a swing
+    else { x -= 0.6 * s; z -= 0.25 * s; rx -= 1.25 * s; rz += 0.7 * s; }
     k = 1;
   }
   // Keep the weapon out of walls and furniture: pull it back toward the camera by however far it
   // would reach past the nearest obstacle (a swing reaches much farther than the rest pose).
   const pull = Math.max(0, Math.min(1.3, (cb.atk ? 1.9 : 0.95) - freeAhead()));
   z += pull; y -= pull * 0.15; rx += pull * 0.5;
+  if (limp) { const t = performance.now() / 1000; rz += Math.sin(t * 1.7) * 0.05; rx += Math.sin(t * 1.1) * 0.03; }   // it dangles and sways
   const g = vm.group;
   g.position.x += (x - g.position.x) * k; g.position.y += (y - g.position.y) * k; g.position.z += (z - g.position.z) * k;
   g.rotation.x += (rx - g.rotation.x) * k; g.rotation.z += (rz - g.rotation.z) * k;
@@ -850,7 +871,7 @@ function updateHud() {
   el('hungerFill').style.background = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' }[hunger.stage];
   const slots = inv.quick.map((_, i) => {
     const it = inv.quickItem(i);
-    const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : it.type === 'wand' || it.type === 'rage' ? `${itemName(it)} (${it.charges})` : itemName(it);
+    const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : it.type === 'wand' || it.type === 'rage' ? `${itemName(it)} (${it.charges})` : it.base === 'spear' ? `${itemName(it)} (${isLimp(it) ? 'LIMP' : it.charges})` : itemName(it);
     const c = it ? itemColor(it) : '#fff5';
     return `<div class="slot" style="border-color:${c}"><i>${i + 1}</i><span style="color:${c}">${name || '&nbsp;'}</span></div>`;
   }).join('');
@@ -858,7 +879,7 @@ function updateHud() {
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
   const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
     .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
-  const line = `<span style="color:${itemColor(w)}">${itemName(w)}${w.type === 'wand' ? ` (${w.charges})` : ''}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
+  const line = `<span style="color:${itemColor(w)}">${itemName(w)}${w.type === 'wand' ? ` (${w.charges})` : w.base === 'spear' ? (isLimp(w) ? ' (LIMP)' : ` (${w.charges} kills left)`) : ''}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
   hudKey = key;

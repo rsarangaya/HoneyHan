@@ -97,9 +97,11 @@ function separateBodies(enemies, player, floor) {
       if (d >= min) continue;
       if (d < 1e-4) { const k = (i * 7 + j * 13) % 628 / 100; dx = Math.cos(k); dz = Math.sin(k); d = 1; }   // exactly stacked: split in a fixed direction
       else { dx /= d; dz /= d; }
-      const push = (min - Math.min(d, min)) / 2;
-      if (free(a.x - dx * push, a.z - dz * push)) { a.x -= dx * push; a.z -= dz * push; }
-      if (free(b.x + dx * push, b.z + dz * push)) { b.x += dx * push; b.z += dz * push; }
+      const sa = a.st.has('stuck'), sb = b.st.has('stuck');                                  // a glued enemy is immovable: the other gives way
+      if (sa && sb) continue;
+      const push = (min - Math.min(d, min)) / (sa || sb ? 1 : 2);
+      if (!sa && free(a.x - dx * push, a.z - dz * push)) { a.x -= dx * push; a.z -= dz * push; }
+      if (!sb && free(b.x + dx * push, b.z + dz * push)) { b.x += dx * push; b.z += dz * push; }
     }
     for (const e of live) {
       let dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
@@ -108,7 +110,7 @@ function separateBodies(enemies, player, floor) {
       if (d < 1e-4) { dx = -Math.sin(player.yaw); dz = -Math.cos(player.yaw); d = 0; }   // dead centre: step the guard out in front
       else { dx /= d; dz /= d; }
       const push = min - d;
-      if (free(e.x + dx * push, e.z + dz * push)) { e.x += dx * push; e.z += dz * push; }
+      if (!e.st.has('stuck') && free(e.x + dx * push, e.z + dz * push)) { e.x += dx * push; e.z += dz * push; }
       else if (!Player.wallHit(floor, player.x - dx * push, player.z - dz * push, player.radius)) { player.x -= dx * push; player.z -= dz * push; }
     }
   }
@@ -458,6 +460,7 @@ class Enemy {
     return Math.hypot(tx - this.x, tz - this.z);
   }
 
+  get elite() { return this.boss || !!this.T.elite; }
   get r() { return this.boss ? 0.65 : this.T.r; }   // body radius: guards keep this far apart and out of the player
 
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
@@ -474,6 +477,20 @@ class Enemy {
   die() {
     this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
     if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
+  }
+
+  // Aj's Bust: a thick white coat of goo over the whole body, a puddle underneath and a few drips. Built once, on demand.
+  buildGoo() {
+    const g = this.goo = new THREE.Group();
+    const mat = new THREE.MeshPhongMaterial({ color: 0xf6f6f0, shininess: 110, specular: 0xffffff, emissive: 0x34342e, transparent: true, opacity: 0.88 });
+    const h = this.quad ? this.T.height / this.scaleK : 1.4, w = this.quad ? 0.42 : 0.44;
+    const blob = (rx, ry, rz, x, y, z) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat); m.scale.set(rx, ry, rz); m.position.set(x, y, z); g.add(m); return m; };
+    blob(w, h * 0.5, w * 0.9, 0, h * 0.5, 0);                                   // the main coat
+    if (!this.quad) { blob(w * 0.62, h * 0.17, w * 0.62, 0, h * 0.92, 0); blob(w * 0.4, h * 0.2, w * 0.4, w * 0.9, h * 0.62, 0); blob(w * 0.4, h * 0.2, w * 0.4, -w * 0.9, h * 0.62, 0); }   // head and arms
+    else blob(w * 0.55, h * 0.3, w * 0.55, 0, h * 0.7, -w * 0.9);               // an animal's head
+    blob(w * 1.7, 0.035, w * 1.7, 0, 0.03, 0);                                  // the puddle
+    for (const [x, z, s] of [[0.2, 0.3, 1], [-0.25, 0.2, 0.7], [0.05, -0.35, 0.85]]) blob(0.05 * s, 0.14 * s, 0.05 * s, x * w * 2, h * 0.28, z * w * 2);   // drips
+    this.mesh.add(g);
   }
 
   // Is the player in front of it (within about 60 degrees of where it faces)? Used for shields and guards.
@@ -676,7 +693,7 @@ class Enemy {
         if (this.T.ranged) { this.updateRanged(dt, player, noise, dist, los, dx, dz); break; }
         this.atkCd -= dt;
         if (this.T.thief && this.stolen) { this.startFlee(player); break; }       // already robbed you: run
-        const C = this.T.charge;
+        const C = this.st.has('stuck') ? null : this.T.charge;                         // a glued boar cannot charge
         if (C && !this.winding) {                                                  // a boar paws the ground, then charges in a straight line
           if (this.chargeT > 0) {
             this.chargeT -= dt;
@@ -766,6 +783,7 @@ class Enemy {
     this.upper.rotation.x = p[0]; this.upper.rotation.y = p[1]; this.upper.position.y = 0.7 - p[4];
     this.arms[1].rotation.x = p[2]; this.arms[0].rotation.x = p[3];
     }
+    if (this.st.has('stuck') && !this.goo) this.buildGoo();
     m.rotation.x = this.sleepT > 0 ? 0.35 : 0;                                                              // slumped while asleep
     if (this.T.sway && !this.stun) m.rotation.z = Math.sin(this.walkT * 0.5 + this.seed) * (this.state === 'alerted' ? 0.04 : 0.1);   // a drunk's roll
     // hit flash

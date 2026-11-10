@@ -50,6 +50,8 @@ function discoverItem(d, silent) {
   else if (d.type === 'key') discover('item:key', nm('Keys'));
   else if (d.type === 'potion') discover('potion:' + d.kind, nm(POTIONS[d.kind].name));
   else if (d.type === 'food') discover('food:' + d.kind, nm(FOOD[d.kind].name));
+  else if (d.type === 'weapon' && d.base === 'spear') discover('item:hog', nm("Ian's Hog"));
+  else if (d.type === 'armor' && d.unique) discover('item:' + d.unique, nm(UNIQUE_NAMES[d.unique]));
   else if (d.type === 'weapon') { discover('weapon:' + d.base, nm(WEAPON_NAMES[d.base])); discover('tier:' + d.tier, nm(TIERS[d.tier].name + ' tier')); }
   else if (d.type === 'wand') discover('wand:' + d.kind, nm(WANDS[d.kind].name));
   else if (d.type === 'rechargewand') discover('item:recharge', nm('Recharge Wand'));
