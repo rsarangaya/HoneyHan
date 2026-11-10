@@ -60,6 +60,25 @@ function findMeleeTarget(player, eyeY, enemies, floor, reach) {
   return zone ? { e: best, zone, dist: bestD } : { e: best, zone: null, dist: bestD };
 }
 
+// Ian's Hog's pole: beige skin with branching reddish-purple veins (paler and greyer when limp). Cached per state.
+const VEIN_TEX = {};
+function veinTexture(limp) {
+  const key = limp ? 'limp' : 'ready';
+  if (VEIN_TEX[key]) return VEIN_TEX[key];
+  const c = document.createElement('canvas'); c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = limp ? '#cbbfa8' : '#e6d4ae'; g.fillRect(0, 0, 64, 256);
+  const r = makeRng(limp ? 11 : 7);
+  for (let i = 0; i < 9; i++) {                                    // a few long veins with side branches
+    let x = r() * 64, y = r() * 256; g.strokeStyle = limp ? 'rgba(140,100,110,0.55)' : 'rgba(160,60,80,0.8)'; g.lineWidth = 1.2 + r() * 1.3;
+    g.beginPath(); g.moveTo(x, y);
+    for (let k = 0; k < 7; k++) { x += (r() - 0.5) * 16; y += 14 + r() * 22; g.lineTo(x, y); if (r() < 0.4) { g.moveTo(x, y); g.lineTo(x + (r() - 0.5) * 22, y + 8 + r() * 10); g.moveTo(x, y); } }
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return VEIN_TEX[key] = t;
+}
+
 // Procedural first-person weapon models (stand-ins until real art).
 function buildWeaponModel(id) {
   const g = new THREE.Group();
@@ -81,7 +100,7 @@ function buildWeaponModel(id) {
     // Ian's Hog. Held pointing forward (the viewmodel tilts it). Ready: a straight ash shaft, a long leaf blade and a red
     // tassel. Limp: the same spear gone soft, its shaft sagging in segments to a hanging, greyed-out tip.
     const limp = id === 'spear:limp';
-    const shaftMat = new THREE.MeshPhongMaterial({ color: limp ? 0x8a7a72 : 0x7a5530, shininess: limp ? 2 : 14, specular: 0x222222 });
+    const shaftMat = new THREE.MeshPhongMaterial({ map: veinTexture(limp), shininess: limp ? 2 : 22, specular: 0x333028 });   // beige, with veins
     const bladeMat = new THREE.MeshPhongMaterial({ color: limp ? 0x8e8a92 : 0xd8dce4, shininess: limp ? 4 : 120, specular: 0xffffff });
     const gold = new THREE.MeshPhongMaterial({ color: limp ? 0x8a8068 : 0xd9a830, shininess: 60, specular: 0x886622 });
     const red = new THREE.MeshLambertMaterial({ color: limp ? 0x8a6068 : 0xc02a2a });

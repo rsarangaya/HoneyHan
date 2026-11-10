@@ -143,4 +143,49 @@ run("Ian's Hog, Aj's Bust and AK's Dumbass", async ({ open, check }) => {
   check('only one Hog and one Dumbass come out of thousands of Legendary rolls', uniq.got.spear === 1 && uniq.got.dunce === 1, JSON.stringify(uniq.got));
   check('only one Aj\'s Bust comes out of thousands of vault chests', uniq.busts === 1, uniq.busts);
   check('a dry run (is the body empty?) does not use the unique up', uniq.dry.busts === 0 && uniq.dry.flag === false, JSON.stringify(uniq.dry));
+
+  // 5. The dunce hat's three effects, and feeding gear to Ian's Hog.
+  const page2 = await open(7);                                           // a fresh page: the elite fights above may have killed the player
+  const fx = await page2.evaluate(async () => {
+    const out = {};
+    const hatItem = () => makeItem({ type: 'armor', slot: 'helmet', cls: 0, tier: 4, unique: 'dunce' });
+    // Fool's Fortune
+    T.reset(); game.inv.equip.helmet = null; out.goldPlain = game.inv.add({ type: 'gold', n: 10 }); const g0 = game.inv.gold;
+    game.inv.pack.push(hatItem()); game.inv.equipItem(game.inv.pack[0]);
+    game.inv.gold = 0; out.goldHat = game.inv.add({ type: 'gold', n: 10 }); out.goldHatTotal = game.inv.gold;
+    // Corner Time: crouch still and an unaware guard looking straight at you never notices
+    T.reset(); game.inv.equip.helmet = null; game.inv.pack.push(hatItem()); game.inv.equipItem(game.inv.pack[0]); hat.coned.clear(); hat.cd = 0; hat.still = 0; hat.hidden = false;
+    let e = T.guard(3, 'away', false); e.hp = e.maxHp = 500;               // a guard with its back to you
+    game.player.keys[KEYS.crouch] = true;
+    out.hid = await T.until(() => hat.hidden, 9000);
+    e.yaw = game.player.yaw + Math.PI; e.lookAround = () => {};                      // it turns round and looks straight at you
+    await T.sleep(2500); out.hiddenAware = e.aware; out.hiddenState = e.state;
+    game.player.keys[KEYS.crouch] = false; await T.until(() => !hat.hidden, 3000); out.unhid = !hat.hidden; out.cd = hat.cd > 10;
+    // without the hat the same guard notices
+    T.reset(); game.inv.equip.helmet = null; hat.coned.clear(); e = T.guard(3, 'away', false); game.player.keys[KEYS.crouch] = true; await T.sleep(3500); e.yaw = game.player.yaw + Math.PI; e.lookAround = () => {}; await T.sleep(1500); out.noHatHides = hat.hidden; out.noHatAware = e.aware; game.player.keys[KEYS.crouch] = false;
+    // Cone of Shame: the first guard to spot you is stunned, the second is not
+    T.reset(); game.inv.equip.helmet = null; game.inv.pack.push(hatItem()); game.inv.equipItem(game.inv.pack[0]); hat.coned.clear(); hat.cd = 99; game.player.keys = {};
+    const a = T.guard(3, 'toward', false); const b = T.guard(3.5, 'toward', false); a.hp = a.maxHp = b.hp = b.maxHp = 500;
+        out.coned = await T.until(() => a.st.has('stun') || b.st.has('stun'), 9000);
+    await T.sleep(800); out.stunned = [a, b].filter(x => x.st.has('stun') || x.stun > 0 || x.st.cool.stun > 0).length;
+    // Ian's Hog: sacrifice gear
+    T.reset(); const hog = makeItem({ type: 'weapon', base: 'spear', tier: 4 }); hog.charges = 0; game.inv.pack.push(hog);
+    const sw = makeItem({ type: 'weapon', base: 'sword', tier: 0 }), ar = makeItem({ type: 'armor', slot: 'chest', cls: 2, tier: 3 }), lg = makeItem({ type: 'shield', tier: 4 }), hat2 = hatItem();
+    game.inv.pack.push(sw, ar, lg, hat2);
+    out.refuseHat = game.inv.sacrifice(hog, hat2); out.refuseSelf = game.inv.sacrifice(hog, hog);
+    game.inv.sacrifice(hog, sw); out.afterCommon = hog.charges; out.swGone = !game.inv.pack.includes(sw);
+    game.inv.sacrifice(hog, ar); out.afterEpic = hog.charges;
+    out.full = game.inv.sacrifice(hog, lg); out.shieldKept = game.inv.pack.includes(lg);
+    hog.charges = 0; game.inv.sacrifice(hog, lg); out.afterLegendary = hog.charges;
+    out.lore = [itemLore(hog), itemLore(makeItem({ type: 'wand', kind: 'bust' })), itemLore(hat2)];
+    return out;
+  });
+  check("Fool's Fortune: 50% more gold with the hat, normal without", /^10 gold$/.test(fx.goldPlain) && fx.goldHatTotal === 15, `${fx.goldPlain} / ${fx.goldHat}`);
+  check("Corner Time: crouching still hides you from an unaware guard facing you", fx.hid && fx.hiddenAware < 0.05 && fx.hiddenState === "unaware", JSON.stringify(fx));
+  check('Corner Time ends when you move and then has a cooldown', fx.unhid && fx.cd);
+  check('without the hat the guard notices you', !fx.noHatHides && fx.noHatAware > 0.2, `aware ${fx.noHatAware}`);
+  check('Cone of Shame: only the first guard to spot you is stunned', fx.coned && fx.stunned === 1, `stunned ${fx.stunned}, coned ${fx.coned}`);
+  check('feeding gear to the Hog: Common +1, Epic +2, Legendary full', fx.afterCommon === 1 && fx.swGone && fx.afterEpic === 3 && fx.afterLegendary === 3, `${fx.afterCommon} ${fx.afterEpic} ${fx.afterLegendary}`);
+  check('the Hog refuses itself, the hat, and a full stomach', /will not take/.test(fx.refuseHat) && /will not take/.test(fx.refuseSelf) && /full/.test(fx.full) && fx.shieldKept);
+  check('the three flavour lines are in', /3 days long/.test(fx.lore[0]) && /^Aj's coming/.test(fx.lore[1]) && /stupider/.test(fx.lore[2]));
 });

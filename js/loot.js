@@ -22,6 +22,20 @@ const LEGENDARY_NAMES = { dagger: 'Nightfang', sword: 'Dawnsplitter', mace: 'Sku
 const UNIQUES = { hog: false, bust: false, dunce: false };
 const resetUniques = () => { for (const k in UNIQUES) UNIQUES[k] = false; };
 const UNIQUE_NAMES = { dunce: "AK's Dumbass" };
+// AK's Dumbass, worn: Fool's Fortune (more gold), Corner Time (crouch still and unaware guards stop noticing you) and
+// Cone of Shame (the first guard on a floor to spot you is stunned by laughter).
+const DUNCE = { gold: 1.5, hideStill: 3, hideMax: 12, hideCd: 20, laugh: 1 };
+const wearingDunce = inv => !!(inv.equip.helmet && inv.equip.helmet.unique === 'dunce');
+// Flavour text for the three one-of-a-kind pieces.
+function itemLore(it) {
+  if (it.type === 'weapon' && it.base === 'spear') return "Ian's hog is 3 days long, as represented by this spear. Refractory period sucks.";
+  if (it.type === 'wand' && it.kind === 'bust') return "Aj's coming on that ass.";
+  if (it.type === 'armor' && it.unique === 'dunce') return 'You feel yourself becoming stupider.';
+  return '';
+}
+// Ian's Hog can also be recharged by sacrificing other gear to it: Common and Uncommon +1 kill, Rare and Epic +2, Legendary full.
+const SACRIFICE_GAIN = [1, 1, 2, 2, 3];
+const sacrificable = it => (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield') && it.base !== 'spear' && !it.unique;
 // A Legendary weapon or helmet roll may turn into a unique (about one in three) if it has not turned up yet this run.
 let uniqueDry = false;                                                                 // a dry run (does this body hold anything?) must not use a unique up
 const dryRoll = fn => { uniqueDry = true; try { return fn(); } finally { uniqueDry = false; } };
@@ -148,7 +162,7 @@ function itemLines(it) {
     const s = weaponStats(it);
     if (s.ranged) return [`Damage ${s.dmg.toFixed(1)} at a full draw (a body hit, about 65% of a sword)`, `Hold attack to draw, release to fire. Full draw ${s.draw} s, and you move slowly while drawing`, `Uses an arrow per shot. Stamina ${s.stam}, noise ${s.noise} m`, `Sneak shot x${s.sneak}, headshots hit hard, leg hits slow`, 'Right click while drawing cancels. A shield is stowed while the bow is out.'];
     if (it.base === 'spear') return [it.charges <= 0 ? "LIMP. It has gone soft and cannot attack. A Recharge Wand stiffens it again." : `Kills left before it goes limp: ${it.charges}/${s.kills}`,
-      `Damage ${s.dmg.toFixed(1)} (the same as a Legendary sword), thrust speed x${s.atkSpd.toFixed(2)}`, `Reach ${s.reach.toFixed(1)} m: three times the sword's ${WSTATS.sword.reach} m`, `Stamina ${s.stam}, noise ${s.noise} m`, `Sneak attack x${s.sneak}`, 'No block of its own (a shield lets it block). Only kills tire it, not misses.', 'One of a kind: only one Ian\'s Hog exists per run.'];
+      `Damage ${s.dmg.toFixed(1)} (the same as a Legendary sword), thrust speed x${s.atkSpd.toFixed(2)}`, `Reach ${s.reach.toFixed(1)} m: three times the sword's ${WSTATS.sword.reach} m`, `Stamina ${s.stam}, noise ${s.noise} m`, `Sneak attack x${s.sneak}`, 'No block of its own (a shield lets it block). Only kills tire it, not misses.', 'Recharge it with a Recharge Wand, or sacrifice other gear to it (Common/Uncommon +1 kill, Rare/Epic +2, Legendary full).', 'One of a kind: only one Ian\'s Hog exists per run.'];
     return [`Damage ${s.dmg.toFixed(1)}`, `Attack speed x${s.atkSpd.toFixed(2)} (swing ${s.dur.toFixed(2)} s), reach ${s.reach.toFixed(1)} m`, `Stamina ${s.stam}, noise ${s.noise} m`,
       s.sneak >= 99 ? 'Sneak attack: instant kill' : `Sneak attack x${s.sneak}`,
       s.blockCost > 0 ? `Block costs ${s.blockCost} stamina` : s.parryWin > 0 ? 'Parry only, no normal block' : 'Weak block']
@@ -156,7 +170,7 @@ function itemLines(it) {
   }
   if (it.type === 'armor') {
     const a = armorStats(it);
-    if (it.unique === 'dunce') return [`Cuts ${Math.round(a.red * 100)}% of damage to the head`, 'Silent', 'A tall, floppy paper cone with a big letter D on it. Nobody has ever looked cool in it.', 'One of a kind: only one exists per run.'];
+    if (it.unique === 'dunce') return [`Cuts ${Math.round(a.red * 100)}% of damage to the head`, 'Silent', "Fool's Fortune: you find 50% more gold.", `Corner Time: crouch perfectly still for ${DUNCE.hideStill} s and guards that have not noticed you stop noticing you (until you move, a guard is alerted, or ${DUNCE.hideMax} s pass; then ${DUNCE.hideCd} s before it works again).`, 'Cone of Shame: the first guard on each floor to spot you bursts out laughing and is stunned for 1 s.', 'A tall, floppy paper cone with a big letter D on it.', 'One of a kind: only one exists per run.'];
     return [`Cuts ${Math.round(a.red * 100)}% of damage to the ${ARMOR_ZONE[it.slot]}`,
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
@@ -274,7 +288,7 @@ class Inventory {
   // Adds a drop descriptor. Returns text for the pickup message, or null if it did not fit.
   add(d) {
     discoverItem(d);                                      // glossary entry (controls.js)
-    if (d.type === 'gold') { this.gold += d.n; return `${d.n} gold`; }
+    if (d.type === 'gold') { const n = wearingDunce(this) ? Math.round(d.n * DUNCE.gold) : d.n; this.gold += n; return `${n} gold${n !== d.n ? " (Fool's Fortune)" : ''}`; }
     if (d.type === 'arrows') {
       const got = Math.min(d.n, QUIVER_MAX - this.arrows);
       if (got <= 0) return null;
@@ -360,6 +374,18 @@ class Inventory {
     this.remove(it);
     if (t.type === 'weapon') return `${itemName(t)} stiffens and stands tall again (${t.charges}/${max} kills).${wasLimp ? ' It is ready to fight.' : ''} The recharge wand crumbles.`;
     return `Recharged the ${itemName(t)} (${t.charges}/${max}). The recharge wand crumbles.`;
+  }
+
+  // Feed a piece of gear to Ian's Hog. Returns a message. `hog` is the Hog (equipped or in the pack), `gear` a pack item.
+  sacrifice(hog, gear) {
+    if (!hog || hog.base !== 'spear') return "You have no Ian's Hog.";
+    if (!sacrificable(gear) || !this.pack.includes(gear)) return 'The Hog will not take that.';
+    const max = WSTATS.spear.kills;
+    if (hog.charges >= max) return "Ian's Hog is already full.";
+    const gain = SACRIFICE_GAIN[gear.tier], was = isLimp(hog), name = itemName(gear);
+    hog.charges = Math.min(max, hog.charges + gain);
+    this.remove(gear);
+    return `You feed the ${name} to Ian's Hog (+${gain}, ${hog.charges}/${max} kills).${was ? ' It stiffens and is ready to fight.' : ''}`;
   }
 
   // 0 to 0.8 share of damage cut for a body zone ('head' | 'body' | 'legs').

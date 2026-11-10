@@ -346,6 +346,28 @@ function dealHit(e, zone, base, w, noise) {
   }
 }
 
+// AK's Dumbass (js/loot.js DUNCE): Corner Time (crouch still, and unaware guards stop noticing you) and Cone of Shame
+// (the first guard on each floor to spot you is stunned by laughter). Fool's Fortune lives in Inventory.add. Returns
+// true while you are hidden.
+const hat = { still: 0, hidden: false, hiddenT: 0, cd: 0, coned: new Set() };
+function hatUpdate(dt) {
+  if (hat.cd > 0) hat.cd -= dt;
+  if (!wearingDunce(inv)) { hat.still = 0; hat.hidden = false; return false; }
+  const moving = Math.hypot(player.vx, player.vz) > 0.3 || cb.atk || cb.draw || cb.eat;
+  const hunted = enemies.some(e => !e.dead && e.state === 'alerted' && !e.boss);
+  if (hat.hidden) {
+    hat.hiddenT += dt;
+    if (moving || !player.crouching || hunted || hat.hiddenT > DUNCE.hideMax) { hat.hidden = false; hat.cd = DUNCE.hideCd; hat.still = 0; flash('Guards can see you again.'); }
+  } else if (player.crouching && !moving && !hunted) {
+    if ((hat.still += dt) >= DUNCE.hideStill && hat.cd <= 0) { hat.hidden = true; hat.hiddenT = 0; flash('You crouch motionless. The guards look right past you.'); }
+  } else hat.still = 0;
+  if (!hat.coned.has(floorNum)) {                                                  // Cone of Shame
+    const g = enemies.find(e => !e.dead && e.state === 'alerted' && e.seen && !e.rageT && !e.boss);
+    if (g) { hat.coned.add(floorNum); if (g.addStatus('stun', DUNCE.laugh)) { discover('status:stun', 'Stun'); flash('A guard spots your hat and bursts out laughing!'); } }
+  }
+  return hat.hidden;
+}
+
 // Ian's Hog: every kill with it uses up a charge. At 0 it goes limp (see isLimp) until a recharge wand stiffens it.
 function hogKill() {
   const it = inv.equip.weapon;
@@ -650,7 +672,8 @@ function updateCombat(dt) {
   if (patch === 'grass') { seenMul = player.crouching ? 0.55 : 0.85; discover('item:grass', 'Tall grass'); }
   else if (patch === 'glowcap') { seenMul = 1.4; discover('item:glow', 'Glowing spores'); }
   else if (patch === 'ice') discover('item:ice', 'Ice');
-  player.stealthMul = (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
+  const hidden = hatUpdate(dt);
+  player.stealthMul = hidden ? 0 : (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
 
   if (player.sprinting) spend(TUNE.sprintDrain * dt);

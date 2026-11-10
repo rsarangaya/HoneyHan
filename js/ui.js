@@ -47,8 +47,8 @@ const invUI = (() => {
   function itemIcon(it) {
     const svg = inner => `<svg class="icon" width="74" height="96" viewBox="0 0 74 96">${inner}</svg>`;
     if (it.base === 'spear') {
-      if (isLimp(it)) return svg('<path d="M14 90 C 24 50, 36 36, 52 30 C 62 28, 64 40, 60 56" fill="none" stroke="#8a7a72" stroke-width="5" stroke-linecap="round"/><polygon points="55,54 65,54 60,82" fill="#8e8a92"/><rect x="54" y="50" width="12" height="5" fill="#8a8068"/><path d="M60 46 l-3 -8 M60 46 l3 -8" stroke="#8a6068" stroke-width="3"/><text x="4" y="12" fill="#e8908a" font-size="11" font-weight="700">LIMP</text>');
-      return svg('<line x1="37" y1="92" x2="37" y2="26" stroke="#7a5530" stroke-width="5" stroke-linecap="round"/><polygon points="37,2 45,26 29,26" fill="#d8dce4" stroke="#fff" stroke-width="1"/><rect x="32" y="26" width="10" height="5" fill="#d9a830"/><path d="M37 34 l-4 12 h8 z" fill="#c02a2a"/>');
+      if (isLimp(it)) return svg('<path d="M14 90 C 24 50, 36 36, 52 30 C 62 28, 64 40, 60 56" fill="none" stroke="#b8a888" stroke-width="5" stroke-linecap="round"/><path d="M14 90 C 24 50, 36 36, 52 30 C 62 28, 64 40, 60 56" fill="none" stroke="#9a5a64" stroke-width="1" stroke-dasharray="3 4"/><polygon points="55,54 65,54 60,82" fill="#8e8a92"/><rect x="54" y="50" width="12" height="5" fill="#8a8068"/><path d="M60 46 l-3 -8 M60 46 l3 -8" stroke="#8a6068" stroke-width="3"/><text x="4" y="12" fill="#e8908a" font-size="11" font-weight="700">LIMP</text>');
+      return svg('<line x1="37" y1="92" x2="37" y2="26" stroke="#e6d4ae" stroke-width="5" stroke-linecap="round"/><path d="M35 90 q4 -10 0 -20 t1 -18 t-1 -18 M39 86 q-3 -8 1 -16 t-1 -14" fill="none" stroke="#a04a58" stroke-width="1"/><polygon points="37,2 45,26 29,26" fill="#d8dce4" stroke="#fff" stroke-width="1"/><rect x="32" y="26" width="10" height="5" fill="#d9a830"/><path d="M37 34 l-4 12 h8 z" fill="#c02a2a"/>');
     }
     if (it.unique === 'dunce') return svg('<polygon points="37,4 62,84 12,84" fill="#f4f1e4" stroke="#bbb" stroke-width="2"/><ellipse cx="37" cy="86" rx="28" ry="6" fill="#e6e2d0" stroke="#bbb"/><text x="37" y="66" text-anchor="middle" fill="#c02a2a" font-size="30" font-weight="900" font-family="serif">D</text><circle cx="37" cy="5" r="4" fill="#c02a2a"/>');
     if (it.kind === 'bust') return svg('<rect x="33" y="30" width="6" height="60" rx="3" fill="#5a3a20" transform="rotate(12 36 60)"/><circle cx="26" cy="26" r="10" fill="#fff" stroke="#ddd"/><ellipse cx="22" cy="42" rx="4" ry="8" fill="#fff"/><ellipse cx="32" cy="46" rx="3" ry="6" fill="#fff"/><ellipse cx="18" cy="28" rx="3" ry="5" fill="#fff"/>');
@@ -98,6 +98,8 @@ const invUI = (() => {
           const wands = [inv.equip.weapon, ...inv.pack].filter(rechargeable);
           buttons += wands.length ? wands.map(wd => btn('rech' + wd.id, `Recharge ${itemName(wd)} (${isLimp(wd) ? 'LIMP' : wd.charges + '/' + chargeMax(wd)})`)).join('') : '<span class="dim">You have no wand or spear to recharge.</span>';
         }
+        const hogItem = [inv.equip.weapon, ...inv.pack].find(i => i.base === 'spear');
+        if (hogItem && sacrificable(it) && hogItem.charges < WSTATS.spear.kills) buttons += btn('sac', `Sacrifice to Ian's Hog (+${SACRIFICE_GAIN[it.tier]})`);
         if (it.type === 'potion') buttons += btn('drink', 'Drink');
         if (it.type === 'food') buttons += btn('eat', 'Eat');
         if (['weapon', 'potion', 'food', 'wand', 'rechargewand', 'rage'].includes(it.type)) buttons += [0, 1, 2, 3].map(i => btn('q' + i, `→ ${i + 1}`)).join('');
@@ -105,7 +107,7 @@ const invUI = (() => {
       } else if (it.type === 'armor' || it.type === 'shield') buttons += btn('unequip', 'Unequip');
       else buttons += '<span class="dim">Equipped. Equip another from the pack to swap.</span>';
       detail = `${itemIcon(it)}<div class="nm">${nameHtml(it)}</div><div class="dim">${sub(it)}${fromPack ? '' : ' · equipped'}</div>
-        <ul>${lines}</ul>${fromPack && compare(it) ? `<div class="cmp">${compare(it)}</div>` : ''}${buttons}`;
+        ${itemLore(it) ? `<div class="dim" style="font-style:italic;margin:4px 0">"${itemLore(it)}"</div>` : ''}<ul>${lines}</ul>${fromPack && compare(it) ? `<div class="cmp">${compare(it)}</div>` : ''}${buttons}`;
     }
     const arm = ['head', 'body', 'legs'].map(z => `${z} ${Math.round(inv.armorRed(z) * 100)}%`).join(', ');
     const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`).join(', ');
@@ -132,6 +134,7 @@ const invUI = (() => {
     else if (a === 'drink') { note = inv.drink(it); if (!inv.find(it.id)) sel = null; }
     else if (a === 'play') { inv.rageReq = it; sel = null; return close(); }
     else if (/^rech\d+$/.test(a)) { const tgt = [inv.equip.weapon, ...inv.pack].find(i => i.id === +a.slice(4)); note = inv.recharge(it, tgt); if (!inv.find(it.id)) sel = null; }
+    else if (a === 'sac') { note = inv.sacrifice([inv.equip.weapon, ...inv.pack].find(i => i.base === 'spear'), it); if (!inv.find(it.id)) sel = null; }
     else if (a === 'eat') { inv.eatReq = it; sel = null; return close(); }
     else if (a === 'drop') { inv.remove(it); sel = null; }
     else if (/^q\d$/.test(a)) inv.assignQuick(+a[1], it);
