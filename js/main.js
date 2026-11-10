@@ -6,7 +6,7 @@ const theme = makeRng(runSeed).pick(THEMES);     // one theme per run, picked fr
 
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(quality.cur);   // 1.5 at most; js/perf.js lowers it if the frame rate drops
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;   // a filmic curve instead of hard clipping
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 80);
@@ -25,6 +25,7 @@ const hud = {
 const mctx = hud.mini.getContext('2d');
 
 const player = new Player();
+let cullChunks = [];        // the merged furniture and torches of the current floor, for distance culling (js/perf.js)
 let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null, upBox = null, upLight = null;
 const floorCache = {};      // floors you have left, kept exactly as they were (guards, opened chests, bodies, explored map)
 const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) has room
@@ -129,6 +130,7 @@ function buildFloor() {
     new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 }), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
   const m = new THREE.Matrix4();
   wallPos.forEach(([x, y], i) => { m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE); walls.setMatrixAt(i, m); });
+  walls.frustumCulled = false;                    // an instanced mesh is culled by its first box only, so never cull it
   group.add(walls);
 
   const planeGeo = new THREE.PlaneGeometry(w * TILE, h * TILE);
@@ -204,7 +206,10 @@ function buildFloor() {
   }
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
   if (floor.shop) buildShop();
+  // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
+  cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell').map(o => o.mesh), group);
   buildTorches();
+  cullChunks.push(...mergeStatic(torchGroups, group));
   enemies = floor.enemies.map(s => new Enemy(s, floor));
   Enemy.all = enemies;
   linkHandlers(enemies);
@@ -238,17 +243,19 @@ function checkShopSight() {
   if (Math.hypot(cx - player.x, cz - player.z) < 9 && hasLOS(floor, player.x, player.z, cx, cz)) { floor.shopSeen = true; flash('A goblin merchant! Hold E at his counter to trade.'); }
 }
 
-let torchPts = [];
-const torchLights = Array.from({ length: 6 }, () => { const l = new THREE.PointLight(theme.light, 0, 14, 1.5); scene.add(l); return l; });
+let torchPts = [], torchGroups = [];
+const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 7), TORCH_FLAME = new THREE.ConeGeometry(0.1, 0.3, 7);
+const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.light, 0, 14, 1.5); scene.add(l); return l; });
 function buildTorches() {
   const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420 });
   const fire = new THREE.MeshBasicMaterial({ color: 0xffa94a });
+  torchGroups = [];
   torchPts = floor.torches.map(t => {
     const x = (t.x + 0.5) * TILE + t.dx * 1.42, z = (t.y + 0.5) * TILE + t.dy * 1.42;
     const g = new THREE.Group(); g.position.set(x, floor.boss ? 3.6 : 2.0, z);       // higher on the tall arena walls
-    const stick = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), iron); stick.position.y = -0.05;
-    const flame = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.22, 0.17), fire); flame.position.y = 0.22;
-    g.add(stick, flame); group.add(g);
+    const stick = new THREE.Mesh(TORCH_STICK, iron); stick.position.y = -0.05;                                  // a round bracket and a tapering flame, not boxes
+    const flame = new THREE.Mesh(TORCH_FLAME, fire); flame.position.y = 0.26;
+    g.add(stick, flame); group.add(g); torchGroups.push(g);
     return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss ? 3.8 : 2.2, color: theme.light, str: 1 };
   });
   for (const o of decorObjs) {
@@ -769,6 +776,7 @@ function lookTarget() {
 // What the prompt shows and how long the hold takes. A locked door cannot be held open without its key.
 function targetInfo(o) {
   if (o.p.kind === 'door' && !inv.has('key', o.p.lock)) return { label: `Locked: needs the ${o.p.keyLabel}`, time: 0, locked: true };
+  if (o.p.kind === 'chest') { const t = o.p.tier | 0; return { label: `Open ${CHEST_NAMES[t]}`, time: 0.9 + 0.15 * t }; }   // better chests take a little longer
   return PROP_INFO[o.p.kind];
 }
 
@@ -792,14 +800,15 @@ function updateSearch(dt) {
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
-  loud(SEARCH_NOISE[o.p.kind] || 0);
+  loud((SEARCH_NOISE[o.p.kind] || 0) + (o.p.kind === 'chest' ? 0.5 * (o.p.tier | 0) : 0));
+  if (o.p.kind === 'chest') discover('item:chest', 'Chests');
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
     flash(`Unlocked the ${o.p.room}`);
     return;
   }
-  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type), ...(o.p.extra || [])]);
+  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, o.p.tier), ...(o.p.extra || [])]);
   const got = [], left = [], notes = [];
   for (const d of drops) {
     const text = inv.add(d);
@@ -875,15 +884,16 @@ function disposeGroup(g) {   // free a floor's GPU memory: geometry, materials a
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   arrows.forEach(a => group.remove(a.mesh)); arrows.length = 0;
-  floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, explored, WALL_H, baseGuards, respawnT };
+  floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
 }
 function loadFloor(n, c) {
   floorNum = n; delete floorCache[n];
-  ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, explored, WALL_H, baseGuards, respawnT } = c);
+  ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT } = c);
   scene.add(group);
   enemies.forEach(e => { e.cone.visible = dev.on; });
   Enemy.all = enemies; player.props = propObjs; player.mobs = enemies;
+  updateCulling(player, cullChunks, propObjs, enemies);
 }
 // Put the player beside the stairs they came by: 'down' = came down, so appear by the stairs up; 'up' = came up, by the stairs down.
 function arriveBy(dir) {
@@ -925,6 +935,7 @@ function generateAndEnter(n, arrive) {
   arrows.length = 0;                                  // the old floor's group (and its arrows) is gone
   cb.draw = null;
   if (arrive) arriveBy(arrive); else player.place(floor);
+  updateCulling(player, cullChunks, propObjs, enemies);
   baseGuards = floor.enemies.length;
   respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
   floorBanner(n);
@@ -990,7 +1001,7 @@ function reveal() {
   }
 }
 
-function drawMinimap() {
+function drawMinimap(step = 1) {
   const S = hud.mini.width / floor.w;
   mctx.fillStyle = '#000'; mctx.fillRect(0, 0, hud.mini.width, hud.mini.height);
   for (let y = 0; y < floor.h; y++) for (let x = 0; x < floor.w; x++) {
@@ -1005,14 +1016,14 @@ function drawMinimap() {
     mctx.beginPath(); mctx.arc(e.x / TILE * S, e.z / TILE * S, 2.5, 0, 7); mctx.fill();
   }
   if (dev.on) for (let i = rings.length - 1; i >= 0; i--) {   // noise rings fade as they pass
-    const n = rings[i]; n.t += 1 / 60;
+    const n = rings[i]; n.t += step / 60;
     if (n.t > 0.6) { rings.splice(i, 1); continue; }
     mctx.strokeStyle = `rgba(120,200,255,${1 - n.t / 0.6})`;
     mctx.beginPath(); mctx.arc(n.x / TILE * S, n.z / TILE * S, n.r / TILE * S * (0.3 + n.t / 0.6 * 0.7), 0, 7); mctx.stroke();
   } else rings.length = 0;
   for (const o of propObjs) {
     if (o.p.opened || !explored[o.p.y * floor.w + o.p.x]) continue;
-    mctx.fillStyle = o.p.kind === 'chest' ? '#e8c860' : o.p.kind === 'merchant' ? '#6cf' : '#b08a5a';
+    mctx.fillStyle = o.p.kind === 'chest' ? TIERS[o.p.tier | 0].color : o.p.kind === 'merchant' ? '#6cf' : '#b08a5a';   // a chest's dot is its grade colour
     mctx.fillRect(o.p.x * S + S / 4, o.p.y * S + S / 4, S / 2 + 1, S / 2 + 1);
   }
   const px = player.x / TILE * S, py = player.z / TILE * S;
@@ -1111,9 +1122,10 @@ addEventListener('contextmenu', e => e.preventDefault());
 
 startFloor(1);
 if (params.has('dev')) setDev(true);
-let last = performance.now(), frameNo = 0, dazeOn = false;
+let last = performance.now(), frameNo = 0, dazeOn = false, frameCount = 0;
+const perfStats = { logic: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
 function frame(now) {
-  const dt = (now - last) / 1000; last = now;
+  const dt = (now - last) / 1000; last = now; const tl0 = performance.now();
   if (state === 'play') {
     player.update(dt, floor);
     inv.update(dt);
@@ -1162,20 +1174,23 @@ function frame(now) {
   if (dazed) camera.rotation.z += Math.sin(now / 180) * 0.035;
   stairsLight.intensity = 0.35 + Math.sin(now / 300) * 0.08;
   updateViewmodel(dt);
-  updateTorches(now);
-  drawMinimap();
+  frameCount++;
+  if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);
+  if (frameCount % 2 === 0) updateTorches(now);                  // the lights drift slowly: every other frame is plenty
+  if (frameCount % 3 === 0) drawMinimap(3);                      // and the minimap three times a second per 9 frames, not every frame
   updateHud();
-  if (!params.has('norender')) renderer.render(scene, camera);   // ?norender=1: tests skip the (software) drawing and keep all the game logic
+  perfStats.logic = perfStats.logic * 0.95 + (performance.now() - tl0) * 0.05;
+  if (!params.has('norender')) { renderer.render(scene, camera); if (state === 'play') adaptQuality(dt, r => { renderer.setPixelRatio(r); resize(); }); }   // ?norender=1: tests skip the (software) drawing and keep all the game logic
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, hunger, arrows, floorCache, shopFloor, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, inv, cb, pst, hunger, arrows, floorCache, perfStats, shopFloor, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
-    updateViewmodel(1); updateTorches(performance.now()); drawMinimap(); renderer.render(scene, camera);
+    updateViewmodel(1); updateCulling(player, cullChunks, propObjs, enemies); updateTorches(performance.now()); drawMinimap(); renderer.render(scene, camera);
   },
 };

@@ -13,6 +13,7 @@ const THEME_NAMES = G.THEMES.map(t => t.name);
 
 const N = parseInt(process.argv[2], 10) || 300;
 let fails = 0, checked = 0;
+const mapStats = [0, 1, 2, 3].map(() => ({ open: 0, corr: 0, n: 0 })), tierCounts = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0]);
 const supply = [0, 0, 0, 0, 0], floorsBy = [0, 0, 0, 0, 0];   // hunger points of food lying in props, per floor number
 const fail = (where, msg) => { if (++fails <= 25) console.log(`FAIL ${where}: ${msg}`); };
 
@@ -46,6 +47,15 @@ for (let s = 1; s <= N; s++) {
     checked++;
     const closed = flood(f, false), open = flood(f, true), guardOpen = flood(f, true, true), at = (x, y) => y * f.w + x;
     if (!touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');
+    if (!boss) {                                                             // map size, corridor share and chest grades
+      const size = [32, 36, 40, 44][n - 1];
+      if (f.w !== size || f.h !== size) fail(where, `map is ${f.w}x${f.h}, want ${size}`);
+      const inRoom = new Uint8Array(f.w * f.h);
+      for (const r of f.rooms) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) inRoom[y * f.w + x] = 1;
+      let open = 0, inR = 0; for (let i = 0; i < f.w * f.h; i++) if (f.tiles[i] !== G.T_WALL) { open++; if (inRoom[i]) inR++; }
+      mapStats[n - 1].open += open; mapStats[n - 1].corr += open - inR; mapStats[n - 1].n++;
+      for (const pr of f.props) if (pr.kind === 'chest') { if (!Number.isInteger(pr.tier) || pr.tier < 0 || pr.tier > 4) fail(where, `chest tier ${pr.tier}`); else tierCounts[n - 1][pr.tier]++; }
+    }
     const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice'].includes(d.kind));
     if (gim && !boss && (patches.length < gim.n[0] - 2 || patches.length > gim.n[1] || patches.some(d => d.kind !== gim.kind))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
     if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
@@ -92,6 +102,17 @@ for (let s = 1; s <= N; s++) {
     }
   }
 }
+const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);
+console.log(`open tiles per floor (floors 1 to 4): ${avgOpen.map(v => Math.round(v)).join(', ')}; corridor share ${corrShare.map(v => Math.round(v * 100) + '%').join(', ')}`);
+if (avgOpen[0] < 230 || avgOpen[0] > 420) fail('floor 1', `floor 1 averages ${Math.round(avgOpen[0])} open tiles, want 230 to 420 (it was 725)`);
+if (avgOpen[3] > 680) fail('floor 4', `floor 4 averages ${Math.round(avgOpen[3])} open tiles`);
+if (!(avgOpen[0] < avgOpen[1] && avgOpen[1] < avgOpen[2] && avgOpen[2] < avgOpen[3])) fail('maps', 'floors should grow with depth');
+corrShare.forEach((v, i) => { if (v > 0.22) fail(`floor ${i + 1}`, `corridors are ${Math.round(v * 100)}% of the map, want 22% or less`); });
+const tierShare = (i, from) => tierCounts[i].slice(from).reduce((a, b) => a + b, 0) / Math.max(1, tierCounts[i].reduce((a, b) => a + b, 0));
+console.log(`chests: wooden share by floor ${[0, 1, 2, 3].map(i => Math.round(100 * tierShare(i, 0) - 100 * tierShare(i, 1)) + '%').join(', ')}; silver or better ${[0, 1, 2, 3].map(i => Math.round(100 * tierShare(i, 2)) + '%').join(', ')}`);
+if (tierShare(0, 1) > 0.6) fail('chests', 'floor 1 should be mostly wooden chests');
+if (tierShare(0, 4) > 0.05) fail('chests', 'golden chests should be very rare on floor 1');
+if (!(tierShare(3, 2) > tierShare(0, 2) * 1.4)) fail('chests', 'deeper floors should have more silver or better chests');
 const per = supply.map((v, i) => Math.round(v / floorsBy[i]));
 console.log(`food in props per floor (hunger points, floors 1 to 5): ${per.join(', ')}`);
 // Drain is 100 per 15 minutes. A floor takes roughly 3 to 6 minutes, so 20 to 40 points. Supply should beat that by about 2 to 4 times (cooks drop food too), but not drown it.

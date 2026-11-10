@@ -43,6 +43,7 @@ const pauseMenu = (() => {
     out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. One per shot, up to 25 in the quiver. Arrows that miss often lie where they landed: walk over one to pick it up again.']));
     out.push(card('item:key', 'Keys', '#e8c860', ['Open a locked room (armory, vault or brewery) on the same floor. Each key hides in a chest. Hold the interact key at the door.']));
     out.push(card('item:puddle', 'Shallow water', '#5a8ac8', ['In the Sunken Tavern, puddles of shallow water splash when you step in them: 8 m when walking, 4 m even when crouched. Guards hear it, so go round them or accept the noise.']));
+    out.push(card('item:chest', 'Chests', '#e8c860', CHEST_NAMES.map((n, i) => `${n} (${TIERS[i].name} colour on the minimap): ${CHEST_BLURB[i]}`).concat('Deeper floors have better chests more often. Better chests take a little longer to open and are a little louder.')));
     out.push(card('item:grass', 'Tall grass', '#5a9a3a', ['In the Moonlit Orchard, tall grass hides you: crouch in it and guards see only about half as far. Standing in it still helps a little.']));
     out.push(card('item:glow', 'Glowing spores', '#6affc0', ['In the Mushroom Cellar, glowing mushrooms light you up: while you stand in their glow, guards see you about 40% farther.']));
     out.push(card('item:bell', 'Tripwire bells', '#d8a030', ['In the Goblin Market, tripwires with little bells ring a loud 14 m alarm when you step on one, once. Look at the floor and step over them.']));

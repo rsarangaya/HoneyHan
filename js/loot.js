@@ -51,6 +51,17 @@ const FOOD = {
 // Weighted food kind. stewWeight sets how likely the rare stew is.
 const rollFoodKind = (rng, stewWeight = 0) => { const ks = Object.keys(FOOD); return ks[weighted(rng, ks.map(k => k === 'stew' ? stewWeight : FOOD[k].weight))]; };
 
+// Chests come in five grades. A better chest holds more gold, more of everything and better gear: the Silver chest
+// never has gear below Uncommon, the Ornate below Rare, the Golden below Epic (with a chance of Legendary).
+const CHEST_NAMES = ['Wooden Chest', 'Iron-bound Chest', 'Silver Chest', 'Ornate Chest', 'Golden Chest'];
+const CHEST_BLURB = [
+  'A plain wooden chest. Gold and a little of this and that.',
+  'Iron bands: more gold, and a better chance of a potion or a piece of gear.',
+  'Silver trim: more of everything, and any gear inside is Uncommon or better.',
+  'Purple and gold: lots of gold, gear is always there and is Rare or better (sometimes a tier higher), and wands turn up.',
+  'Gold and glowing: a hoard. Gear is Epic or better, with a chance of Legendary, plus gold, potions and wands.',
+];
+
 // Interaction labels and hold times for everything you can search or use.
 const PROP_INFO = {
   chest:     { label: 'Open chest',       time: 0.9 },
@@ -152,7 +163,7 @@ function rollEquipment(floorNum, rng, { boost = 0, minTier = 0, kind } = {}) {
 
 // Returns a list of drop descriptors. rng is seeded per prop so a seed repeats.
 // bonus raises drop chances (clean sneak kills leave intact gear).
-function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
+function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', tier = 0) {
   const out = [];
   const potion = () => ({ type: 'potion', kind: rollPotionKind(rng), n: 1 });
   if (kind === 'corpse') {
@@ -170,14 +181,15 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin') {
       out.push(opts[weighted(rng, opts.map(o => o[1]))][0]);
     }
   } else if (kind === 'chest') {
-    out.push({ type: 'gold', n: rng.int(10, 25) + floorNum * 4 });
+    const t = Math.max(0, Math.min(4, tier | 0));                                      // the chest's grade, 0 (wooden) to 4 (golden)
+    out.push({ type: 'gold', n: Math.round((rng.int(10, 25) + floorNum * 4) * (1 + 0.6 * t)) });
     if (rng() < 0.65) out.push({ type: 'arrows', n: rng.int(4, 8) });
-    if (rng() < 0.4) out.push(potion());
+    if (rng() < 0.4 + 0.08 * t) out.push(potion());
     if (rng() < 0.12) out.push({ type: 'food', kind: rollFoodKind(rng, 1), n: 1 });
-    if (rng() < 0.05) out.push({ type: 'wand', kind: rollWandKind(rng) });
-    if (rng() < 0.015) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
-    if (rng() < 0.006) out.push({ type: 'rage' });
-    if (rng() < 0.4) out.push(rollEquipment(floorNum, rng));
+    if (rng() < 0.05 + 0.05 * t) out.push({ type: 'wand', kind: rollWandKind(rng) });
+    if (rng() < 0.015 + 0.012 * t) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
+    if (rng() < 0.006 + (t >= 3 ? 0.03 : 0)) out.push({ type: 'rage' });
+    if (rng() < [0.4, 0.5, 0.75, 1, 1][t]) out.push(rollEquipment(floorNum, rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
   } else if (kind === 'vaultchest') {
     out.push({ type: 'gold', n: rng.int(40, 90) + floorNum * 10 });
     if (rng() < 0.7) out.push(potion());

@@ -26,7 +26,13 @@ const THEMES = [
   { name: 'The Frozen Chapel',     wall: '#6c7e90', floor: '#4a5868', ceil: '#202a36', fog: 0x0a1018, light: 0xc8e4ff },
 ];
 
-const MAP_W = 45, MAP_H = 45;
+const MAP_W = 45, MAP_H = 45;               // the boss arena's size
+// Ordinary floors start small and grow a little: floor 1 is a compact 32 x 32 so the first minutes are not a long walk.
+const mapSizeFor = floorNum => [32, 36, 40, 44][Math.min(floorNum, 4) - 1];
+const weightedPick = (rng, w) => { let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return 0; };   // a seeded weighted choice by index
+// Chest grade by depth: wooden mostly early, Silver and Ornate more often deeper, Golden rare (and never on floor 1 early).
+const chestTierWeights = floorNum => [Math.max(22, 62 - 8 * floorNum), 26 + 2 * floorNum, 8 + 3 * floorNum, 1.5 + 1.4 * floorNum, 0.1 + 0.3 * floorNum];
+const roomTargetFor = floorNum => [8, 9, 10, 11][Math.min(floorNum, 4) - 1];
 
 // What each theme does to the floor. kind: the decal that marks it. n: how many per floor.
 //   puddle: moving steps splash (8 m, 4 m crouched).  grass: a crouched player is half as visible.  glowcap: spore light, you are seen 40% farther.
@@ -80,7 +86,7 @@ function roomPoint(f, r, k) {
 function generateFloor(seed, floorNum, opts = {}) {
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     f = layoutFloor(seed + attempt * 7777, floorNum, opts);
     if ((!opts.armory || f.rooms.some(r => r.theme === 'armory')) && (!opts.shop || f.shop)) break;
   }
@@ -152,7 +158,7 @@ function layoutBoss(seed, floorNum) {
   const addProp = (kind, extra = {}, list = edge) => {
     const c = take(list); if (!c) return;
     const [dx, dy] = wallDir(c.x, c.y);
-    props.push({ kind, x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy), ...extra });
+    props.push({ kind, x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy), ...(kind === 'chest' ? { tier: weightedPick(rng, chestTierWeights(floorNum + 1)) } : {}), ...extra });
   };
   addProp('potions', { fixed: 'heal' }, edge.filter(c => dist(c.x, c.y, start.x, start.y) >= 14));   // the one guaranteed healing potion, far from the start
   for (const kind of ['chest', 'chest', 'chest', 'barrel', 'barrel', 'rubble', 'rubble']) addProp(kind);
@@ -205,7 +211,7 @@ function layoutBoss(seed, floorNum) {
 
 function layoutFloor(seed, floorNum, opts) {
   const rng = makeRng(seed * 7919 + floorNum * 104729);
-  const w = MAP_W, h = MAP_H;
+  const w = mapSizeFor(floorNum), h = w;
   const tiles = new Uint8Array(w * h);
   const blocked = new Uint8Array(w * h);        // furniture and prop tiles that guards must path around
   const at = (x, y) => tiles[y * w + x];
@@ -218,12 +224,12 @@ function layoutFloor(seed, floorNum, opts) {
   const mk = (x, y, rw, rh) => ({ x, y, w: rw, h: rh, cx: x + (rw >> 1), cy: y + (rh >> 1), theme: 'generic', locked: false });
   const clash = (a, b) => a.x < b.x + b.w + 2 && a.x + a.w + 2 > b.x && a.y < b.y + b.h + 2 && a.y + a.h + 2 > b.y;
   const fits = r => r.x >= 2 && r.y >= 2 && r.x + r.w <= w - 2 && r.y + r.h <= h - 2 && !rooms.some(o => clash(r, o));
-  const target = rng.int(9, 12);
+  const target = roomTargetFor(floorNum) + rng.int(0, 1);
   for (let tries = 0, made = 0; tries < 900 && made < target; tries++) {
-    const r = mk(rng.int(2, w - 12), rng.int(2, h - 12), rng.int(4, 10), rng.int(4, 10));
+    const r = mk(rng.int(2, w - 11), rng.int(2, h - 11), rng.int(4, 8), rng.int(4, 8));
     if (!fits(r)) continue;
     const group = [r];
-    if (rng() < 0.35) {                          // L or T shape
+    if (rng() < 0.3) {                           // L or T shape
       const ew = rng.int(4, 6), eh = rng.int(4, 6);
       const e = mk(rng() < 0.5 ? r.x + r.w - 2 : r.x - ew + 2, r.y + rng.int(-2, r.h - 2), ew, eh);
       if (fits(e)) group.push(e);
@@ -243,11 +249,20 @@ function layoutFloor(seed, floorNum, opts) {
     const vLine = ty => { while (y !== ty) { y += Math.sign(ty - y); open(x, y); if (wide) open(x + 1, y); } };
     if (rng() < 0.5) { hLine(b.cx); vLine(b.cy); } else { vLine(b.cy); hLine(b.cx); }
   };
-  for (let i = 1; i < rooms.length; i++) carve(rooms[i - 1], rooms[i]);
-  for (let i = 0; i < 4; i++) {
-    const a = rng.pick(rooms), b = rng.pick(rooms);
-    if (a !== b) carve(a, b);
+  // Rooms are linked by a minimum spanning tree over their centres (every room joins its nearest neighbour, so corridors are
+  // short and do not criss-cross the map), then one or two short loops so there is more than one way round.
+  const gap = (p, q) => Math.abs(p.cx - q.cx) + Math.abs(p.cy - q.cy);
+  const joined = [rooms[0]], rest = rooms.slice(1), edges = new Set();
+  while (rest.length) {
+    let best = null;
+    for (const t of joined) for (const r of rest) { const d = gap(t, r); if (!best || d < best.d) best = { t, r, d }; }
+    carve(best.t, best.r); edges.add(rooms.indexOf(best.t) + ',' + rooms.indexOf(best.r));
+    joined.push(best.r); rest.splice(rest.indexOf(best.r), 1);
   }
+  const loops = [];
+  for (let i = 0; i < rooms.length; i++) for (let k = i + 1; k < rooms.length; k++) if (!edges.has(i + ',' + k) && !edges.has(k + ',' + i)) loops.push({ a: rooms[i], b: rooms[k], d: gap(rooms[i], rooms[k]) });
+  loops.sort((p, q) => p.d - q.d);
+  for (const l of loops.slice(0, floorNum >= 2 ? 2 : 1)) if (l.d <= 16) carve(l.a, l.b);
 
   // ---- start in room 0, stairs in the room farthest from it by walking distance ----
   const start = { x: rooms[0].cx, y: rooms[0].cy };
@@ -395,7 +410,7 @@ function layoutFloor(seed, floorNum, opts) {
     const addProp = (kind, extra = {}) => {
       const c = take(edge.length ? edge : inner, true); if (!c) return;
       const [dx, dy] = wallDir(c.x, c.y);
-      props.push({ kind, x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy), ...extra });
+      props.push({ kind, x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy), ...(kind === 'chest' ? { tier: pickWeighted([0, 1, 2, 3, 4], chestTierWeights(floorNum)) } : {}), ...extra });
     };
     const addDecor = (kind, list) => {
       if (DECALS.has(kind)) {
@@ -481,7 +496,7 @@ function layoutFloor(seed, floorNum, opts) {
   for (const d of doors) {
     const holder = keyHolders.shift();
     if (!holder) break;
-    holder.kind = 'chest';
+    holder.kind = 'chest'; if (holder.tier === undefined) holder.tier = pickWeighted([0, 1, 2], chestTierWeights(floorNum).slice(0, 3));
     holder.extra = [{ type: 'key', lock: d.lock, label: d.keyLabel }];
     holder.holdsKey = true;
   }
@@ -508,13 +523,13 @@ function layoutFloor(seed, floorNum, opts) {
     }
   }
 
-  // ---- guards: 1 + 2 per floor, spread over the unlocked rooms (barracks hold more). Each patrols
+  // ---- guards: 6 + 2 per floor, spread over the unlocked rooms (barracks hold more). Each patrols
   // between two room waypoints beside room centres, so none sit on the stairwell.
   const f = { w, h, tiles, blocked };
   const pool = rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop');   // no guards live in the shop
   const enemies = [], perRoom = new Map();
   const inShop = p => !!shopRoom && p.x >= shopRoom.x && p.x < shopRoom.x + shopRoom.w && p.y >= shopRoom.y && p.y < shopRoom.y + shopRoom.h;
-  for (let i = 0; i < 4 + 2 * floorNum; i++) {
+  for (let i = 0; i < 6 + 2 * floorNum; i++) {
     let a, b;
     for (let tries = 0; tries < 12; tries++) {                    // re-pick when a waypoint falls inside the shop (rooms can overlap)
       const home = pickWeighted(pool, pool.map(r => r.theme === 'barracks' ? 2.5 : 1));

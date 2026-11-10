@@ -14,6 +14,7 @@ const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: 
 
 const lam = (c, emissive) => new THREE.MeshLambertMaterial(emissive === undefined ? { color: c } : { color: c, emissive });
 const glow = c => new THREE.MeshBasicMaterial({ color: c });
+const FLAME_MAT = new THREE.MeshBasicMaterial({ color: 0xffb040 });
 function B(parent, w, h, d, mat, x, y, z, ry = 0, rz = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz; parent.add(m); return m;
@@ -22,6 +23,39 @@ function C(parent, rt, rb, h, mat, x, y, z, seg = 10) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
   m.position.set(x, y, z); parent.add(m); return m;
 }
+
+// ---- rounded building blocks (everything used to be a plain box). Geometry is cached by shape, so a hundred barrels
+// share one set of vertices, and the whole floor's furniture is merged into a few meshes afterwards (js/perf.js). ----
+const GEO = {};
+const cached = (key, make) => GEO[key] || (GEO[key] = make());
+// A box with softly rounded edges (a bevelled extrusion).
+function RB(parent, w, h, d, mat, x, y, z, ry = 0, rz = 0) {
+  const b = Math.min(0.04, w / 5, h / 5, d / 5);
+  const g = cached(`rb${w}|${h}|${d}`, () => {
+    const hw = w / 2 - b, hh = h / 2 - b, sh = new THREE.Shape();
+    sh.moveTo(-hw, -hh); sh.lineTo(hw, -hh); sh.lineTo(hw, hh); sh.lineTo(-hw, hh); sh.closePath();
+    const ge = new THREE.ExtrudeGeometry(sh, { depth: Math.max(0.002, d - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, curveSegments: 1 });
+    ge.translate(0, 0, -(d - 2 * b) / 2); return ge;
+  });
+  const m = new THREE.Mesh(g, mat); m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz; parent.add(m); return m;
+}
+// A lathe: spin a profile [[radius, height], ...] round the y axis (barrels, urns, pots, plinths).
+function LA(parent, pts, mat, x, y, z, seg = 14) {
+  const g = cached(`la${seg}${JSON.stringify(pts)}`, () => new THREE.LatheGeometry(pts.map(([r, h]) => new THREE.Vector2(r, h)), seg));
+  const m = new THREE.Mesh(g, mat); m.position.set(x, y, z); parent.add(m); return m;
+}
+// An ellipsoid (sacks, pillows, heads, loaves).
+function SP(parent, w, h, d, mat, x, y, z, ry = 0) {
+  const g = cached('sp', () => new THREE.SphereGeometry(0.5, 12, 8));
+  const m = new THREE.Mesh(g, mat); m.scale.set(w, h, d); m.position.set(x, y, z); m.rotation.y = ry; parent.add(m); return m;
+}
+// A torus lying flat (hoops, rims, rings).
+function TR(parent, R, r, mat, x, y, z) {
+  const g = cached(`tr${R}|${r}`, () => new THREE.TorusGeometry(R, r, 5, 18));
+  const m = new THREE.Mesh(g, mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); parent.add(m); return m;
+}
+const BOOK_COLORS = [0x6a2a2a, 0x2a4a6a, 0x3a6a3a, 0x6a5a2a, 0x5a2a6a, 0x4a3a2a, 0x7a4a2a, 0x2a5a5a];
+const BARREL = [[0.0, 0], [0.3, 0], [0.35, 0.12], [0.4, 0.4], [0.4, 0.55], [0.35, 0.83], [0.3, 0.95], [0.0, 0.95]];   // a bulged barrel
 
 // Wraps a model in a group placed on its tile, turned to face the room and shifted toward the wall if it is on an edge.
 function placeOnTile(inner, tx, ty, yaw, shift) {
@@ -33,6 +67,14 @@ function placeOnTile(inner, tx, ty, yaw, shift) {
   return { mesh, x: x0 - Math.sin(yaw) * shift, z: z0 - Math.cos(yaw) * shift };
 }
 
+const CHEST_LOOK = [
+  { body: 0x6a4422, lid: 0x7a4e28, trim: 0x4a3018 },                                    // wooden
+  { body: 0x5a4030, lid: 0x6a4a34, trim: 0x3a3d44 },                                    // iron-bound
+  { body: 0x2a3a5c, lid: 0x34486e, trim: 0xc8d0e0 },                                    // silver
+  { body: 0x4a2a6a, lid: 0x5a3480, trim: 0xe0b040, gem: 0xff4a8a },                     // ornate: purple and gold
+  { body: 0xc89a28, lid: 0xd8aa38, trim: 0xfff0a0, gem: 0xffffff, glow: 0x806010 },     // golden, glowing
+];
+
 // ---- lootable props ----
 function makeProp(p) {
   const inner = new THREE.Group();
@@ -41,20 +83,28 @@ function makeProp(p) {
   const rg = makeRng(p.seed);
   const wood = new THREE.Color(theme.wall).multiplyScalar(0.8).getHex();
   if (p.kind === 'chest' || p.kind === 'vaultchest') {
-    const vault = p.kind === 'vaultchest';
-    const s = vault ? 1.18 : 1;
-    const base = B(inner, 1.0 * s, 0.5 * s, 0.65 * s, mat(vault ? 0x3a3a4a : 0x6a4422), 0, 0.25 * s, 0);
-    const pivot = new THREE.Group(); pivot.position.set(0, 0.5 * s, -0.325 * s);                // lid hinges on the back edge
-    B(pivot, 1.04 * s, 0.18 * s, 0.69 * s, mat(vault ? 0x4a4a5c : 0x8a5a2c), 0, 0.09 * s, 0.325 * s);
-    const trim = new THREE.MeshLambertMaterial({ color: 0xc9a23a, emissive: 0x2a2008 });
-    B(inner, 0.12 * s, 0.62 * s, 0.7 * s, trim, -0.3 * s, 0.3 * s, 0); B(inner, 0.12 * s, 0.62 * s, 0.7 * s, trim, 0.3 * s, 0.3 * s, 0);
-    B(inner, 0.14, 0.14, 0.05, trim, 0, 0.5 * s, 0.34 * s);                                       // lock plate
-    if (p.holdsKey) B(inner, 0.05, 0.05, 0.05, glow(0xffe060), 0, 0.5 * s + 0.12, 0.34 * s);        // a faint spark on the chest that holds a key
+    // five grades (js/loot.js CHEST_NAMES): plain wood, iron bands, silver trim, purple and gold, a glowing golden hoard
+    const vault = p.kind === 'vaultchest', t = vault ? 2 : p.tier | 0, L = vault ? { body: 0x3a3a4a, lid: 0x4a4a5c, trim: 0xc9a23a } : CHEST_LOOK[t], s = vault ? 1.18 : 1;
+    const bodyM = mat(L.body), lidM = mat(L.lid), trim = new THREE.MeshLambertMaterial({ color: L.trim, emissive: L.glow || 0x2a2008 }); o.mats.push(trim);
+    RB(inner, 1.0 * s, 0.5 * s, 0.65 * s, bodyM, 0, 0.25 * s, 0);
+    for (const x of [-0.3, 0.3]) RB(inner, (t === 1 ? 0.16 : 0.1) * s, 0.53 * s, 0.69 * s, trim, x * s, 0.26 * s, 0);          // bands round the body
+    const pivot = new THREE.Group(); pivot.position.set(0, 0.5 * s, -0.325 * s);                                              // the lid hinges on the back edge
+    const lid = new THREE.Mesh(cached('chestlid', () => new THREE.CylinderGeometry(0.34, 0.34, 1.04, 16, 1, false, 0, Math.PI)), lidM);
+    lid.rotation.z = Math.PI / 2; lid.scale.set(0.62 * s, 1 * s, 1 * s); lid.position.set(0, 0, 0.325 * s); pivot.add(lid);   // a half cylinder: a domed lid
+    for (const x of [-0.3, 0.3]) { const band = new THREE.Mesh(cached('chestlidband', () => new THREE.CylinderGeometry(0.352, 0.352, 0.1, 16, 1, false, 0, Math.PI)), trim); band.rotation.z = Math.PI / 2; band.scale.set(0.62 * s, 1 * s, 1 * s); band.position.set(x * s, 0, 0.325 * s); pivot.add(band); }
+    if (t >= 1) for (const x of [-0.4, -0.2, 0.2, 0.4]) SP(inner, 0.06, 0.06, 0.06, trim, x * s, 0.34 * s, 0.335 * s);        // studs along the front
+    RB(inner, 0.14 * s, 0.17 * s, 0.05, trim, 0, 0.45 * s, 0.34 * s);                                                          // lock plate
+    if (L.gem) SP(inner, 0.1, 0.1, 0.06, glow(L.gem), 0, 0.6 * s, 0.34 * s);                                                   // a gem on the lid
+    if (t === 4) {                                                                                                              // a golden hoard glows
+      const aura = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.3, 14, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd060, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide })); aura.position.y = 0.95; inner.add(aura);
+      for (let i = 0; i < 6; i++) SP(inner, 0.07, 0.04, 0.07, trim, (rg() - 0.5) * 0.4, 0.52 * s, (rg() - 0.3) * 0.3);       // coins on the lid
+    }
+    if (p.holdsKey) SP(inner, 0.07, 0.07, 0.07, glow(0xffe060), 0, 0.5 * s + 0.14, 0.34 * s);                                  // a faint spark on the chest that holds a key
     inner.add(pivot); o.lid = pivot;
   } else if (p.kind === 'barrel') {
-    C(inner, 0.4, 0.34, 0.95, mat(wood), 0, 0.475, 0, 12);
-    for (const y of [0.2, 0.7]) C(inner, 0.42, 0.42, 0.06, lam(0x3a3a3a), 0, y, 0, 12);
-    C(inner, 0.36, 0.36, 0.03, mat(0x2a1a10), 0, 0.96, 0, 12);                                    // lid
+    LA(inner, BARREL, mat(wood), 0, 0, 0, 14);
+    for (const [y, r] of [[0.2, 0.362], [0.74, 0.382]]) TR(inner, r, 0.022, lam(0x3a3a3a), 0, y, 0);                        // iron hoops
+    C(inner, 0.3, 0.3, 0.02, mat(0x2a1a10), 0, 0.955, 0, 14);                                                              // lid
   } else if (p.kind === 'rack') {
     // armory: a weapon rack or an armor stand, chosen by seed
     const steel = mat(0xb8bcc4, 0x18181c);
@@ -68,10 +118,10 @@ function makeProp(p) {
       }
     } else {
       C(inner, 0.05, 0.05, 1.6, mat(wood), 0, 0.8, -0.1, 6);
-      B(inner, 0.5, 0.6, 0.28, mat(0x6a6e78, 0x101014), 0, 1.2, -0.1);                              // breastplate
-      B(inner, 0.7, 0.12, 0.28, steel, 0, 1.45, -0.1);                                              // pauldrons
-      B(inner, 0.3, 0.3, 0.3, steel, 0, 1.72, -0.1);                                                // helm
-      B(inner, 0.52, 0.26, 0.26, mat(0x4a4e58), 0, 0.82, -0.1);                                     // tassets
+      SP(inner, 0.52, 0.62, 0.3, mat(0x6a6e78, 0x101014), 0, 1.2, -0.1);                            // a rounded breastplate
+      SP(inner, 0.3, 0.14, 0.26, steel, -0.32, 1.45, -0.1); SP(inner, 0.3, 0.14, 0.26, steel, 0.32, 1.45, -0.1);   // pauldrons
+      SP(inner, 0.32, 0.34, 0.32, steel, 0, 1.72, -0.1);                                            // helm
+      LA(inner, [[0, 0.7], [0.3, 0.7], [0.24, 0.95], [0.0, 0.95]], mat(0x4a4e58), 0, 0, -0.1, 10);   // tassets
       B(inner, 0.6, 0.08, 0.6, mat(wood), 0, 0.04, -0.1);
     }
   } else if (p.kind === 'potions') {
@@ -94,10 +144,10 @@ function makeProp(p) {
       B(inner, 1.6, 0.05, 0.5, mat(0x2a1c10), 0, 0.35 + row * 0.5, -0.1);
       for (let i = 0; i < 5; i++) {
         const pick = Math.floor(rg() * 4), x = -0.6 + i * 0.3, y = 0.46 + row * 0.5;
-        if (pick === 0) B(inner, 0.26, 0.13, 0.16, mat(0xc79a58), x, y, 0, (rg() - 0.5) * 0.4);                 // loaf
-        else if (pick === 1) B(inner, 0.2, 0.12, 0.18, mat(0xf0d060), x, y, 0, (rg() - 0.5) * 0.4);             // cheese
+        if (pick === 0) SP(inner, 0.27, 0.14, 0.17, mat(0xc79a58), x, y, 0, (rg() - 0.5) * 0.4);                // loaf
+        else if (pick === 1) { const ch = C(inner, 0.1, 0.1, 0.12, mat(0xf0d060), x, y, 0, 10); ch.rotation.y = (rg() - 0.5) * 0.4; }   // a round of cheese
         else if (pick === 2) { const a = new THREE.Mesh(new THREE.SphereGeometry(0.075, 6, 5), mat(0xc8493a)); a.position.set(x, y + 0.02, 0); inner.add(a); }   // apple
-        else B(inner, 0.05, 0.22, 0.05, mat(0x8a4030), x, y + 0.05, 0.05);                                      // sausage
+        else C(inner, 0.03, 0.03, 0.22, mat(0x8a4030), x, y + 0.05, 0.05, 6);                                    // sausage
       }
     }
   } else if (p.kind === 'rubble') {
@@ -144,18 +194,17 @@ function makeDecor(d) {
   const stone = lam(0x75726c), dstone = lam(0x4a4844), iron = lam(0x2a2a30), straw = lam(0xb89a58), bone = lam(0xe6e0c8);
   const cloths = [0x8a2a2a, 0x2a3a7a, 0x2a6a4a, 0x7a5a1a, 0x5a2a6a];
   const cloth = () => lam(cloths[Math.floor(rg() * cloths.length)]);
-  const flame = (parent, x, y, z, s = 1) => B(parent, 0.07 * s, 0.11 * s, 0.07 * s, glow(0xffb040), x, y, z);
+  const flame = (parent, x, y, z, s = 1) => { const f = new THREE.Mesh(cached('flame', () => new THREE.ConeGeometry(0.04, 0.13, 6)), FLAME_MAT); f.position.set(x, y, z); f.scale.setScalar(s); parent.add(f); return f; };
 
   switch (d.kind) {
     case 'bed': {
-      B(inner, 2.0, 0.35, 1.1, wood, 0, 0.18, 0);                                                    // frame
-      B(inner, 1.9, 0.16, 1.0, straw, 0, 0.43, 0);                                                   // straw tick
-      B(inner, 1.25, 0.07, 1.04, cloth(), 0.35, 0.55, 0);                                            // blanket
-      B(inner, 0.5, 0.13, 0.7, lam(0xd8d0b8), -0.7, 0.58, 0);                                        // pillow
-      B(inner, 0.1, 0.75, 1.1, wood, -1.0, 0.45, 0);                                                 // headboard
-      B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, 0.5); B(inner, 0.08, 0.5, 0.08, wood, 1.0, 0.25, -0.5);
-      if (rg() < 0.5) B(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
-      break;
+      RB(inner, 2.0, 0.3, 1.1, wood, 0, 0.17, 0);                                                    // frame
+      RB(inner, 1.88, 0.14, 0.98, straw, 0, 0.4, 0);                                                 // straw tick
+      RB(inner, 1.2, 0.09, 1.02, cloth(), 0.35, 0.5, 0);                                             // blanket
+      SP(inner, 0.52, 0.16, 0.72, lam(0xd8d0b8), -0.7, 0.58, 0);                                     // a plump pillow
+      RB(inner, 0.1, 0.75, 1.12, wood, -1.0, 0.45, 0);                                               // headboard
+      for (const z of [0.5, -0.5]) LA(inner, [[0.0, 0], [0.05, 0], [0.04, 0.3], [0.06, 0.5], [0.0, 0.5]], wood, 1.0, 0, z, 8);   // turned foot posts
+      if (rg() < 0.5) SP(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
     }
     case 'puddle': {                                               // a flat, glossy patch of shallow water
       const pm = new THREE.MeshBasicMaterial({ color: 0x3a6a9a, transparent: true, opacity: 0.55 });
@@ -185,87 +234,82 @@ function makeDecor(d) {
       for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.6 + rg() * 0.6, 10), im); d.rotation.x = -Math.PI / 2; d.position.set((rg() - 0.5) * 1.2, 0.014 + i * 0.001, (rg() - 0.5) * 1.2); inner.add(d); }
       break;
     }
-    case 'counter': {                                              // the merchant's counter: planks, coins, scales and a lantern
-      B(inner, 2.0, 0.95, 0.75, wood, 0, 0.475, 0);
-      B(inner, 2.1, 0.08, 0.85, wood2, 0, 0.99, 0);
-      B(inner, 1.9, 0.05, 0.05, lam(0x2a1c10), 0, 0.2, 0.38);
-      for (let i = 0; i < 4; i++) C(inner, 0.07, 0.07, 0.025 + i * 0.012, lam(0xe8c860), -0.7 + (i % 2) * 0.12, 1.05 + i * 0.01, 0.18 - (i >> 1) * 0.1, 8);    // coin stacks
-      B(inner, 0.5, 0.03, 0.05, iron, 0.25, 1.35, 0.1); B(inner, 0.02, 0.3, 0.02, iron, 0.25, 1.2, 0.1);                                                  // scales
-      C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.02, 1.07, 0.12, 12); C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.5, 1.07, 0.12, 12);
-      for (const x of [-0.1, 0.75]) B(inner, 0.22, 0.2, 0.22, lam(0x6a4a2a), x, 1.13, -0.15);                                                              // goods crates
+    case 'counter': {
+      RB(inner, 2.0, 0.95, 0.75, wood, 0, 0.475, 0);
+      RB(inner, 2.1, 0.08, 0.85, wood2, 0, 0.99, 0);
+      RB(inner, 1.9, 0.05, 0.05, lam(0x2a1c10), 0, 0.2, 0.38);
+      for (let i = 0; i < 4; i++) C(inner, 0.07, 0.07, 0.025 + i * 0.012, lam(0xe8c860), -0.7 + (i % 2) * 0.12, 1.05 + i * 0.01, 0.18 - (i >> 1) * 0.1, 10);    // coin stacks
+      RB(inner, 0.5, 0.03, 0.05, iron, 0.25, 1.35, 0.1); C(inner, 0.012, 0.012, 0.3, iron, 0.25, 1.2, 0.1, 5);                                            // scales
+      C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.02, 1.07, 0.12, 14); C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.5, 1.07, 0.12, 14);
+      for (const x of [-0.1, 0.75]) RB(inner, 0.22, 0.2, 0.22, lam(0x6a4a2a), x, 1.13, -0.15);                                                             // goods crates
       flame(inner, -0.95, 1.2, -0.25); C(inner, 0.02, 0.02, 0.18, iron, -0.95, 1.1, -0.25, 6);
-      break;
     }
     case 'bookshelf': {
-      B(inner, 1.8, 2.3, 0.45, wood, 0, 1.15, 0);
+      RB(inner, 1.8, 2.3, 0.45, wood, 0, 1.15, 0);
       for (let row = 0; row < 4; row++) {
         const y = 0.35 + row * 0.55;
-        B(inner, 1.7, 0.05, 0.42, wood2, 0, y, 0.02);
+        RB(inner, 1.7, 0.05, 0.42, wood2, 0, y, 0.02);
         for (let i = 0, x = -0.75; i < 8 && x < 0.8; i++) {
           const wd = 0.1 + rg() * 0.1;
           if (rg() < 0.12) { x += 0.2; continue; }                                                   // a gap
-          const c = new THREE.Color().setHSL(rg(), 0.45, 0.28 + rg() * 0.15);
-          B(inner, wd, 0.36 + rg() * 0.08, 0.28, lam(c.getHex()), x + wd / 2, y + 0.22, 0.05, 0, rg() < 0.1 ? 0.3 : 0);
+          const bc = BOOK_COLORS[Math.floor(rg() * BOOK_COLORS.length)];                              // a small palette, so the books share materials and merge
+          RB(inner, wd, 0.36 + rg() * 0.08, 0.28, lam(bc), x + wd / 2, y + 0.22, 0.05, 0, rg() < 0.1 ? 0.3 : 0);
           x += wd + 0.02;
         }
       }
-      break;
+      LA(inner, [[0, 0], [0.07, 0], [0.05, 0.1], [0.09, 0.2], [0.0, 0.22]], lam(0xc9a23a, 0x2a2008), 0.6, 2.3, 0.05, 8);   // a vase on top
     }
     case 'weaponrack': {
-      B(inner, 1.4, 1.5, 0.08, wood, 0, 0.9, 0);
-      B(inner, 1.4, 0.07, 0.2, wood2, 0, 0.55, 0.1);
-      for (let i = 0; i < 4; i++) B(inner, 0.06, 0.9 + rg() * 0.5, 0.03, lam(0x9a9ea6), -0.5 + i * 0.33, 1.0, 0.12, 0, (rg() - 0.5) * 0.2);
-      B(inner, 0.42, 0.42, 0.04, wood2, 0.45, 1.35, 0.1);                                           // a round shield on the board
-      break;
+      RB(inner, 1.4, 1.5, 0.08, wood, 0, 0.9, 0);
+      RB(inner, 1.4, 0.07, 0.2, wood2, 0, 0.55, 0.1);
+      for (let i = 0; i < 4; i++) RB(inner, 0.06, 0.9 + rg() * 0.5, 0.03, lam(0x9a9ea6), -0.5 + i * 0.33, 1.0, 0.12, 0, (rg() - 0.5) * 0.2);
+      const sh = C(inner, 0.22, 0.22, 0.05, wood2, 0.45, 1.35, 0.12, 16); sh.rotation.x = Math.PI / 2;      // a round shield on the board
+      SP(inner, 0.1, 0.1, 0.06, lam(0x9a9ea6), 0.45, 1.35, 0.17);                                       // its boss
     }
     case 'barrels': {
       const spots = [[-0.5, -0.2], [0.35, -0.3], [0.0, 0.35]];
       for (const [x, z] of spots) {
-        C(inner, 0.35, 0.3, 0.85, wood, x, 0.425, z, 10);
-        for (const y of [0.18, 0.65]) C(inner, 0.37, 0.37, 0.05, iron, x, y, z, 10);
+        LA(inner, BARREL.map(([r, h]) => [r * 0.88, h * 0.9]), wood, x, 0, z, 12);
+        for (const [y, r] of [[0.18, 0.32], [0.62, 0.34]]) TR(inner, r, 0.02, iron, x, y, z);
       }
-      B(inner, 0.5, 0.05, 0.5, lam(0x3a2a18), 0.35, 0.87, -0.3, 0.4);                                // a board across one barrel
-      break;
+      RB(inner, 0.5, 0.05, 0.5, lam(0x3a2a18), 0.35, 0.87, -0.3, 0.4);                               // a board across one barrel
     }
     case 'crates': {
-      B(inner, 1.0, 1.0, 1.0, wood, -0.25, 0.5, 0);
-      B(inner, 0.8, 0.8, 0.8, wood, 0.5, 0.4, 0.15, 0.3);
-      B(inner, 0.7, 0.7, 0.7, wood, -0.15, 1.35, 0.05, 0.5);
-      for (const [x, y, z] of [[-0.25, 0.5, 0.505], [0.5, 0.4, 0.57]]) B(inner, 0.9, 0.08, 0.02, wood2, x, y, z);   // slats
-      B(inner, 0.3, 0.2, 0.3, straw, 0.5, 0.85, 0.15);                                                // straw poking out
-      break;
+      RB(inner, 1.0, 1.0, 1.0, wood, -0.25, 0.5, 0);
+      RB(inner, 0.8, 0.8, 0.8, wood, 0.5, 0.4, 0.15, 0.3);
+      RB(inner, 0.7, 0.7, 0.7, wood, -0.15, 1.35, 0.05, 0.5);
+      for (const [x, y, z] of [[-0.25, 0.5, 0.52], [0.5, 0.4, 0.58]]) { RB(inner, 0.9, 0.08, 0.03, wood2, x, y + 0.2, z); RB(inner, 0.9, 0.08, 0.03, wood2, x, y - 0.2, z); }   // slats
+      SP(inner, 0.34, 0.2, 0.34, straw, 0.5, 0.85, 0.15);                                             // straw poking out
     }
     case 'table': {
-      B(inner, 1.7, 0.1, 0.95, wood, 0, 0.85, 0);
-      for (const sx of [-0.75, 0.75]) for (const sz of [-0.35, 0.35]) B(inner, 0.1, 0.85, 0.1, wood2, sx, 0.425, sz);
-      for (const x of [-0.45, 0.35]) { C(inner, 0.13, 0.13, 0.02, lam(0xb0a890), x, 0.91, 0.18, 10); B(inner, 0.12, 0.06, 0.1, lam(0x9a6a3a), x + 0.04, 0.95, 0.18); }   // plates and crusts
-      C(inner, 0.06, 0.05, 0.13, lam(0x8a7a5a), -0.1, 0.96, -0.2, 8); C(inner, 0.06, 0.05, 0.13, lam(0x8a7a5a), 0.55, 0.96, -0.25, 8);   // mugs
+      if (d.seed % 3 === 0) { C(inner, 0.85, 0.85, 0.09, wood, 0, 0.85, 0, 24); LA(inner, [[0, 0], [0.32, 0], [0.12, 0.1], [0.1, 0.7], [0.2, 0.8], [0.0, 0.8]], wood2, 0, 0, 0, 12); }   // a round table on a turned pedestal
+      else { RB(inner, 1.7, 0.1, 0.95, wood, 0, 0.85, 0); for (const sx of [-0.75, 0.75]) for (const sz of [-0.35, 0.35]) LA(inner, [[0, 0], [0.06, 0], [0.045, 0.2], [0.055, 0.8], [0.0, 0.8]], wood2, sx, 0, sz, 8); }
+      for (const x of [-0.45, 0.35]) { C(inner, 0.13, 0.13, 0.02, lam(0xb0a890), x, 0.91, 0.18, 12); SP(inner, 0.14, 0.07, 0.11, lam(0x9a6a3a), x + 0.04, 0.96, 0.18); }   // plates and crusts
+      LA(inner, [[0, 0], [0.05, 0], [0.065, 0.13], [0.06, 0.13], [0.0, 0.12]], lam(0x8a7a5a), -0.1, 0.9, -0.2, 8); LA(inner, [[0, 0], [0.05, 0], [0.065, 0.13], [0.06, 0.13], [0.0, 0.12]], lam(0x8a7a5a), 0.55, 0.9, -0.25, 8);   // mugs
       C(inner, 0.03, 0.03, 0.16, bone, 0.1, 0.98, 0.0, 6); flame(inner, 0.1, 1.1, 0.0);              // a candle stub
-      for (const [x, z, ry] of [[-0.5, 0.85, 0.15], [0.55, 0.9, -0.3], [0.1, -0.9, 3.2]]) {          // stools pushed back
-        B(inner, 0.4, 0.06, 0.4, wood2, x, 0.46, z, ry);
-        for (const [lx, lz] of [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]]) B(inner, 0.05, 0.43, 0.05, wood2, x + lx, 0.22, z + lz, ry);
+      for (const [x, z, ry] of [[-0.5, 0.85, 0.15], [0.55, 0.9, -0.3], [0.1, -0.9, 3.2]]) {          // round stools pushed back
+        C(inner, 0.22, 0.22, 0.06, wood2, x, 0.46, z, 14);
+        for (const [lx, lz] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]]) C(inner, 0.025, 0.035, 0.43, wood2, x + lx, 0.22, z + lz, 6);
       }
-      break;
     }
     case 'hearth': {
-      B(inner, 1.9, 1.5, 0.7, stone, 0, 0.75, 0);
-      B(inner, 1.1, 0.75, 0.4, lam(0x0a0806), 0, 0.5, 0.18);                                         // firebox
-      B(inner, 2.1, 0.12, 0.85, dstone, 0, 1.55, 0.02);                                              // mantel
-      B(inner, 0.7, 0.4, 0.04, glow(0xff6a20), 0, 0.42, 0.3);                                        // embers
-      B(inner, 0.5, 0.55, 0.25, glow(0xffa040), 0, 0.5, 0.25); B(inner, 0.3, 0.35, 0.2, glow(0xffe080), 0, 0.45, 0.28);
-      B(inner, 0.7, 0.09, 0.09, lam(0x4a3018), 0, 0.1, 0.3, 0.2); B(inner, 0.6, 0.09, 0.09, lam(0x3a2410), 0, 0.2, 0.28, -0.3);
+      RB(inner, 1.9, 1.5, 0.7, stone, 0, 0.75, 0);
+      for (let i = 0; i < 9; i++) SP(inner, 0.4 + rg() * 0.15, 0.3 + rg() * 0.1, 0.12, stone, -0.8 + (i % 5) * 0.4, 0.2 + Math.floor(i / 5) * 0.55 + (rg() - 0.5) * 0.1, 0.34);   // rounded fieldstones in the face
+      RB(inner, 1.1, 0.75, 0.4, lam(0x0a0806), 0, 0.5, 0.18);                                        // firebox
+      RB(inner, 2.1, 0.12, 0.85, dstone, 0, 1.55, 0.02);                                             // mantel
+      SP(inner, 0.7, 0.2, 0.2, glow(0xff6a20), 0, 0.2, 0.3);                                         // embers
+      const f1 = flame(inner, 0, 0.5, 0.28, 4); f1.scale.set(3.2, 4.2, 3.2); const f2 = flame(inner, 0.2, 0.42, 0.28, 3); f2.scale.set(2.4, 3.2, 2.4);
+      C(inner, 0.05, 0.05, 0.7, lam(0x4a3018), 0, 0.12, 0.3, 6).rotation.z = Math.PI / 2 + 0.2; C(inner, 0.045, 0.045, 0.6, lam(0x3a2410), 0.05, 0.22, 0.28, 6).rotation.z = Math.PI / 2 - 0.3;   // logs
       C(inner, 0.07, 0.07, 0.25, bone, -0.7, 1.7, 0.1, 6);                                           // candle stub on the mantel
-      break;
     }
     case 'cauldron': {
-      for (const a of [0, 2.1, 4.2]) B(inner, 0.08, 0.35, 0.08, iron, Math.sin(a) * 0.4, 0.17, Math.cos(a) * 0.4);
-      C(inner, 0.55, 0.45, 0.7, iron, 0, 0.62, 0, 14);
-      C(inner, 0.6, 0.6, 0.07, iron, 0, 0.98, 0, 14);
-      C(inner, 0.5, 0.5, 0.03, glow(0x40ff70), 0, 0.97, 0, 14);                                      // glowing brew
-      for (let i = 0; i < 4; i++) C(inner, 0.05 + rg() * 0.04, 0.05, 0.03, glow(0x8affaa), (rg() - 0.5) * 0.7, 0.99, (rg() - 0.5) * 0.7, 6);   // bubbles
-      B(inner, 0.05, 0.9, 0.05, wood2, 0.3, 1.2, 0.1, 0, -0.4);                                       // stirring spoon
-      for (let i = 0; i < 3; i++) B(inner, 0.12, 0.08, 0.1, lam(0x4a3018), 0.75 + i * 0.01, 0.05 + i * 0.07, 0.4 - i * 0.1);   // firewood
-      break;
+      for (const a of [0, 2.1, 4.2]) C(inner, 0.03, 0.05, 0.35, iron, Math.sin(a) * 0.4, 0.17, Math.cos(a) * 0.4, 6);
+      LA(inner, [[0, 0.3], [0.3, 0.3], [0.5, 0.5], [0.58, 0.75], [0.52, 0.95], [0.46, 0.97], [0.0, 0.9]], iron, 0, 0, 0, 16);   // a pot-bellied cauldron
+      TR(inner, 0.52, 0.045, iron, 0, 0.96, 0);                                                      // rim
+      C(inner, 0.46, 0.46, 0.03, glow(0x40ff70), 0, 0.94, 0, 16);                                    // glowing brew
+      for (let i = 0; i < 4; i++) SP(inner, 0.12, 0.06, 0.12, glow(0x8affaa), (rg() - 0.5) * 0.7, 0.96, (rg() - 0.5) * 0.7);   // bubbles
+      C(inner, 0.025, 0.025, 0.95, wood2, 0.3, 1.2, 0.1, 6).rotation.z = 0.4;                         // stirring spoon
+      for (let i = 0; i < 3; i++) C(inner, 0.05, 0.05, 0.25, lam(0x4a3018), 0.75 + i * 0.01, 0.07 + i * 0.1, 0.4 - i * 0.1, 6).rotation.z = Math.PI / 2;   // firewood
     }
     case 'rug': {
       const c = cloths[Math.floor(rg() * cloths.length)];
@@ -275,21 +319,19 @@ function makeDecor(d) {
       break;
     }
     case 'bones': {
-      for (let i = 0; i < 4 + rg() * 3; i++) B(inner, 0.04 + rg() * 0.04, 0.03, 0.2 + rg() * 0.25, bone, (rg() - 0.5) * 1.2, 0.03, (rg() - 0.5) * 1.2, rg() * 3);
+      for (let i = 0; i < 4 + rg() * 3; i++) { const b = C(inner, 0.025 + rg() * 0.02, 0.025, 0.2 + rg() * 0.25, bone, (rg() - 0.5) * 1.2, 0.03, (rg() - 0.5) * 1.2, 5); b.rotation.z = Math.PI / 2; b.rotation.y = rg() * 3; }
       if (rg() < 0.7) {
-        B(inner, 0.2, 0.18, 0.22, bone, (rg() - 0.5) * 0.6, 0.1, (rg() - 0.5) * 0.6, rg() * 3);       // skull
-        B(inner, 0.05, 0.05, 0.02, lam(0x120c08), 0.0, 0.12, 0.0);
+        SP(inner, 0.2, 0.18, 0.22, bone, (rg() - 0.5) * 0.6, 0.1, (rg() - 0.5) * 0.6, rg() * 3);       // skull
+        SP(inner, 0.05, 0.05, 0.03, lam(0x120c08), 0.0, 0.12, 0.0);
       }
-      break;
     }
     case 'sacks': {
       for (let i = 0; i < 2; i++) {
         const x = (i - 0.5) * 0.55, bag = lam(0xa08a5a);
-        B(inner, 0.5, 0.55, 0.4, bag, x, 0.28, (rg() - 0.5) * 0.2, rg() * 0.8);
-        B(inner, 0.22, 0.12, 0.2, bag, x, 0.6, 0);
-        B(inner, 0.24, 0.04, 0.22, lam(0x6a5230), x, 0.54, 0);                                        // tie
+        SP(inner, 0.52, 0.6, 0.44, bag, x, 0.3, (rg() - 0.5) * 0.2, rg() * 0.8);                       // a lumpy sack
+        LA(inner, [[0.0, 0], [0.1, 0], [0.07, 0.08], [0.12, 0.16], [0.0, 0.16]], bag, x, 0.54, 0, 8);   // its gathered neck
+        TR(inner, 0.085, 0.015, lam(0x6a5230), x, 0.56, 0);                                            // tie
       }
-      break;
     }
     case 'candles': {
       for (let i = 0; i < 3; i++) {
@@ -311,16 +353,14 @@ function makeDecor(d) {
       }
       break;
     }
-    case 'beam': {         // a wooden ceiling beam across a room, d.len metres long, d.alongZ turns it
-      B(inner, d.len, 0.28, 0.3, wood, 0, WALL_H - 0.14, 0, d.alongZ ? Math.PI / 2 : 0);
-      break;
+    case 'beam': {
+      RB(inner, d.len, 0.28, 0.3, wood, 0, WALL_H - 0.14, 0, d.alongZ ? Math.PI / 2 : 0);
     }
     case 'urn': {
       const clay = lam(0x8a5a3a);
-      C(inner, 0.28, 0.2, 0.55, clay, 0, 0.28, 0, 10); C(inner, 0.14, 0.26, 0.16, clay, 0, 0.62, 0, 10);
-      C(inner, 0.17, 0.15, 0.05, lam(0x5a3a24), 0, 0.72, 0, 10);
-      B(inner, 0.4, 0.04, 0.4, lam(0x2a2a30), 0, 0.3, 0, 0.4);                                         // iron band
-      break;
+      LA(inner, [[0, 0], [0.16, 0], [0.26, 0.12], [0.29, 0.3], [0.22, 0.5], [0.12, 0.62], [0.15, 0.72], [0.17, 0.74], [0.0, 0.74]], clay, 0, 0, 0, 12);   // a belly and a flared neck
+      TR(inner, 0.28, 0.02, lam(0x2a2a30), 0, 0.3, 0);                                                 // iron band
+      for (const s of [-1, 1]) { const h = new THREE.Mesh(cached('urnh', () => new THREE.TorusGeometry(0.07, 0.015, 5, 10)), clay); h.position.set(s * 0.17, 0.55, 0); h.rotation.y = Math.PI / 2; inner.add(h); }   // handles
     }
     case 'banner': {
       C(inner, 0.025, 0.025, 1.1, iron, 0, 2.35, 0, 6).rotation.z = Math.PI / 2;
@@ -331,21 +371,19 @@ function makeDecor(d) {
       break;
     }
     case 'altar': {
-      B(inner, 1.5, 0.85, 0.8, stone, 0, 0.43, 0);
-      B(inner, 1.7, 0.1, 0.95, dstone, 0, 0.9, 0);
-      B(inner, 0.5, 0.02, 0.95, lam(0x8a2a2a), 0, 0.96, 0);                                           // runner
+      RB(inner, 1.5, 0.85, 0.8, stone, 0, 0.43, 0);
+      RB(inner, 1.7, 0.1, 0.95, dstone, 0, 0.9, 0);
+      RB(inner, 0.5, 0.02, 0.95, lam(0x8a2a2a), 0, 0.96, 0);                                           // runner
       for (const x of [-0.6, 0.6]) { C(inner, 0.04, 0.045, 0.3, bone, x, 1.12, 0, 6); flame(inner, x, 1.3, 0); }
-      C(inner, 0.07, 0.05, 0.18, lam(0xc9a23a, 0x2a2008), 0, 1.05, 0.1, 8);                          // goblet
-      B(inner, 0.18, 0.3, 0.18, lam(0xc9a23a, 0x2a2008), 0, 1.12, -0.2);                              // small idol
-      break;
+      LA(inner, [[0, 0], [0.06, 0], [0.025, 0.07], [0.03, 0.14], [0.07, 0.2], [0.0, 0.2]], lam(0xc9a23a, 0x2a2008), 0, 0.95, 0.1, 10);   // goblet
+      SP(inner, 0.18, 0.3, 0.18, lam(0xc9a23a, 0x2a2008), 0, 1.12, -0.2);                              // small idol
     }
     case 'statue': {
-      B(inner, 0.7, 0.5, 0.7, dstone, 0, 0.25, 0);
-      B(inner, 0.38, 1.0, 0.28, stone, 0, 1.0, 0);
-      B(inner, 0.28, 0.3, 0.28, stone, 0, 1.65, 0);
-      B(inner, 0.12, 0.6, 0.12, stone, -0.28, 1.1, 0.1, 0, 0.3); B(inner, 0.12, 0.6, 0.12, stone, 0.28, 1.1, 0.1, 0, -0.3);
-      B(inner, 0.06, 0.8, 0.06, lam(0x9a9ea6), 0.3, 1.0, 0.25, 0, -0.1);                              // a sword in one hand
-      break;
+      LA(inner, [[0, 0], [0.42, 0], [0.38, 0.08], [0.32, 0.45], [0.36, 0.5], [0.0, 0.5]], dstone, 0, 0, 0, 14);   // a moulded plinth
+      C(inner, 0.17, 0.22, 1.0, stone, 0, 1.0, 0, 10);                                                 // robed body
+      SP(inner, 0.3, 0.32, 0.3, stone, 0, 1.68, 0);                                                    // head
+      for (const s of [-1, 1]) { const arm = C(inner, 0.05, 0.06, 0.6, stone, s * 0.27, 1.15, 0.1, 8); arm.rotation.z = -s * 0.3; }
+      C(inner, 0.025, 0.02, 0.8, lam(0x9a9ea6), 0.3, 1.0, 0.25, 6).rotation.z = 0.1;                    // a sword in one hand
     }
   }
   const sc = d.scale || 1;                                         // the boss arena scales banners and statues up to fit the tall walls

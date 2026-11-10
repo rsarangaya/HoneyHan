@@ -327,6 +327,12 @@ class Enemy {
     this.shadow = new THREE.Mesh(SHADOW_GEO, SHADOW_MAT);
     this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
     this.shadow.renderOrder = 1; m.add(this.shadow);
+    // Merge the parts inside each animated group (torso and head, each arm, each leg): about 60 meshes become about 25
+    // per creature, and the pose code still moves the same groups.
+    const flashMats = this.mats;
+    if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), flashMats); for (const w of this.wings || []) bakeMeshes(w, new Set(), flashMats); }
+    else { bakeMeshes(this.upper, new Set(this.arms), flashMats); for (const a of this.arms) bakeMeshes(a, new Set(), flashMats); }
+    for (const l of this.legs) bakeMeshes(l, new Set(), flashMats);
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
     this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;

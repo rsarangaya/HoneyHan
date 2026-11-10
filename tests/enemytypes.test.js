@@ -11,6 +11,7 @@ const N = parseInt(process.argv[2], 10) || 150;
 const THEMES = Object.keys(L.THEME_NATIVES), TAVERN = 'The Sunken Tavern';
 const GENERIC = ['archer', 'shaman', 'brute', 'wolf'];
 const shareBy = [0, 0, 0, 0, 0], guardsBy = [0, 0, 0, 0, 0];
+const densOpen = [0, 0, 0, 0], densEn = [0, 0, 0, 0], densMin = [99, 99, 99, 99];
 
 for (let s = 1; s <= N; s++) {
   const seed = (s * 2654435761) >>> 0;
@@ -47,6 +48,7 @@ for (let s = 1; s <= N; s++) {
       const wolves = count('wolf'), wantW = fl === 1 ? 0 : (fl === 5 ? 2 : Math.min(3, fl - 1) + bonusW);
       if (wolves !== wantW) fail(w, `wolves ${wolves}, want ${wantW}`);
       if (new Set(E.filter(e => e.handler !== undefined).map(e => e.handler)).size !== wolves) fail(w, 'two wolves share a handler');
+      if (fl <= 4) { let open = 0; for (const tl of f.tiles) if (tl !== 0) open++; densOpen[fl - 1] += open; densEn[fl - 1] += E.length; densMin[fl - 1] = Math.min(densMin[fl - 1], 100 * E.length / open); }
       if (theme === TAVERN) {
         const solo = E.filter(e => !e.boss && type(e) !== 'rat' && type(e) !== 'wolf');
         shareBy[fl - 1] += solo.filter(e => ['cook', 'bandit', 'bouncer'].includes(type(e))).length; guardsBy[fl - 1] += solo.length;
@@ -57,6 +59,27 @@ for (let s = 1; s <= N; s++) {
 const pct = shareBy.map((v, i) => Math.round(100 * v / guardsBy[i]));
 console.log(`Tavern native share of guards by floor: ${pct.join('%, ')}%  (targets 30, 45, 60, then lower on floors 4 and 5, where archers, a shaman, a brute and wolf handlers take guards)`);
 pct.forEach((p, i) => { const want = [30, 45, 60, 45, 25][i]; if (Math.abs(p - want) > 14 + (i === 2 || i === 3 ? 8 : 0)) fail(`floor ${i + 1}`, `native share ${p}% is far from ${want}%`); });
+
+// enemy density: enemies per 100 open tiles, by floor (it was about 1.2 on floor 1 with the old 45 x 45 map)
+const dens = densEn.map((v, i) => 100 * v / densOpen[i]);
+console.log(`enemies per 100 open tiles, floors 1 to 4: ${dens.map(v => v.toFixed(2)).join(', ')} (lowest single floor ${densMin.map(v => v.toFixed(1)).join(', ')})`);
+[[2.7, 3.9], [2.8, 4.0], [2.9, 4.2], [3.0, 4.4]].forEach(([lo, hi], i) => { n++; if (dens[i] < lo || dens[i] > hi) fail(`floor ${i + 1}`, `density ${dens[i].toFixed(2)} outside ${lo} to ${hi}`); if (densMin[i] < 1.7) fail(`floor ${i + 1}`, `a floor has only ${densMin[i].toFixed(2)} enemies per 100 tiles`); });
+if (!(dens[3] > dens[0])) fail('density', 'deeper floors should be busier');
+
+// chest grades: better chests hold more gold, more gear, and never gear below their floor
+let goldAvg = [0, 0, 0, 0, 0], gearRate = [0, 0, 0, 0, 0], badMin = 0, legendary = 0;
+for (let tier = 0; tier <= 4; tier++) for (let i = 1; i <= 1200; i++) {
+  const d = L.rollLoot('chest', 3, L.makeRng(i * 7 + tier), 0, [], 'goblin', tier);
+  goldAvg[tier] += d.filter(x => x.type === 'gold').reduce((a, x) => a + x.n, 0) / 1200;
+  const gear = d.filter(x => ['weapon', 'armor', 'shield'].includes(x.type)); if (gear.length) gearRate[tier] += 1 / 1200;
+  for (const g of gear) { if (g.tier < [0, 0, 1, 2, 3][tier]) badMin++; if (tier === 4 && g.tier === 4) legendary++; }
+}
+n++;
+if (!goldAvg.every((v, i) => i === 0 || v > goldAvg[i - 1] * 1.15)) fail('chest gold', goldAvg.map(v => v.toFixed(0)).join(', ') + ' should rise with the grade');
+if (!(gearRate[0] < 0.46 && gearRate[3] > 0.97 && gearRate[4] > 0.97 && gearRate[1] < gearRate[2])) fail('chest gear', gearRate.map(v => v.toFixed(2)).join(', '));
+if (badMin) fail('chest gear', `${badMin} pieces below the chest's minimum tier`);
+if (legendary < 40) fail('chest gear', `golden chests gave only ${legendary} Legendary pieces in 1200 opens`);
+console.log(`chest gold by grade: ${goldAvg.map(v => v.toFixed(0)).join(', ')}; gear chance ${gearRate.map(v => v.toFixed(2)).join(', ')}`);
 
 // every theme has a boss, every type a name and (for the new ones) glossary text
 for (const t of THEMES) { n++; if (!vm.runInContext(`THEME_BOSS[${JSON.stringify(t)}]`, ctx)) fail(t, 'no boss'); }
