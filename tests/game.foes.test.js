@@ -50,13 +50,13 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
   const brute = await page.evaluate(async () => {
     const out = {};
     T.reset(); game.inv.hp = 1e9; game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
-    const b = T.guard(1.2, 'toward', true, 'brute'); out.hp = b.maxHp; out.dmgMul = b.dmgMul; out.noStagger = b.T.noStagger; out.chase = b.chase;
+    const b = T.guard(1.2, 'toward', true, 'brute'); out.base = TUNE.enemyHp; out.hp = b.maxHp; out.dmgMul = b.dmgMul; out.noStagger = b.T.noStagger; out.chase = b.chase;
     b.hp = b.maxHp = 900;
     game.cb.press = true; await T.until(() => b.hp < 900, 4000); await T.sleep(100);
     out.stun = b.stun; out.stunStatus = b.addStatus('stun');
     return out;
   });
-  check('a brute has 3x health, hits twice as hard and is slower than a sprint', brute.hp === 120 && brute.dmgMul === 2 && brute.chase < 4.6, `hp ${brute.hp}, chase ${brute.chase.toFixed(1)}`);
+  check('a brute has 3x health, hits twice as hard and is slower than a sprint', brute.hp === 3 * brute.base && brute.dmgMul === 2 && brute.chase < 4.6, `hp ${brute.hp}, chase ${brute.chase.toFixed(1)}`);
   check('a brute is not staggered or stunned by ordinary hits', brute.stun === 0 && brute.stunStatus === false);
 
   // 4. The floors mix the new types in.
@@ -100,5 +100,15 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
     return { name: document.querySelector('#boss div').textContent, innkeeper: !!(b && b.spec.dress === 'innkeeper') };
   });
   check('the Tavern\'s boss is the Giant Innkeeper', boss.name === 'Giant Innkeeper' && boss.innkeeper, boss.name);
+  // 6. Killing the floor-5 boss: nothing throws, the boss says it fell, and its body holds the loot (regression: bossDefeated read `extra` before its declaration).
+  const fall = await page.evaluate(() => {
+    game.startFloor(5); const b = game.enemies.find(e => e.boss);
+    b.hp = 1; let error = null;
+    try { dealHit(b, 'body', 20, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0); } catch (e) { error = e.message; }
+    const body = propObjs.find(o => o.p.kind === 'corpse' && o.p.left && o.p.left.some(d => d.type === 'gold'));
+    const gold = body ? body.p.left.find(d => d.type === 'gold').n : 0;
+    return { error, dead: b.dead, msg: document.getElementById('msg').textContent, items: body ? body.p.left.length : 0, gold };
+  });
+  check('the floor-5 boss falls without an error and its body holds gear and gold', fall.error === null && fall.dead && /boss falls/.test(fall.msg) && fall.items >= 3 && fall.gold >= 120, JSON.stringify(fall));
   await page.close();
 });

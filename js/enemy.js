@@ -143,7 +143,9 @@ class Enemy {
     this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
     this.cause = 'died';
     this.seed = spec.seed;
-    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp * this.T.hpMul; this.stun = 0; this.hitT = 0;
+    const fl = this.boss ? 0 : Math.max(0, (typeof floorNum === 'number' ? floorNum : 1) - 1);   // floor scaling, once at spawn (boss excluded)
+    this.dmgScale = 1 + TUNE.floorDmgScale * fl;
+    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl); this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
     this.dead = false; this.deadT = 0;
     this.build();
@@ -467,7 +469,7 @@ class Enemy {
   get windT_() { if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
   get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : this.T.reach); }
   get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
-  get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul; }
+  get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul * this.dmgScale; }
   get cooldown() { return TUNE.enemyCooldown / this.atkSpd * this.T.cdMul; }
 
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }

@@ -1,7 +1,7 @@
 # Status
 
-Project: Prototype Test (working name), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-09 (branch `impatience`: steps 2 to 8 of the build order, each tested)
+Project: HoneyHan (formerly Prototype Test), a first-person stealth roguelike dungeon crawler.
+Last updated: 2026-11-10 (branch `impatience`: steps 2 to 8 of the build order, each tested)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
@@ -149,8 +149,28 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - Tests: `tests/game.legend.test.js` (40 checks: the three items, one-per-run, the hat's three effects, sacrifice). `tests/wands.test.js` now expects six wand kinds. The last full `node tests/run-all.js` passed. Two rage timing checks in `tests/game.magic.test.js` ("they calm down..." and "the recorder breaks...") fail intermittently under load, also on the code before this round. Test gotcha: after a fight that kills the player the page stays in the dead state, so open a fresh page.
 - Not play-tested by a real person: how often the three drop, whether Corner Time and Cone of Shame feel fair, and whether the Hog's 3 kills per charge is too tight.
 
+### Balance pass 1 (2026-11-10): challenging, not too easy
+- **Why:** a 50-seed simulation measured it too easy: a goblin died in 2 hits, about 18 Healing Potions per run, about 2,060 gold, and food at 2.2x the walking need.
+- **What changed** (final values, Round 2 values where they differ):
+  - Enemies (`TUNE` in `js/combat.js`, `js/enemy.js`): enemy HP 40 -> 55, enemy damage 10 -> 13, boss damage multiplier 1.8 -> 1.4. New `floorHpScale` 0.12 and `floorDmgScale` 0.06: non-boss enemies get HP x (1 + 0.12 x (floor - 1)) and damage x (1 + 0.06 x (floor - 1)) at spawn.
+  - Healing (`js/loot.js`, `js/gen.js`): potion shelves per brewery 1-3 -> 1-2; Healing weight 40 -> 22; chest potion chance 40% + 8%/grade -> 20% + 5%/grade; barrel and rubble potion 20% -> 10%; corpse potion weight 1.5 -> 1. The boss arena's guaranteed Healing Potion and +40 HP per potion are unchanged.
+  - Gold (`js/loot.js`, `js/main.js`): chest gold x0.6; vault chest 25-55 + 6F (was 40-90 + 10F); barrel and rubble 2-6 (was 3-10); generic corpse 3-9 (was 4-14); bandit 5-15 (was 8-25); bouncer 6-15 (was 10-25); brute 5-12 (was 8-20). Boss gold 120-200 unchanged.
+  - Shop (`js/shop.js`): heal 45 (was 20), stamina 40 (25), swift 50 (30), might 65 (40), stoneskin 65 (40), shadow 70 (45); bread 12 (8), cheese 15 (10), jerky 20 (14), apple 8 (5), stew 45 (30). Gear, wands and arrows unchanged.
+  - Hunger (`js/hunger.js`, `js/loot.js`): drain 100 per 660 s (was 900 s); chest food 8% (was 12%), barrel food 4% (7%), rubble 2% (3%).
+  - Tuning panel (`js/tune.js`): `floorHpScale` and `floorDmgScale` fields added; storage key now `prototype-test-tune-12`.
+- **Measured result** (floors 1 to 4, mean of 50 seeds):
+  - Healing Potions per floor: 1.3 / 1.7 / 2.0 / 2.1.
+  - Gold by end of floor 4: about 1,007.
+  - Food: 1.45x the walking need.
+  - Goblin on floor 1: Common sword kills in 3 hits; kills an unarmoured player in 8 body hits. Goblin on floor 4: 75 HP.
+  - Boss: kills an unarmoured player in 6 body hits, 8 with a Rare medium chest.
+- **Bug fixed:** `bossDefeated` in `js/main.js` used `extra` before its `const` line, so the boss's death threw and its loot never appeared. Fixed by moving the line up. New regression check in `tests/game.foes.test.js`.
+- **Test fixed:** the Rage test in `tests/game.magic.test.js` sometimes let the Rage-immune boss kill the player, which froze game time. The boss and the far enemy are now removed after their immunity checks. 5 runs in a row pass.
+- **Not changed, needs real play:** stealth (vision 10 m, 100 degree cone, hearing), enemy counts, respawns, weapons, armor, statuses, wands, uniques.
+- Not play-tested by a real person.
+
 ## Decisions made
-- Name: Prototype Test (placeholder).
+- Name: HoneyHan (formerly "Prototype Test").
 - Scope for now: floors 1 to 5, first boss on floor 5. Run length is up to the player.
 - Tone: fantasy dungeon, not super grim. Dungeons can look like anything (inn, manor, library, cellar, outdoor ruins).
 - Combat: LMB attack, RMB block (depends on equipment), quickslots for items. Block is Option B (head and body blocked, leg sweeps go under).

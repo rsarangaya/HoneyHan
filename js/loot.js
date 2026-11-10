@@ -68,7 +68,7 @@ const ARMOR_ZONE = { helmet: 'head', chest: 'body', boots: 'legs' };
 const ARMOR_LABEL = { helmet: 'Helmet', chest: 'Chest', boots: 'Boots' };
 
 const POTIONS = {
-  heal:      { name: 'Healing Potion',   color: '#e8434b', weight: 40, desc: `Restores ${POTION_HEAL} HP.` },
+  heal:      { name: 'Healing Potion',   color: '#e8434b', weight: 22, desc: `Restores ${POTION_HEAL} HP.` },
   stamina:   { name: 'Vigor Potion',     color: '#4cc36a', weight: 20, desc: 'Refills stamina and doubles its regen for 20 s.' },
   swift:     { name: 'Swiftness Potion', color: '#4cc3e8', weight: 12, desc: 'Move 35% faster for 25 s.' },
   might:     { name: 'Might Potion',     color: '#e8903a', weight: 10, desc: 'Deal 40% more damage for 25 s.' },
@@ -220,28 +220,28 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', ti
     if (type === 'rat') { if (rng() < 0.25 + bonus) out.push({ type: 'gold', n: rng.int(1, 4) }); return out; }   // rats carry next to nothing
     if (type === 'archer' && rng() < 0.7) { out.push({ type: 'arrows', n: rng.int(3, 6) }); return out; }                  // archers carry arrows
     if (type === 'shaman') { if (rng() < 0.1) out.push({ type: 'wand', kind: rollWandKind(rng) }); else if (rng() < 0.5) out.push(potion()); return out; }
-    if (type === 'brute') { if (rng() < 0.6) out.push(rollEquipment(floorNum, rng, { minTier: 2 })); out.push({ type: 'gold', n: rng.int(8, 20) }); return out; }
+    if (type === 'brute') { if (rng() < 0.6) out.push(rollEquipment(floorNum, rng, { minTier: 2 })); out.push({ type: 'gold', n: rng.int(5, 12) }); return out; }
     if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
-    if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(10, 25) }); return out; }   // the elite always pays
-    if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(8, 25) }); return out; }          // robbers carry gold
+    if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(6, 15) }); return out; }   // the elite always pays
+    if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(5, 15) }); return out; }          // robbers carry gold
     // a guard drops at most ONE thing; one of the pieces it was visibly carrying is the likeliest
     if (rng() < 0.7 + bonus) {
-      const opts = [[{ type: 'gold', n: rng.int(4, 14) }, 4], [{ type: 'arrows', n: rng.int(2, 5) }, 2], [potion(), 1.5], ...gear.map(g => [g, 3])];
+      const opts = [[{ type: 'gold', n: rng.int(3, 9) }, 4], [{ type: 'arrows', n: rng.int(2, 5) }, 2], [potion(), 1], ...gear.map(g => [g, 3])];
       out.push(opts[weighted(rng, opts.map(o => o[1]))][0]);
     }
   } else if (kind === 'chest') {
     const t = Math.max(0, Math.min(4, tier | 0));                                      // the chest's grade, 0 (wooden) to 4 (golden)
-    out.push({ type: 'gold', n: Math.round((rng.int(10, 25) + floorNum * 4) * (1 + 0.6 * t)) });
+    out.push({ type: 'gold', n: Math.round(Math.round((rng.int(10, 25) + floorNum * 4) * (1 + 0.6 * t)) * 0.6) });
     if (rng() < 0.65) out.push({ type: 'arrows', n: rng.int(4, 8) });
-    if (rng() < 0.4 + 0.08 * t) out.push(potion());
-    if (rng() < 0.12) out.push({ type: 'food', kind: rollFoodKind(rng, 1), n: 1 });
+    if (rng() < 0.20 + 0.05 * t) out.push(potion());
+    if (rng() < 0.08) out.push({ type: 'food', kind: rollFoodKind(rng, 1), n: 1 });
     if (rng() < 0.05 + 0.05 * t) out.push({ type: 'wand', kind: rollWandKind(rng) });
     if (rng() < 0.015 + 0.012 * t) out.push({ type: 'rechargewand', full: rng() < WAND.rechargeFull });
     if (rng() < 0.006 + (t >= 3 ? 0.03 : 0)) out.push({ type: 'rage' });
     const bust = rollBust(rng, 0.004 + (t >= 3 ? 0.02 : 0)); if (bust) out.push(bust);
     if (rng() < [0.4, 0.5, 0.75, 1, 1][t]) out.push(rollEquipment(floorNum, rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
   } else if (kind === 'vaultchest') {
-    out.push({ type: 'gold', n: rng.int(40, 90) + floorNum * 10 });
+    out.push({ type: 'gold', n: rng.int(25, 55) + floorNum * 6 });
     if (rng() < 0.7) out.push(potion());
     out.push(rollEquipment(floorNum, rng, { boost: 1, minTier: 1 }));
     if (rng() < 0.3) out.push({ type: 'wand', kind: rollWandKind(rng) });
@@ -253,12 +253,12 @@ function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', ti
   } else if (kind === 'pantry') {
     for (let i = rng() < 0.25 ? 2 : 1; i > 0; i--) out.push({ type: 'food', kind: rollFoodKind(rng, 4), n: 1 });   // a food shelf: usually one meal, sometimes two, and a small chance of stew
   } else if (kind === 'potions') {
-    out.push(potion());                                                      // one per shelf; a room has 1 to 3 shelves
+    out.push(potion());                                                      // one per shelf; a room has 1 to 2 shelves
   } else {   // barrel, rubble: smaller and less certain, the search time is the cost
     if (rng() < 0.45) out.push({ type: 'arrows', n: rng.int(2, 4) });
-    if (rng() < 0.4) out.push({ type: 'gold', n: rng.int(3, 10) });
-    if (rng() < 0.2) out.push(potion());
-    if (rng() < (kind === 'barrel' ? 0.07 : 0.03)) out.push({ type: 'food', kind: rollFoodKind(rng), n: 1 });
+    if (rng() < 0.4) out.push({ type: 'gold', n: rng.int(2, 6) });
+    if (rng() < 0.1) out.push(potion());
+    if (rng() < (kind === 'barrel' ? 0.04 : 0.02)) out.push({ type: 'food', kind: rollFoodKind(rng), n: 1 });
     if (kind === 'rubble' && rng() < 0.06) out.push(rollEquipment(floorNum, rng, { kind: 'weapon' }));
   }
   return out;

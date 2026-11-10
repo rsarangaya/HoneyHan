@@ -1,7 +1,7 @@
 // Hunger (DESIGN.md section 18). A 0 to 100 meter that drains while you play, with four stages. Pure
 // logic with no DOM so it can be tested in plain Node (tests/hunger.test.js). Starving never kills.
 const HUNGER = {
-  drainPerSec: 100 / 900,                 // 100 to 0 in 15 minutes of normal play
+  drainPerSec: 100 / 660,                 // 100 to 0 in 11 minutes of normal play
   sprintMul: 2, fightMul: 1.6, idleMul: 0.6,   // faster when sprinting or fighting, slower standing still or crouched
   hungryAt: 50, weakAt: 25,
   regenHungry: 0.8, regenWeak: 0.6,       // stamina regen multipliers

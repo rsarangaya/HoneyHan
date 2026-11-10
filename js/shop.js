@@ -6,8 +6,8 @@ const TIER_PRICE = [1, 2, 3.5, 6, 12];                              // Common to
 const WEAPON_PRICE = { dagger: 30, sword: 45, mace: 50, bow: 40, spear: 120 };
 const ARMOR_CLASS_PRICE = [20, 45, 80];                             // light, medium, heavy
 const ARMOR_SLOT_FACTOR = { helmet: 0.8, chest: 1.4, boots: 0.8 };
-const POTION_PRICE = { heal: 20, stamina: 25, swift: 30, might: 40, stoneskin: 40, shadow: 45 };
-const FOOD_PRICE = { bread: 8, cheese: 10, jerky: 14, apple: 5, stew: 30 };
+const POTION_PRICE = { heal: 45, stamina: 40, swift: 50, might: 65, stoneskin: 65, shadow: 70 };
+const FOOD_PRICE = { bread: 12, cheese: 15, jerky: 20, apple: 8, stew: 45 };
 const WAND_PRICE = { fire: 90, frost: 80, lightning: 110, force: 95, sleep: 85, bust: 700 };   // for a full wand
 const OTHER_PRICE = { shield: 40, rechargewand: 60, grandrecharge: 140, rage: 1200, arrows: 2 };
 const SELL_SHARE = 0.35, FEATURED_MARKUP = 1.25, ARROW_PACK = 5;

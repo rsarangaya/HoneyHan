@@ -10,8 +10,8 @@ const walk = { sprinting: false, still: false, crouching: false };
 const half = () => 0.5;   // rnd that makes the growl timer exactly growlEvery
 
 let h = new Hunger();
-for (let i = 0; i < 900; i++) h.update(1, walk, half);
-check('100 to 0 in 15 minutes of normal play', h.v < 0.5, h.v.toFixed(2));
+for (let i = 0; i < 660; i++) h.update(1, walk, half);
+check('100 to 0 in 11 minutes of normal play', h.v < 0.5, h.v.toFixed(2));
 h = new Hunger(); h.update(10, { ...walk, sprinting: true }, half); check('sprinting drains twice as fast', near(100 - h.v, HUNGER.drainPerSec * 10 * 2));
 h = new Hunger(); h.update(10, { ...walk, still: true }, half); check('standing still drains slower', near(100 - h.v, HUNGER.drainPerSec * 10 * 0.6));
 h = new Hunger(); h.update(10, { ...walk, crouching: true }, half); check('crouching drains slower', near(100 - h.v, HUNGER.drainPerSec * 10 * 0.6));

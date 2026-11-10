@@ -115,7 +115,7 @@ if (tierShare(0, 4) > 0.05) fail('chests', 'golden chests should be very rare on
 if (!(tierShare(3, 2) > tierShare(0, 2) * 1.4)) fail('chests', 'deeper floors should have more silver or better chests');
 const per = supply.map((v, i) => Math.round(v / floorsBy[i]));
 console.log(`food in props per floor (hunger points, floors 1 to 5): ${per.join(', ')}`);
-// Drain is 100 per 15 minutes. A floor takes roughly 3 to 6 minutes, so 20 to 40 points. Supply should beat that by about 2 to 4 times (cooks drop food too), but not drown it.
-for (let i = 0; i < 4; i++) if (per[i] < 40 || per[i] > 110) fail(`floor ${i + 1}`, `food supply ${per[i]} is outside 40 to 110 per floor`);
+// Drain is 100 per 11 minutes (round 2 retune). A floor takes roughly 3 to 6 minutes, so 27 to 55 points. Supply should beat that by about 1.2 to 1.5 times (cooks drop food too), but not drown it.
+for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1}`, `food supply ${per[i]} is outside 25 to 110 per floor`);
 console.log(`${checked} floors checked, ${fails} failures`);
 process.exit(fails ? 1 : 0);

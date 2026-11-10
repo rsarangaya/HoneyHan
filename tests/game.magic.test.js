@@ -115,6 +115,8 @@ run('Wands and Hanahan\'s Rage', async ({ open, check }) => {
     out.msg = game.inv.use(0); await T.until(() => A.rageT > 0 && B.rageT > 0, 3000);
     out.enraged = A.rageT > 0 && B.rageT > 0; out.bossImmune = !(boss.rageT > 0); out.farImmune = !(far.rageT > 0);
     out.charges = rec.charges;
+    // immunity is checked; remove the boss and far guard so they cannot hunt (and kill) the player, which freezes game time
+    for (const x of [boss, far]) game.enemies.splice(game.enemies.indexOf(x), 1);
     const hp0 = game.inv.hp;
     await T.until(() => A.hp < 500 || B.hp < 500, 40000); out.brawl = A.hp < 500 || B.hp < 500;
     out.playerSafe = game.inv.hp === hp0;

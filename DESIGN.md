@@ -332,7 +332,7 @@ Each theme has its own roster, so the setting changes who you fight and not only
 
 ## 18. Hunger and food (planned 2026-11-03, not implemented, do not build yet)
 Goal: food is a real resource, not a second healing potion. Hunger adds a slow pressure to the run (do not dawdle, do not rest forever) without becoming a chore. It should never kill a player who is playing at a normal pace.
-- **Hunger meter:** 0 to 100, shown as a small bar under stamina. It drains with time while playing (not while a menu is open), faster when you sprint or fight and slower when you stand still or crouch. First guess: about 100 to 0 in 15 minutes of normal play, so a full 5 floor run needs roughly 1 to 2 meals.
+- **Hunger meter:** 0 to 100, shown as a small bar under stamina. It drains with time while playing (not while a menu is open), faster when you sprint or fight and slower when you stand still or crouch. Balance pass 1 (2026-11-10) set it to about 100 to 0 in 11 minutes of normal play (was a 15 minute first guess), so a full 5 floor run needs roughly 1 to 2 meals.
 - **Stages of hunger** (each is a clear message and a HUD colour):
   | Meter | State | Effect |
   |---|---|---|

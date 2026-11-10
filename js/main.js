@@ -573,8 +573,8 @@ function bossDefeated(e) {
   const epic = rollEquipment(floorNum, rng, {});
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
   const uniq = epic.tier === 4 ? rollUniqueGear(rng, rng() < 0.5) : null, bust = rollBust(rng, 0.12);    // a Legendary body may hold a one-of-a-kind piece
-  const left = [uniq || epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : []), ...(bust ? [bust] : [])];
   const extra = rollEquipment(floorNum, rng, { boost: 1, minTier: 2 });
+  const left = [uniq || epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : []), ...(bust ? [bust] : [])];
   propObjs.push({
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],

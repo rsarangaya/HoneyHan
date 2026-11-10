@@ -2,13 +2,13 @@
 const ZONE_MUL = { head: 1.75, body: 1.0, legs: 0.65 };
 // Global combat numbers, editable live from the dev tuning panel (js/tune.js).
 const TUNE = {
-  enemyHp: 40, enemyDmg: 10, windup: 0.35, enemyCooldown: 0.6,
+  enemyHp: 55, enemyDmg: 13, floorHpScale: 0.12, floorDmgScale: 0.06, windup: 0.35, enemyCooldown: 0.6,
   enemyAtkSpd: 1.4,                   // attack speed stat: x its weapon's spd. Cooldown / this, wind-up / sqrt(this)
   enemyReach: 1.7,                    // how close an alerted guard must be to start a swing
   chaseSpeed: 5.0,                    // alerted guards run faster than a sprinting player
   playerAtkSpd: 1,                    // attack speed stat: x the weapon's spd. Swing time / this
   walkSpeed: 3.0, sprintSpeed: 4.6, crouchSpeed: 1.4,
-  bossHp: 220, bossDmgMul: 1.8,       // the boss wears Rare plate, so its real toughness is higher than its HP
+  bossHp: 220, bossDmgMul: 1.4,       // the boss wears Rare plate, so its real toughness is higher than its HP
   bossWake: 12,                       // metres: the boss stays asleep until you are this close
   bossSpeed: 4.2,                     // a sprinting player (4.6) can outrun it
   bossLegendary: 0.10,                // chance its guaranteed Epic drop upgrades to Legendary

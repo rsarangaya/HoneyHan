@@ -19,7 +19,7 @@ check('great helm 65/130/225/385', row('armor', { slot: 'helmet', cls: 2 }, [65,
 check('leather jerkin 30/55/100/170', row('armor', { slot: 'chest', cls: 0 }, [30, 55, 100, 170]));
 check('chainmail 65/125/220/380', row('armor', { slot: 'chest', cls: 1 }, [65, 125, 220, 380]));
 check('plate cuirass 110/225/390/670', row('armor', { slot: 'chest', cls: 2 }, [110, 225, 390, 670]));
-check('potions are flat priced', S.priceOf({ type: 'potion', kind: 'heal' }) === 20 && S.priceOf({ type: 'potion', kind: 'shadow' }) === 45);
+check('potions are flat priced', S.priceOf({ type: 'potion', kind: 'heal' }) === 45 && S.priceOf({ type: 'potion', kind: 'shadow' }) === 70);
 check('a pack of 5 arrows costs 10', S.priceOf({ type: 'arrows' }) === 10);
 check('a used wand is worth less than a full one', S.priceOf({ type: 'wand', kind: 'fire', charges: 1 }) < S.priceOf({ type: 'wand', kind: 'fire', charges: 5 }));
 check('prices are multiples of 5', ['dagger', 'sword', 'mace', 'bow'].every(b => [0, 1, 2, 3, 4].every(t => S.priceOf({ type: 'weapon', base: b, tier: t }) % 5 === 0)));
@@ -76,7 +76,7 @@ r = S.sellToMerchant(inv, sw);
 check('selling pays 35% and removes the item', r.ok && inv.gold === 15 && !inv.pack.includes(sw), r.msg);
 const pots = S.makeItem({ type: 'potion', kind: 'heal', n: 3 }); inv.pack.push(pots);
 S.sellToMerchant(inv, pots);
-check('selling a stack sells one at a time', pots.n === 2 && inv.gold === 22, 'gold ' + inv.gold);
+check('selling a stack sells one at a time', pots.n === 2 && inv.gold === 30, 'gold ' + inv.gold);
 const key = S.makeItem({ type: 'key', lock: 'a', label: 'Key' }); inv.pack.push(key);
 r = S.sellToMerchant(inv, key);
 check('keys cannot be sold', !r.ok && inv.pack.includes(key));
