@@ -80,6 +80,8 @@ const ENEMY_TYPES = {
     info: ['A named elite guard, wanted by a goblin defector (a quest on floors 2 to 4). It patrols one room, wears plate and carries a floating name.', 'About twice the health of a guard and 1.3 times its damage. A sneak attack is capped, so a dagger cannot instakill it, but any way of killing it counts.', 'Report back to the defector near the start room for the reward: a good potion or a Rare or better piece of gear.'] },
   // The quest-giver's body: never in the enemy list, so it cannot be hit and nothing reacts to it.
   defector: { name: 'Goblin Defector', skin: 0x7a9a4a, noGear: true, weapon: 'dagger', scale: 0.9 },
+  // The prisoner rescue's captive (js/quests.js): a shackled goblin built like the defector, never in the enemy list.
+  prisoner: { name: 'Prisoner', skin: 0x8a9a5a, noGear: true, weapon: 'dagger', scale: 0.86 },
   // The sneak thief chase (js/quests.js): carries a loot sack, never fights, runs from you (fleer, see Enemy.updateFleer) at 1.1 x the alerted guard
   // speed (about 1.2 x your sprint), cowers when cornered and escapes down the stairs if it gets there. Its shout is silent (shout 0).
   sackthief: { name: 'Sack Thief', zones: [0, 1, 0], skin: 0x4a6a3a, noGear: true, weapon: 'dagger', hpMul: 0.5, dmgMul: 0, speed: 1.1, vis: 1.1, hear: 1.2, shout: 0, scale: 0.88, r: 0.36, fleer: true,

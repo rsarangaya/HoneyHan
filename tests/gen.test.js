@@ -5,7 +5,7 @@
 // every locked door has exactly one key in a chest outside the locked rooms, locked rooms
 // are reachable only through their door, and the boss arena has one boss and one healing potion.
 // Also: mimic, locked and trapped chest placement (shares, exclusions, same seed, rest of floor unchanged) and lockpick drop rates.
-// Encounters: the four types roll about equally; the wanted guard (defector in the start room, target on a patrol route) and the
+// Encounters: the five types roll about equally; the wanted guard (defector in the start room, target on a patrol route) and the
 // sack thief (two rooms of its own) lay out over many seeds, the floor stays as it was apart from the encounter; the sack, the
 // wanted reward and the encounter lines are checked with stub globals.
 const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -232,10 +232,10 @@ for (let s = 1; s <= N; s++) {
   for (const k of [0, 1, 2]) if (Math.abs(pct(k) - want[k]) > 1.5) fail('roll', `${k} encounters ${pct(k).toFixed(1)}%, want about ${want[k]}%`);
   for (const m of qbad.slice(0, 3)) fail('roll', m);
   if (!types.miniboss || !types.shrine) fail('roll', 'both encounter types should be rolled');
-  // Four types, weight 1 each: each should be about a quarter of the encounters rolled.
+  // Five types, weight 1 each: each should be about a fifth of the encounters rolled.
   const totalTypes = Object.values(types).reduce((a, b) => a + b, 0);
-  for (const t of ['miniboss', 'shrine', 'wanted', 'thief']) { const sh = (types[t] || 0) / totalTypes; if (Math.abs(sh - 0.25) > 0.02) fail('roll', `${t} is ${(sh * 100).toFixed(1)}% of encounters, want about 25%`); }
-  if (Object.keys(types).length !== 4) fail('roll', `unexpected encounter types: ${Object.keys(types).join(', ')}`);
+  for (const t of ['miniboss', 'shrine', 'wanted', 'thief', 'prisoner']) { const sh = (types[t] || 0) / totalTypes; if (Math.abs(sh - 0.2) > 0.02) fail('roll', `${t} is ${(sh * 100).toFixed(1)}% of encounters, want about 20%`); }
+  if (Object.keys(types).length !== 5) fail('roll', `unexpected encounter types: ${Object.keys(types).join(', ')}`);
   console.log(`encounter types: ${Object.entries(types).map(([t, c]) => t + ' ' + (100 * c / totalTypes).toFixed(1) + '%').join(', ')}`);
 
   // Lair layout: 300 seeds, floors 2 to 4, mini-boss forced. The door is reachable from the start with no key; the lair interior is
@@ -479,6 +479,155 @@ for (let s = 1; s <= N; s++) {
   // The same seed gives the same floor (door, room, stairs, boss, props and the tile grid).
   const sig = f => JSON.stringify([Array.from(f.tiles), f.safe, f.stairs, f.boss, f.props, f.decor.length]);
   for (let s = 1; s <= 20; s++) { const seed = (s * 2654435761) >>> 0; if (sig(safeFloor(seed)) !== sig(safeFloor(seed))) fail(`safe room, seed ${seed}`, 'a repeat of the same seed gave a different floor'); }
+}
+
+// Prisoner rescue (js/quests.js 'prisoner', gen.js opts.quest 'prisoner'): one prisoner a run, the cell layout over 300 seeds
+// (floors 2 to 4), the cell key's carrier and its obtainability, and the reward (stub inventory). Plain Node.
+{
+  const PX = vm.runInContext('({ rollQuests, makeRng, QUESTS, prisonerTalk })', ctx);
+  const deadCarriers = vm.runInContext('[...CARRY_NO]', ctx);
+  // One prisoner a run at most: over 20000 seeds, and at least one prisoner plan turns up (so the check is not vacuous).
+  let twoPrisoners = 0, prisonerPlans = 0;
+  for (let s = 1; s <= 20000; s++) {
+    const seed = (s * 2654435761) >>> 0, shop = PX.makeRng((seed ^ 0x51ed270b) >>> 0).int(1, 4);
+    const plan = PX.rollQuests(seed, 5, shop), n = Object.values(plan).filter(t => t === 'prisoner').length;
+    if (n) prisonerPlans++;
+    if (n > 1) twoPrisoners++;
+  }
+  if (twoPrisoners) fail('prisoner per run', `${twoPrisoners} of 20000 runs have two prisoner floors`);
+  if (prisonerPlans < 500) fail('prisoner per run', `only ${prisonerPlans} runs have a prisoner (check is vacuous)`);
+  console.log(`prisoner plans: ${prisonerPlans} of 20000 runs, ${twoPrisoners} with two prisoners`);
+
+  // Cell layouts: 300 seeds, floors 2 to 4, quest forced. A key is obtainable if its holder can be reached from the start through
+  // the chain of doors (a chest counts if reachable, a guard if one of its waypoints is).
+  const touch = (f, seen, x, y) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => seen[(y + dy) * f.w + x + dx]);
+  const floodSet = (f, openDoors) => {
+    const { w, h, tiles } = f, seen = new Uint8Array(w * h), q = [f.start.y * w + f.start.x]; seen[q[0]] = 1;
+    const ok = (x, y) => x >= 0 && y >= 0 && x < w && y < h && tiles[y * w + x] !== G.T_WALL && (tiles[y * w + x] !== G.T_DOOR || openDoors.has(y * w + x));
+    for (let qi = 0; qi < q.length; qi++) {
+      const i = q[qi], x = i % w, y = (i / w) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (ok(nx, ny) && !seen[ny * w + nx]) { seen[ny * w + nx] = 1; q.push(ny * w + nx); } }
+    }
+    return seen;
+  };
+  const obtainable = f => {                                  // doors that can be unlocked from the start, and the tiles reached
+    const open = new Set(); let seen = floodSet(f, open), grew = true;
+    while (grew) {
+      grew = false;
+      for (const d of f.doors) {
+        const di = d.y * f.w + d.x; if (open.has(di)) continue;
+        const chest = f.props.find(p => (p.extra || []).some(it => it.type === 'key' && it.lock === d.lock));
+        const guard = f.enemies.find(e => e.carry && e.carry.lock === d.lock);
+        const reached = chest ? touch(f, seen, chest.x, chest.y) : guard ? [{ x: guard.x, y: guard.y }, ...guard.route].some(p => seen[p.y * f.w + p.x]) : false;
+        if (reached) { open.add(di); seen = floodSet(f, open); grew = true; }
+      }
+    }
+    return { open, seen };
+  };
+  let cFit = 0, cNo = 0, plainCells = 0; const holderKinds = { guard: 0, chest: 0, patrol: 0 }, carrierTypes = {}, cBad = [], dists = [];
+  for (let s = 1; s <= 300; s++) for (let n = 2; n <= 4; n++) {
+    const seed = (s * 2654435761 + 4321) >>> 0, where = `cell seed ${seed} floor ${n}`;
+    const f = G.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'prisoner' });
+    if (f.quest) { vm.runInContext('assignEnemyTypes', ctx)(f, seed, n, THEME_NAMES[(s + n) % THEME_NAMES.length]); vm.runInContext('questSpawn', ctx)(f); }   // the game runs the type pass first
+    if (!f.quest) { cNo++; if (f.rooms.some(r => r.theme === 'cell') || f.enemies.some(e => e.qguard)) cBad.push(`${where}: no encounter, but cell pieces are left behind`); continue; }
+    cFit++;
+    const q = f.quest, cell = f.rooms.find(r => r.theme === 'cell');
+    if (q.type !== 'prisoner' || !cell || !cell.locked) { cBad.push(`${where}: no locked cell room`); continue; }
+    const door = f.doors.find(d => d.room === 'cell');
+    if (!door || door.lock !== q.lock || f.tiles[door.y * f.w + door.x] !== G.T_DOOR) { cBad.push(`${where}: cell door missing or wrong lock`); continue; }
+    const closed = flood(f, false), open = flood(f, true), at = (x, y) => y * f.w + x;
+    if (!touchable(f, closed, door.x, door.y)) cBad.push(`${where}: cell door not reachable from the start without a key`);
+    let inside = 0, leak = 0;
+    for (let y = cell.y; y < cell.y + cell.h; y++) for (let x = cell.x; x < cell.x + cell.w; x++) { if (closed[at(x, y)]) leak++; if (open[at(x, y)]) inside++; }
+    if (leak) cBad.push(`${where}: cell interior reachable without the door`);
+    if (!inside) cBad.push(`${where}: cell interior unreachable even through the door`);
+    if (!inRoom(cell, q.npc.x, q.npc.y) || (f.tiles[at(q.npc.x, q.npc.y)] === G.T_WALL || f.tiles[at(q.npc.x, q.npc.y)] === G.T_DOOR)) cBad.push(`${where}: prisoner not on open floor in the cell`);
+    const qg = f.enemies.filter(e => e.qguard);
+    if (qg.length !== 1) cBad.push(`${where}: ${qg.length} patrol guards`);
+    else {
+      const g = qg[0], j = g.route[0], d = Math.max(Math.abs(j.x - door.x), Math.abs(j.y - door.y));
+      dists.push(d);
+      if (!closed[at(j.x, j.y)]) cBad.push(`${where}: patrol approach not reachable without a key`);
+      if (!g.route.every(p => open[at(p.x, p.y)])) cBad.push(`${where}: patrol route not reachable`);
+      if (!g.route.some(p => f.rooms.some(r => !r.locked && r.theme !== 'shop' && inRoom(r, p.x, p.y)))) cBad.push(`${where}: patrol has no ordinary room on its route`);
+      if (d > 12) cBad.push(`${where}: patrol approach ${d} tiles from the cell door`);
+    }
+    const carriers = f.enemies.filter(e => e.carry && e.carry.lock === q.lock), chests = f.props.filter(p => (p.extra || []).some(it => it.type === 'key' && it.lock === q.lock));
+    if (carriers.length + chests.length !== 1) cBad.push(`${where}: ${carriers.length} carriers and ${chests.length} chests hold the cell key`);
+    for (const c of carriers) {
+      carrierTypes[c.type] = (carrierTypes[c.type] || 0) + 1;
+      if (deadCarriers.includes(c.type)) cBad.push(`${where}: key carried by a ${c.type}`);
+      if (c.qguard) holderKinds.patrol++; else holderKinds.guard++;
+    }
+    holderKinds.chest += chests.length;
+    if (q.keyOn !== (carriers.length ? 'guard' : 'chest')) cBad.push(`${where}: keyOn ${q.keyOn} does not match the holder`);
+    if (!obtainable(f).open.has(at(door.x, door.y))) cBad.push(`${where}: the cell key cannot be reached from the start`);
+    if (s <= 20) {
+      const sig = JSON.stringify([f.quest, f.enemies.filter(e => e.qguard)]);
+      const f2 = G.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'prisoner' }); vm.runInContext('assignEnemyTypes', ctx)(f2, seed, n, THEME_NAMES[(s + n) % THEME_NAMES.length]); vm.runInContext('questSpawn', ctx)(f2);
+      if (sig !== JSON.stringify([f2.quest, f2.enemies.filter(e => e.qguard)])) cBad.push(`${where}: placement changed between two runs`);
+    }
+  }
+  // The chest fallback (no other guard can carry the key): the same floors with only the patrol left, so the key goes in the chest.
+  let fallbacks = 0;
+  for (let s = 1; s <= 300; s++) for (let n = 2; n <= 4; n++) {
+    const seed = (s * 2654435761 + 4321) >>> 0, f = G.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'prisoner' });
+    if (!f.quest || !f.quest.holder) continue;
+    vm.runInContext('assignEnemyTypes', ctx)(f, seed, n, THEME_NAMES[(s + n) % THEME_NAMES.length]);
+    f.enemies = f.enemies.filter(e => e.qguard); vm.runInContext('questSpawn', ctx)(f);
+    const chest = f.props.find(p => p.x === f.quest.holder.x && p.y === f.quest.holder.y);
+    fallbacks++;
+    if (f.quest.keyOn !== 'chest' || !(chest.extra || []).some(it => it.type === 'key' && it.lock === f.quest.lock) || f.enemies.some(e => e.carry)) fail(`cell fallback seed ${seed} floor ${n}`, `keyOn ${f.quest.keyOn}, the key did not go in the chest`);
+    else if (!obtainable(f).open.has(f.doors.find(d => d.room === 'cell').y * f.w + f.doors.find(d => d.room === 'cell').x)) fail(`cell fallback seed ${seed} floor ${n}`, 'the chest key cannot be reached');
+  }
+  console.log(`prisoner key chest fallback: ${fallbacks} floors with a chest holder and no other guard`);
+  for (let s = 1; s <= 100; s++) { const f = G.generateFloor((s * 2654435761 + 11) >>> 0, 3, { armory: false, boss: false, shop: false }); if (f.rooms.some(r => r.theme === 'cell') || f.enemies.some(e => e.qguard)) plainCells++; }
+  if (plainCells) cBad.push(`${plainCells} plain floors have a cell`);
+  for (const m of cBad.slice(0, 6)) fail('prisoner cell', m);
+  if (cBad.length) fail('prisoner cell', `${cBad.length} prisoner cell checks failed in total`);
+  if (cFit < 250) fail('prisoner cell', `only ${cFit} of 900 floors fit the cell`);
+  console.log(`prisoner cells: ${cFit} floors fit, ${cNo} did not; key holders ${JSON.stringify(holderKinds)}; carriers ${JSON.stringify(carrierTypes)}; patrol approach at most ${dists.length ? Math.max(...dists) : 0} tiles from the door`);
+
+  // Reward (prisonerTalk) with a stub inventory: gear, potion or gold by weight; gear Rare+ and a tier better from floor 3;
+  // gold 60 to 120 plus 20 a floor; potion kinds and count; paid once; a full pack keeps the reward for the next talk.
+  const stub = { got: [], msgs: [], full: false };
+  ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; }, has: () => false };
+  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {}; ctx.addLog = () => {};
+  const P = vm.runInContext('QUESTS', ctx).prisoner, rbad = [];
+  const tierSum = { 2: 0, 3: 0 }, tierN = { 2: 0, 3: 0 }, kinds = { gear: 0, potion: 0, gold: 0 }, NR = 3000;
+  for (const fl of [2, 3]) for (let i = 0; i < NR; i++) {
+    ctx.runSeed = (i * 2246822519 + fl * 31) >>> 0; stub.got = [];
+    vm.runInContext(`prisonerRun = { floor: ${fl}, paid: false, reward: null }`, ctx);
+    PX.prisonerTalk({ p: {} });
+    const d = stub.got[0];
+    if (!d) { rbad.push('no reward'); continue; }
+    if (d.type === 'potion') { kinds.potion++; if (d.n !== P.potionN || !P.potionKinds.includes(d.kind)) rbad.push('potion off the list'); }
+    else if (d.type === 'gold') { kinds.gold++; if (d.n < P.goldMin + P.goldPerFloor * fl || d.n > P.goldMax + P.goldPerFloor * fl) rbad.push(`gold ${d.n} on floor ${fl}`); }
+    else { kinds.gear++; if (!['weapon', 'armor', 'shield'].includes(d.type) || d.tier < P.gearMinTier) rbad.push('gear below Rare'); tierSum[fl] += d.tier; tierN[fl]++; }
+  }
+  for (const k of Object.keys(kinds)) if (Math.abs(kinds[k] / (2 * NR) - 1 / 3) > 0.03) fail('prisoner reward', `${k} is ${(100 * kinds[k] / (2 * NR)).toFixed(1)}%, want about 33%`);
+  const mean2 = tierSum[2] / tierN[2], mean3 = tierSum[3] / tierN[3];
+  if (!(mean3 > mean2 + 0.1)) fail('prisoner reward', `gear tier floor 3 ${mean3.toFixed(2)} should beat floor 2 ${mean2.toFixed(2)}`);
+  if (rbad.length) fail('prisoner reward', `${rbad.length} bad rewards, e.g. ${rbad[0]}`);
+  console.log(`prisoner reward: gear ${kinds.gear}, potion ${kinds.potion}, gold ${kinds.gold}; mean gear tier floor 2 ${mean2.toFixed(2)}, floor 3 ${mean3.toFixed(2)}`);
+  // Paid once; a full pack keeps the reward for the next talk.
+  vm.runInContext('prisonerRun = { floor: 2, paid: false, reward: null }', ctx);
+  stub.got = []; PX.prisonerTalk({ p: {} }); const first = stub.got.length;
+  PX.prisonerTalk({ p: {} }); const second = stub.got.length;
+  if (first !== 1 || second !== 1) fail('prisoner paid once', `${first} then ${second} rewards`);
+  vm.runInContext('prisonerRun = { floor: 2, paid: false, reward: null }', ctx);
+  stub.full = true; stub.got = []; PX.prisonerTalk({ p: {} });
+  const heldPaid = vm.runInContext('prisonerRun.paid', ctx), fullMsg = stub.msgs[stub.msgs.length - 1] || '';
+  stub.full = false; PX.prisonerTalk({ p: {} });
+  if (heldPaid || !/Make room/.test(fullMsg) || stub.got.length !== 1) fail('prisoner full pack', `paid ${heldPaid}, message "${fullMsg}", rewards ${stub.got.length}`);
+  // Lines: before the key, with the key, freed (unpaid), chest holder, and after the reward.
+  const L = vm.runInContext('QUEST_TYPES', ctx).prisoner.line;
+  vm.runInContext('prisonerRun = { floor: 2, paid: false, reward: null }', ctx);
+  const q0 = { type: 'prisoner', lock: 3, keyOn: 'guard', freed: false };
+  const l0 = L({ quest: q0 }); ctx.inv.has = () => true; const l1 = L({ quest: q0 }); ctx.inv.has = () => false;
+  const l2 = L({ quest: { ...q0, freed: true } }), lc = L({ quest: { ...q0, keyOn: 'chest' } });
+  vm.runInContext('prisonerRun.paid = true', ctx); const l3 = L({ quest: { ...q0, freed: true } });
+  if (!/a guard carries it/.test(l0) || !/You have the cell key/.test(l1) || !/Meet them in the safe room/.test(l2) || !/it is in a chest/.test(lc) || l3 !== '') fail('prisoner line', JSON.stringify([l0, l1, l2, lc, l3]));
 }
 
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);

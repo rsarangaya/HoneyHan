@@ -1,11 +1,11 @@
 // Encounters (js/quests.js): the locked mini-boss room and the shrine bargain, in the running game. Run on its own:
 // node tests/game.quests.test.js. The layouts and the roll are checked in plain Node by tests/gen.test.js.
-// Seeds (found with generateFloor and rollQuests, themes included): seed 29 has the mini-boss on floor 2 (the lair key is on a
+// Seeds (found with generateFloor and rollQuests, themes included): seed 38 has the mini-boss on floor 2 (the lair key is on a
 // reachable chest); seed 23 has the shrine on floor 4 and no encounter on floor 1. The wanted guard (defector, target, reward) is
-// checked on seed 10 floor 2, and the sack thief (wander, flee, cornered, escape, kills, sack) on seed 4 floor 2 (see the end of the run).
+// checked on seed 10 floor 2, and the sack thief (wander, flee, cornered, escape, kills, sack) on seed 401 floor 2 (see the end of the run).
 // The flee checks use free tiles and the thief's own collider; one check there is a known defect and fails on purpose (see its comment).
 const { run } = require('./lib');
-const MINI_SEED = 29, MINI_FLOOR = 2, SHRINE_SEED = 23;   // seed 29: mini-boss on floor 2; seed 23: shrine on floor 4
+const MINI_SEED = 38, MINI_FLOOR = 2, SHRINE_SEED = 23;   // seed 38: mini-boss on floor 2; seed 23: shrine on floor 4
 
 // Page-side helpers: hold or release E, face a prop (1.1 m off), open and close the inventory with Tab / Escape.
 const QH = () => {
@@ -33,7 +33,7 @@ const QH = () => {
 };
 
 run('Encounters: the mini-boss room and the shrine bargain', async ({ open, check }) => {
-  // ---- The locked mini-boss room (seed 29, floor 2) ----
+  // ---- The locked mini-boss room (seed 38, floor 2) ----
   const mini = await open(MINI_SEED);
   await mini.evaluate(QH);
   const m = await mini.evaluate(async n => {
@@ -162,7 +162,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   // ---- The wanted guard (seed 10: defector on floor 2; floor 4 is its shop floor) and the sack thief (seed 4: thief on floor 2) ----
   // Each case starts a fresh floor from the same run seed. A fight runs inside one evaluate call (no frames in between), so the
   // swings, shots and stabs land exactly where the test put the enemy. Frames still run between calls (Hold E, escapes, corpses).
-  const WANT_SEED = 10, THIEF_SEED = 4;
+  const WANT_SEED = 10, THIEF_SEED = 401;
   const WH = () => {
     const inR = (r, p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
     const dist = (e, P) => Math.hypot(e.x - P.x, e.z - P.z);
@@ -479,4 +479,165 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   const tA = await tsig(TH), tB = await tsig(TH2);
   check('a seeded sack thief repeats: the same route and start on a second run', tA === tB, tA.slice(0, 100));
   await TH2.close(); await TH.close();
+  // ---- The prisoner rescue (seeds 113 and 4 on floor 2, 13 on floor 3: the cell fits and the key sits on a guard; found with generateFloor) ----
+  // The cell door and body, the untargetable captive, the key from a melee kill and a sneak kill, the door, the walk to the stairs (fixed
+  // steps, every step checked against solid props), the frame hook (no work when nothing walks), the safe-room reward: paid once, kept across floors.
+  {
+    const PH = () => {
+      window.PR = {
+        place(e, d, facing) {
+          const P = game.player, f = game.floor;
+          for (const dd of [d, d - 0.5, d + 0.5, 2]) {
+            const x = P.x - Math.sin(P.yaw) * dd, z = P.z - Math.cos(P.yaw) * dd;
+            if (!P.blocked(f, x, z)) { e.x = x; e.z = z; e.yaw = facing === 'away' ? P.yaw : Math.atan2(-(P.x - x), -(P.z - z)); e.sync(0); return true; }
+          }
+          return false;
+        },
+        cellDoor: () => propObjs.find(o => o.p.room === 'cell'),
+        corpseWithKey: () => propObjs.find(o => o.p.kind === 'corpse' && (o.p.extra || []).some(it => it.type === 'key')),
+        frames: async n => { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); },
+        // Walks the freed prisoner with fixed 1/60 s steps (no frames run inside this call) until it is gone or 90 s of game time pass.
+        walk() {
+          const F = floor, e = F.quest.cell.e, T = TILE, S = F.stairs, out = { steps: 0, through: 0 };
+          collider.props = F.solids;
+          const x0 = e.x, z0 = e.z, t0 = performance.now(), log0 = pending.length;
+          while (prisonerWalk && out.steps < 60 * 90) {
+            prisonerStep(1 / 60); out.steps++;
+            if (prisonerWalk && Player.prototype.blocked.call(collider, F, e.x, e.z)) out.through++;   // inside a solid prop or a wall
+          }
+          out.ms = (performance.now() - t0) / Math.max(1, out.steps);
+          out.moved = Math.hypot(e.x - x0, e.z - z0);
+          out.gone = !prisonerWalk && !e.mesh.visible;
+          out.nearStairs = Math.max(Math.abs(Math.floor(e.x / T) - S.x), Math.abs(Math.floor(e.z / T) - S.y)) <= 1;
+          out.slipLog = document.getElementById('log').textContent.includes('slips down the stairs');
+          out.noise = pending.length - log0;                                             // what guards would hear: nothing from the walk
+          return out;
+        },
+      };
+    };
+    const SEEDS = [[113, 2], [4, 2], [13, 3]];
+    const walks = [];
+    for (const [seed, n] of SEEDS) {
+      const pg = await open(seed);
+      await pg.evaluate(QH); await pg.evaluate(PH);
+      if (seed === 113) await pg.evaluate(() => { window.psCalls = 0; const real = prisonerStep; window.prisonerStep = dt => { psCalls++; return real(dt); }; });
+      const info = await pg.evaluate(async n => {
+        game.startFloor(n);
+        const q = floor.quest, out = { type: q && q.type };
+        if (!q || q.type !== 'prisoner') return out;
+        const body = q.cell.o, d = PR.cellDoor();
+        out.keyOn = q.keyOn; out.doorLabel = d ? targetInfo(d).label : null;
+        out.bodySolid = floor.solids.includes(q.cell.sol); out.bodyInProps = propObjs.includes(body);
+        out.enemyListHasPrisoner = enemies.some(e => e.type === 'prisoner');
+        Qs.face(body);
+        out.bodyTargetInfo = !!targetInfo(body); out.bodyLookTarget = lookTarget() === body;
+        out.line = questLine(floor);
+        if (typeof psCalls === 'number') { const c0 = psCalls; for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r)); out.idleCalls = psCalls - c0; }
+        return out;
+      }, n);
+      check(`seed ${seed}: floor ${n} has a prisoner; the cell door says it needs the Cell Key; the body is solid, not an enemy, not a target`,
+        info.type === 'prisoner' && /Cell Key/.test(info.doorLabel || '') && info.bodySolid && info.bodyInProps && !info.enemyListHasPrisoner && !info.bodyTargetInfo && !info.bodyLookTarget,
+        JSON.stringify(info));
+      check(`seed ${seed}: the Optional line says where the key is`, /a guard carries it|it is in a chest/.test(info.line || ''), info.line);
+      if (seed === 113) check('before the cell opens, the frame loop calls the walk step zero times in 20 frames', info.idleCalls === 0, `${info.idleCalls} calls`);
+
+      // Untargetable: swings, a bow shot and a blast right on the captive leave it whole, and the body stays put.
+      const hit = await pg.evaluate(() => {
+        const q = floor.quest, e = q.cell.e, hp0 = e.hp, body = q.cell.o, P = game.player;
+        game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 }); game.inv.hp = game.inv.maxHp;
+        Qs.face(body); P.keys = {};
+        for (let i = 0; i < 40; i++) playerHit();
+        game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'bow', tier: 0 }); game.inv.arrows = 20;
+        P.pitch = 0; fireArrow(1);
+        for (let k = 0; k < 900 && arrows.some(a => a.owner === 'player' && !a.stuck); k++) updateArrows(1 / 120);
+        explodeAt(e.x, e.z, null);
+        return { hp: e.hp, hp0, dead: !!e.dead, body: propObjs.includes(body) };
+      });
+      check(`seed ${seed}: the prisoner takes no damage from a sword, an arrow or a blast`, hit.hp === hit.hp0 && !hit.dead && hit.body, JSON.stringify(hit));
+
+      if (seed === 113) {
+        // The key from a melee kill of the guard that carries it: an awake fight, then the corpse with the key on it.
+        const kill = await pg.evaluate(async () => {
+          const c = enemies.find(e => e.spec.carry);
+          if (!c) return { found: false };
+          game.inv.hp = game.inv.maxHp; game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+          PR.place(c, 1.2, 'toward'); c.set('alerted'); c.last = { x: game.player.x, z: game.player.z };
+          for (let i = 0; i < 80 && !c.dead; i++) playerHit();
+          const done = await T.until(() => c.corpseDone, 5000);
+          return { found: true, dead: c.dead, done, corpse: !!PR.corpseWithKey() };
+        });
+        check('the guard carrying the cell key dies to a melee kill and leaves a corpse with the key on it', kill.found && kill.dead && kill.done && kill.corpse, JSON.stringify(kill));
+        const loot = await pg.evaluate(async () => {
+          const c = PR.corpseWithKey(); Qs.face(c); Qs.key(true);
+          const ok = await T.until(() => game.inv.has('key', floor.quest.lock), 15000); Qs.key(false);
+          return { ok, line: questLine(floor) };
+        });
+        check('searching that corpse puts the cell key in the pack and the line says so', loot.ok && /You have the cell key/.test(loot.line), JSON.stringify(loot));
+        // A sneak stab from behind kills the carrier too: a fresh floor 2 (same seed, same carrier).
+        const sneak = await pg.evaluate(() => {
+          game.startFloor(2);
+          const c = enemies.find(e => e.spec.carry);
+          if (!c) return { found: false };
+          game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+          PR.place(c, 1.2, 'away'); c.set('unaware'); c.aware = 0; c.last = null; c.seen = false;
+          playerHit();
+          return { found: true, dead: c.dead, corpse: !!PR.corpseWithKey() };
+        });
+        check('a sneak stab on the key guard kills it and leaves the key on its corpse', sneak.found && sneak.dead && sneak.corpse, JSON.stringify(sneak));
+      } else {
+        await pg.evaluate(() => game.inv.add({ type: 'key', lock: floor.quest.lock, label: 'Cell Key' }));   // the key, as if looted
+      }
+
+      // Free it: hold E on the cell door with the key. The line says it is free and due in the safe room.
+      const freed = await pg.evaluate(async () => {
+        const o = PR.cellDoor(), q = floor.quest, c = q.cell.e;
+        Qs.face(o); Qs.key(true);
+        const ok = await T.until(() => q.freed, 15000); Qs.key(false);
+        return { ok, line: questLine(floor), doorTile: floor.tiles[o.p.y * floor.w + o.p.x], walking: !!prisonerWalk, visible: c.mesh.visible };
+      });
+      check(`seed ${seed}: holding E with the key opens the cell; the prisoner is free and walking`, freed.ok && freed.walking && freed.visible && freed.doorTile === 1 && /You freed the prisoner/.test(freed.line), JSON.stringify(freed));
+
+      // The walk: reaches the stairs and is gone within 90 s of game time, never inside a solid prop, and makes no noise.
+      const w = await pg.evaluate(() => PR.walk());
+      walks.push({ seed, ...w });
+      check(`seed ${seed}: the freed prisoner reaches the stairs and is gone within 90 s, through no solid prop`,
+        w.gone && w.nearStairs && w.slipLog && w.through === 0 && w.steps < 60 * 90 && w.moved > 3 && w.noise === 0,
+        `${(w.steps / 60).toFixed(1)} s, moved ${w.moved.toFixed(1)} m, solid contacts ${w.through}, noise ${w.noise}, near stairs ${w.nearStairs}, log ${w.slipLog}`);
+
+      if (seed === 113) {
+        // The safe room after the boss: the prisoner stands inside the room, prompts, and survives leaving and coming back.
+        const boss = await pg.evaluate(async () => {
+          game.startFloor(5);
+          const b = enemies.find(e => e.boss); b.hp = 1;
+          dealHit(b, 'body', 20, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0);
+          const open = await T.until(() => floor.safe && floor.safe.open, 4000);
+          const r = floor.safe.rect, o = propObjs.find(p => p.p.who === 'prisoner'), out = { open, has: !!o };
+          if (!o) return out;
+          const tx = Math.floor(o.x / TILE), ty = Math.floor(o.z / TILE);
+          out.inRoom = tx >= r.x0 && tx <= r.x1 && ty >= r.y0 && ty <= r.y1 && !(tx === floor.stairs.x && ty === floor.stairs.y);
+          out.label = targetInfo(o).label; out.line = questLine(floor);
+          changeFloor(4, 'up'); changeFloor(5, 'down');
+          out.kept = propObjs.some(p => p.p.who === 'prisoner') && !prisonerRun.paid;
+          return out;
+        });
+        check('the safe room after the boss holds the freed prisoner inside the room, with a reward prompt and a line', boss.open && boss.has && boss.inRoom && /Take the prisoner/.test(boss.label) && /waits in the safe room/.test(boss.line || ''), JSON.stringify(boss));
+        check('after leaving the boss floor and coming back, the prisoner is still there and unpaid', boss.kept, JSON.stringify(boss));
+        const pay = await pg.evaluate(async () => {
+          const o = propObjs.find(p => p.p.who === 'prisoner'), I = game.inv;
+          const snap = () => JSON.stringify({ pack: I.pack.map(i => i.id), gold: I.gold, arrows: I.arrows });
+          const before = snap();
+          Qs.face(o); Qs.key(true);
+          const paid = await T.until(() => prisonerRun.paid, 15000); Qs.key(false);
+          const got = snap(), line = questLine(floor);
+          Qs.face(o); Qs.key(true); await PR.frames(20); Qs.key(false);            // a second hold: nothing more
+          return { paid, changed: got !== before, line, once: snap() === got, opened: !!o.p.opened, msg: document.getElementById('msg').textContent };
+        });
+        check('holding E pays the reward once: the pack, gold or arrows change, the line clears, a second hold pays nothing', pay.paid && pay.changed && pay.line === '' && pay.once && pay.opened, JSON.stringify(pay));
+        const idleAfter = await pg.evaluate(async () => { const c0 = psCalls; await PR.frames(20); return psCalls - c0; });
+        check('after the walk, the frame loop calls the walk step zero times in 20 frames', idleAfter === 0, `${idleAfter} calls`);
+      }
+      await pg.close();
+    }
+    for (const w of walks) console.log(`prisoner walk seed ${w.seed}: ${(w.steps / 60).toFixed(1)} s game time, ${w.ms.toFixed(4)} ms per step (budget: well under 0.1 ms a step)`);
+  }
 });

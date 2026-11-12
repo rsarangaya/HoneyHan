@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-17';   // bumped so old saved values don't override the new defaults (last: wanted guard and sack thief numbers)
+  const KEY = 'prototype-test-tune-18';   // bumped so old saved values don't override the new defaults (last: prisoner rescue numbers)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -19,6 +19,7 @@ const tunePanel = (() => {
     ['mini-boss reward', QUESTS.miniboss, [['minTier', 1], ['goldMin', 1], ['goldMax', 1], ['goldPerFloor', 1], ['potion', 0.05]]],
     ['wanted guard reward', QUESTS.wanted, [['potionShare', 0.05], ['potionN', 1], ['gearMinTier', 1]]],
     ['sack thief', QUESTS.thief, [['goldMin', 1], ['goldMax', 1], ['goldPerFloor', 1], ['minTier', 1], ['think', 0.1], ['escapeDist', 0.1], ['stairsBonus', 1], ['keep', 1], ['giveUp', 0.5]]],
+    ['prisoner rescue', QUESTS.prisoner, [['gearWeight', 0.5], ['potionWeight', 0.5], ['goldWeight', 0.5], ['gearMinTier', 1], ['potionN', 1], ['goldMin', 1], ['goldMax', 1], ['goldPerFloor', 1], ['speed', 0.1], ['think', 0.1], ['wait', 0.1]]],
     ['shrine bargain', QUESTS.shrine, [['priceHp', 0.5], ['priceGear', 0.5], ['pricePotions', 0.5], ['boonWeapon', 0.5], ['boonStamina', 0.5], ['boonTreasure', 0.5], ['hpLoss', 1], ['minMaxHp', 5], ['stamBonus', 0.05], ['weaponMinTier', 1], ['weaponMaxTier', 1]]],
     ['mimic', MIMIC, [['springWind', 0.05], ['springReach', 0.1]]],
     ['archer shots', ENEMY_TYPES.archer.ranged, [['min', 0.5], ['max', 0.5], ['wind', 0.05], ['cd', 0.1], ['speed', 1]]],

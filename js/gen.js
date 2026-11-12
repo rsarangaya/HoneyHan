@@ -74,6 +74,7 @@ const LOCKED_ROOMS = {
   vault:      { w: 5, h: 5, theme: 'vault',      name: 'vault',   key: 'Vault Key' },
   brewery:    { w: 6, h: 5, theme: 'lockedbrew', name: 'brewery', key: 'Brewery Key' },
   lair:       { w: 6, h: 5, theme: 'lair',       name: 'lair',    key: 'Lair Key' },       // the mini-boss room (opts.quest = 'miniboss'), never rolled as a plain locked room
+  cell:       { w: 4, h: 4, theme: 'cell',       name: 'cell',    key: 'Cell Key' },       // the prisoner's cell (opts.quest = 'prisoner'), likewise
 };
 const NEIGH8 = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]];
 
@@ -87,7 +88,7 @@ function roomPoint(f, r, k) {
 }
 
 // opts.armory: this floor must contain the armory (retries with new layouts until it fits). opts.quest: an encounter
-// type from js/quests.js ('miniboss', 'shrine', 'wanted' or 'thief'); the layout is retried until it fits, and floor.quest describes it.
+// type from js/quests.js ('miniboss', 'shrine', 'wanted', 'thief' or 'prisoner'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
@@ -369,7 +370,7 @@ function layoutFloor(seed, floorNum, opts) {
         const dx = s.ex + s.dx, dy = s.ey + s.dy;
         set(dx, dy, T_DOOR);
         const room = mk(x, y, rw, rh);
-        room.theme = spec.theme; room.locked = true; room.lock = lock; room.entry = { x: s.ex, y: s.ey };
+        room.theme = spec.theme; room.locked = true; room.lock = lock; room.entry = { x: s.ex, y: s.ey }; room.join = { x: hx, y: hy };   // join: the open floor tile outside the corridor
         rooms.push(room);
         doors.push({ x: dx, y: dy, axis: s.dx !== 0 ? 'x' : 'z', lock, room: spec.name, keyLabel: spec.key });
         return room;
@@ -588,16 +589,20 @@ function layoutFloor(seed, floorNum, opts) {
   // ---- encounters (js/quests.js picks the floor and the type): drawn last, so floors without one are identical to before.
   // miniboss: one more locked room (the lair) whose key goes into an ordinary chest. shrine: one of the shrine rooms' altars. ----
   let quest = null;
-  if (opts.quest === 'miniboss') {
-    const holder = rng.shuffle(props.filter(p => (p.kind === 'chest' || p.kind === 'barrel' || p.kind === 'rubble') && !p.holdsKey && !p.mimic && !p.locked && !p.trap && !inShop(p) && !rooms.some(r => r.locked && p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h)))
-      .sort((p, q) => (p.kind === 'chest' ? 0 : 1) - (q.kind === 'chest' ? 0 : 1))[0];   // a chest, or a barrel or rubble pile turned into one
+  // late placement of a locked room (lair, cell): the join tile must be open floor reachable from the start without keys, with nothing on it
+  const lateAvoid = () => {
     const seen = new Uint8Array(w * h), fq = [start.y * w + start.x];   // floor reachable from the start without keys
     seen[fq[0]] = 1;
     for (let n = 0; n < fq.length; n++) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = fq[n] % w + dx, ny = ((fq[n] / w) | 0) + dy, ni = ny * w + nx;
       if (!wallAt(nx, ny) && !seen[ni] && !blocked[ni] && at(nx, ny) !== T_DOOR && !(nx === stairs.x && ny === stairs.y)) { seen[ni] = 1; fq.push(ni); }
     }
-    const avoid = (x, y) => at(x, y) !== T_FLOOR || !seen[y * w + x] || blocked[y * w + x] || used.has(y * w + x) || props.some(p => p.x === x && p.y === y);
+    return (x, y) => at(x, y) !== T_FLOOR || !seen[y * w + x] || blocked[y * w + x] || used.has(y * w + x) || props.some(p => p.x === x && p.y === y);
+  };
+  if (opts.quest === 'miniboss') {
+    const holder = rng.shuffle(props.filter(p => (p.kind === 'chest' || p.kind === 'barrel' || p.kind === 'rubble') && !p.holdsKey && !p.mimic && !p.locked && !p.trap && !inShop(p) && !rooms.some(r => r.locked && p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h)))
+      .sort((p, q) => (p.kind === 'chest' ? 0 : 1) - (q.kind === 'chest' ? 0 : 1))[0];   // a chest, or a barrel or rubble pile turned into one
+    const avoid = lateAvoid();
     const room = holder && placeLocked('lair', wanted.length + 1, 6000, avoid);   // lock ids 1..wanted.length are taken by the planned locked rooms, even ones that failed to place
     if (room) {
       holder.kind = 'chest'; if (holder.tier === undefined) holder.tier = pickWeighted([0, 1, 2], chestTierWeights(floorNum).slice(0, 3));
@@ -650,6 +655,25 @@ function layoutFloor(seed, floorNum, opts) {
     if (homes.length >= 2) {
       const a = rng.pick(homes), b = rng.pick(homes.filter(r => r !== a));
       quest = { type: 'thief', route: [roomPoint(f, a, 2), roomPoint(f, b, 6)], seed: seedOf() };
+    }
+  } else if (opts.quest === 'prisoner') {
+    // a small locked cell (placed last, like the lair) holding the captive, on the tile farthest from its door. One extra guard patrols
+    // between the cell's approach and the nearest ordinary room. quest.holder: a chest that takes the cell key if no other guard can carry it (quests.js).
+    const holder = rng.shuffle(props.filter(p => p.kind === 'chest' && !p.holdsKey && !p.mimic && !p.locked && !p.trap && !inShop(p) && !rooms.some(r => r.locked && p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h)))[0];
+    const room = placeLocked('cell', wanted.length + 1, 6000, lateAvoid());
+    if (room) {
+      const e = room.entry, door = doors[doors.length - 1], jn = room.join;
+      let npc = { x: room.cx, y: room.cy }, far = -1;
+      for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++) { const d = Math.hypot(x - e.x, y - e.y); if (d > far) { far = d; npc = { x, y }; } }
+      const lit = [];
+      for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++)
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy) && at(x + dx, y + dy) !== T_DOOR) lit.push({ x, y, dx, dy });
+      rng.shuffle(lit);
+      for (let i = 0; i < lit.length; i++) if (torches.every(t => Math.hypot(t.x - lit[i].x, t.y - lit[i].y) >= 3)) { torches.push(lit[i]); break; }   // one wall torch (the light pool is unchanged)
+      for (const [x, y] of [[room.x, room.y], [room.x + room.w - 1, room.y + room.h - 1]]) if (x !== npc.x || y !== npc.y) decor.push({ kind: 'bones', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+      const near = rooms.filter(r => !r.locked && r.theme !== 'shop').sort((a, b) => Math.hypot(a.cx - jn.x, a.cy - jn.y) - Math.hypot(b.cx - jn.x, b.cy - jn.y))[0];
+      enemies.push({ x: jn.x, y: jn.y, route: [jn, roomPoint(f, near, 3)], seed: seedOf(), qguard: true });
+      quest = { type: 'prisoner', lock: room.lock, npc, door: { x: door.x, y: door.y }, holder: holder ? { x: holder.x, y: holder.y } : null, seed: seedOf() };
     }
   }
 

@@ -83,7 +83,7 @@ console.log(`chest gold by grade: ${goldAvg.map(v => v.toFixed(0)).join(', ')}; 
 
 // every theme has a boss, every type a name and (for the new ones) glossary text
 for (const t of THEMES) { n++; if (!vm.runInContext(`THEME_BOSS[${JSON.stringify(t)}]`, ctx)) fail(t, 'no boss'); }
-for (const [k, v] of Object.entries(L.ENEMY_TYPES)) { n++; if (!v.name) fail(k, 'no name'); if (!['goblin', 'cook', 'bandit', 'rat', 'wolf', 'archer', 'shaman', 'brute', 'bouncer', 'defector'].includes(k) && !(v.info && v.info.length)) fail(k, 'no glossary text'); }
+for (const [k, v] of Object.entries(L.ENEMY_TYPES)) { n++; if (!v.name) fail(k, 'no name'); if (!['goblin', 'cook', 'bandit', 'rat', 'wolf', 'archer', 'shaman', 'brute', 'bouncer', 'defector', 'prisoner'].includes(k) && !(v.info && v.info.length)) fail(k, 'no glossary text'); }
 
 // loot per type
 const rng = seed => L.makeRng(seed);

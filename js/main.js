@@ -630,9 +630,9 @@ function makeCorpse(e, sneak) {
   e.corpseDone = true;
   if (e.T.mimic) return mimicCorpse(e);
   const bonus = sneak ? 0.15 : 0;
-  if (!dryRoll(() => rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot) return;
+  if (!dryRoll(() => rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot && !e.spec.carry) return;
   propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot ? [{ type: 'gold', n: e.loot }] : undefined },
+    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot || e.spec.carry ? [...(e.loot ? [{ type: 'gold', n: e.loot }] : []), ...(e.spec.carry ? [e.spec.carry] : [])] : undefined },   // stolen gold, and the cell key a prisoner quest guard carries
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
 }
@@ -985,7 +985,7 @@ function targetInfo(o) {
     if (o.p.locked) { const pk = inv.pack.find(i => i.type === 'lockpick'); return pk ? { label: `Pick the lock of the ${CHEST_NAMES[t]} (${pk.n} lockpick${pk.n > 1 ? 's' : ''})`, time: LOCKPICK.time } : { label: `Locked: needs a lockpick, or smash it with a weapon`, time: 0, locked: true }; }
     return player.crouching ? { label: `Search carefully: ${CHEST_NAMES[t]}`, time: base * TRAP.disarmMul } : { label: `Open ${CHEST_NAMES[t]}`, time: base };   // crouched is slower for every chest, so the bar never gives a trap away (a trapped one is then disarmed)
   }
-  if (o.p.kind === 'questnpc') return { label: questPrompt(floor), time: PROP_INFO.questnpc.time };
+  if (o.p.kind === 'questnpc') return { label: questPrompt(floor, o), time: PROP_INFO.questnpc.time };
   const pi = PROP_INFO[o.p.kind];
   return player.crouching && (o.p.kind === 'barrel' || o.p.kind === 'rubble') ? { label: 'Search carefully', time: pi.time * TRAP.disarmMul } : pi;
 }
@@ -1011,7 +1011,7 @@ const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3,
 function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
   if (o.p.kind === 'altar') { dealUI.open(o); return; }
-  if (o.p.kind === 'questnpc') { questTalk(); return; }
+  if (o.p.kind === 'questnpc') { questTalk(o); return; }
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
     discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
@@ -1380,6 +1380,7 @@ function frame(now) {
     updateRespawn(dt);
     updateArrows(dt);
     updateDoors(dt);
+    if (prisonerWalk) prisonerStep(Math.min(dt, 0.05));                                // a freed prisoner on its way to the stairs (js/quests.js): only while one is walking
     const events = pending.splice(0);              // noises guards made last frame
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * HUSH }); rings.push({ x: player.x, z: player.z, r: pulse * HUSH, t: 0 }); }

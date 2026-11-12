@@ -236,6 +236,7 @@ class Enemy {
     torsoPart(0.56, 0.7, 0.34, cloth, 0, 0.35, 0, up);                                           // torso
     part(0.58, 0.08, 0.35, leather, 0, 0.1, 0);                                                  // belt
     part(0.1, 0.08, 0.02, metal, 0, 0.1, -0.18);                                                 // buckle
+    if (this.spec.carry) { const gold = lam(0xe8c040); part(0.035, 0.14, 0.02, gold, 0.2, -0.02, -0.19); part(0.1, 0.07, 0.02, gold, 0.2, 0.07, -0.19); part(0.06, 0.025, 0.02, gold, 0.23, -0.07, -0.19); }   // a small gold key hanging on the belt (the quest key, see QUEST_TYPES.prisoner)
     part(0.46, 0.3, 0.05, cloth, 0, -0.04, -0.17);                                               // loincloth
     if (vest) {
       const vm = metalFor(vest);
@@ -339,6 +340,9 @@ class Enemy {
     } else if (this.type === 'defector') {
       part(0.44, 0.34, 0.44, lam(0x3a3a4a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x3a3a4a), 0, 0.9, 0.2);        // a grey hood
       part(0.6, 0.78, 0.38, lam(0x4a4a58), 0, 0.35, 0); part(0.64, 0.5, 0.38, lam(0x4a4a58), 0, -0.18, 0);        // a long travelling cloak
+    } else if (this.type === 'prisoner') {
+      for (const a of this.arms) box(0.21, 0.08, 0.21, metal, 0, -0.55, 0, a);                                                    // iron shackles on both wrists
+      part(0.6, 0.18, 0.37, lam(0x5a4a34), 0, 0.5, 0); part(0.34, 0.08, 0.34, lam(0x5a4a34), 0, 1.08, 0);                         // a ragged shirt and a tattered rag on the head
     } else if (this.type === 'bomber') {
       ellPart(0.3, 0.3, 0.3, black, 0, -0.8, -0.12, this.arms[0]); cylPart(0.03, 0.03, 0.07, metal, 0, -0.63, -0.12, this.arms[0]); cylPart(0.014, 0.014, 0.12, leather, 0, -0.58, -0.12, this.arms[0]);   // a round black bomb in the off hand with a fuse
       const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = new THREE.SphereGeometry(0.055, 6, 5)), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
