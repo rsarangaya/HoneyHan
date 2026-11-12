@@ -172,8 +172,11 @@ class Enemy {
     this.foe = null; this.isAlly = this.type === 'ally';             // foe: the ally this enemy is fighting instead of the player (js/quests.js sets it)
     this.seed = spec.seed;
     const fl = this.boss ? 0 : Math.max(0, (typeof floorNum === 'number' ? floorNum : 1) - 1);   // floor scaling, once at spawn (boss excluded)
-    this.dmgScale = 1 + TUNE.floorDmgScale * fl;
-    this.hp = this.maxHp = this.boss ? TUNE.bossHp : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl); this.stun = 0; this.hitT = 0;
+    const sg = Math.max(0, (typeof stage === 'number' ? stage : 1) - 1);   // stage scaling, once at spawn (js/main.js: stage 1..4, 5 is the final boss arena)
+    this.final = !!spec.final;
+    this.dmgScale = (1 + TUNE.floorDmgScale * fl) * (1 + TUNE.stageDmgScale * sg);
+    this.bossDmg = this.final ? TUNE.finalBossDmg : 1 + TUNE.stageBossDmg * sg;
+    this.hp = this.maxHp = this.boss ? TUNE.bossHp * (this.final ? TUNE.finalBossHp : 1 + TUNE.stageBossHp * sg) : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl) * (1 + TUNE.stageHpScale * sg); this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
     this.dead = false; this.deadT = 0;
     this.build();
@@ -193,7 +196,7 @@ class Enemy {
     this.mats = [skin, dark, cloth, leather, metal, bone, black];
     // Random kit: each piece is a real item (same classes and tiers the player finds). What the
     // guard wears is drawn on the model, soaks up damage in that zone, and is what it can drop.
-    const tierOf = () => rollTier(typeof floorNum === 'number' ? floorNum : 1, rg);
+    const tierOf = () => rollTier(typeof effFloor === 'function' ? effFloor() : typeof floorNum === 'number' ? floorNum : 1, rg);   // effFloor: floor + stage loot depth (js/main.js)
     const piece = (slot, chance) => rg() < chance ? { type: 'armor', slot, cls: weighted(rg, [50, 35, 15]), tier: tierOf() } : null;
     const heavy = slot => ({ type: 'armor', slot, cls: 2, tier: 2 });          // the boss, captains and ice knights wear full plate (Rare)
     const plate = this.boss || this.T.heavy;
@@ -213,7 +216,7 @@ class Enemy {
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
-    m.scale.setScalar(this.boss ? BOSS_SCALE : this.T.scale || 0.92 + rg() * 0.2);
+    m.scale.setScalar(this.boss ? BOSS_SCALE * (this.final ? TUNE.finalBossScale : 1) : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
     if (this.T.model === 'float') this.buildFloat(m, lam);
     else if (this.T.model === 'mimic') this.buildMimic(m);
@@ -573,7 +576,7 @@ class Enemy {
   get windT_() { if (this.windOvr) return this.windOvr; if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
   get reach() { return TUNE.enemyReach * (this.boss ? TUNE.bossReachMul : this.T.reach); }
   get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
-  get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul * this.dmgScale; }
+  get dmgMul() { return this.boss ? TUNE.bossDmgMul * this.bossDmg : this.T.dmgMul * this.dmgScale; }
   get cooldown() { return TUNE.enemyCooldown / this.atkSpd * this.T.cdMul; }
 
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }

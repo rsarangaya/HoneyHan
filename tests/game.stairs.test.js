@@ -18,7 +18,7 @@ run('Stairs down and back up', async ({ open, check }) => {
     game.startFloor(1); await T.sleep(100);
     const f = game.floor, P = game.player;
     P.x = (f.stairs.x + 0.5) * TILE; P.z = (f.stairs.y + 0.5) * TILE + 1.1;                   // walk into the stairwell
-    await T.until(() => document.getElementById('floor').textContent.startsWith('Floor 2'), 4000); await T.sleep(300);
+    await T.until(() => document.getElementById('floor').textContent.includes('Floor 2 /'), 4000); await T.sleep(300);
     const u = game.floor.up, ux = (u.x + 0.5) * TILE, uz = (u.y + 0.5) * TILE;
     const out = { floor: document.getElementById('floor').textContent, dist: Math.hypot(P.x - ux, P.z - uz), outside: upProgress() === 0, stillTwo: floorNum === 2 };
     // on the steps the eye rises
@@ -27,7 +27,7 @@ run('Stairs down and back up', async ({ open, check }) => {
     P.x = ux + 4; P.z = uz;                                                                   // step off before the next test
     return out;
   });
-  check('going down puts you on floor 2, beside the stairs up and not on them', /^Floor 2/.test(arrive.floor) && arrive.stillTwo && arrive.outside && arrive.dist > 1.5 && arrive.dist < 4.5, `${arrive.floor}, ${arrive.dist.toFixed(1)} m away`);
+  check('going down puts you on floor 2, beside the stairs up and not on them', /Floor 2 \//.test(arrive.floor) && arrive.stillTwo && arrive.outside && arrive.dist > 1.5 && arrive.dist < 4.5, `${arrive.floor}, ${arrive.dist.toFixed(1)} m away`);
   check('your eye rises as you climb the steps', arrive.eyes[1] > arrive.eyes[0] + 0.1 && arrive.eyes[2] > arrive.eyes[1] && arrive.eyes[2] < 3.5, arrive.eyes.map(v => v.toFixed(2)).join(' < '));
 
   // 3. Floor 1 is kept exactly as you left it, and climbing back puts you by its stairs down, not on them.
@@ -52,7 +52,7 @@ run('Stairs down and back up', async ({ open, check }) => {
       f2: f2, same2: null,
     };
   });
-  check('climbing the stairs up returns you to floor 1', keep.back && keep.stillOne && /^Floor 1/.test(keep.text), keep.text);
+  check('climbing the stairs up returns you to floor 1', keep.back && keep.stillOne && /Floor 1 \//.test(keep.text), keep.text);
   check('floor 1 is the very same floor you left', keep.sameFloor && keep.sameEnemies);
   check('guards killed, chests opened and the explored map are all kept', keep.deadStays && keep.chestOpen && keep.explored);
   check('you arrive beside the stairs down, not in them (no instant descent)', keep.dist > 1.5 && keep.dist < 4.5 && keep.stillOne, `${keep.dist.toFixed(1)} m from the stairwell`);
@@ -80,14 +80,29 @@ run('Stairs down and back up', async ({ open, check }) => {
   check('guards path around the stairs up, never over them', path.skipped || (path.len > 0 && !path.through), JSON.stringify(path));
 
   // 6. The boss floor: you can climb up from it, and its sealed stairs down still hold.
+  // Walk the real stairs down from floor 1 to the boss arena, so floor 4 is cached (the way back is only open into cached floors).
   const boss = await page.evaluate(async () => {
-    game.startFloor(5); await T.sleep(200);
-    const P = game.player, f = game.floor, out = { up: !!f.up };
+    game.startFloor(1); await T.sleep(100);
+    const P = game.player;
+    for (let n = 1; n <= 4; n++) {
+      const f = game.floor; P.x = (f.stairs.x + 0.5) * TILE; P.z = (f.stairs.y + 0.5) * TILE + 1.1;
+      await T.until(() => floorNum === n + 1, 5000); await T.sleep(200);
+    }
+    const out = { up: !!game.floor.up, atBoss: floorNum === 5 && !!game.floor.boss };
     const u = upBox; P.x = (u.x0 + u.x1) / 2; P.z = u.dir > 0 ? u.z0 + 0.1 : u.z1 - 0.1;
     await T.until(() => floorNum === 4, 5000); await T.sleep(200); out.climbed = floorNum === 4;
     return out;
   });
-  check('you can climb up out of the boss arena', boss.up && boss.climbed);
+  check('you can climb up out of the boss arena (floor 4 is cached from the real walk down)', boss.up && boss.atBoss && boss.climbed);
+
+  // A dev jump straight to the boss arena has no cached floor 4: the way back is sealed, you stay in the arena.
+  const sealed = await page.evaluate(async () => {
+    game.startStage(1); game.startFloor(5); await T.sleep(200);            // startStage empties every cache, so floor 4 is not there
+    const P = game.player, u = upBox; P.x = (u.x0 + u.x1) / 2; P.z = u.dir > 0 ? u.z0 + 0.1 : u.z1 - 0.1;
+    await T.sleep(600);
+    return { stayed: floorNum === 5, msg: document.getElementById('msg').textContent + ' ' + document.getElementById('log').textContent };
+  });
+  check('a dev-jump arena with no cached floor 4 refuses the climb ("The way back is sealed.")', sealed.stayed && /way back is sealed/i.test(sealed.msg), sealed.msg.slice(0, 80));
 
   // 7. startFloor still means a brand new floor (the dev keys and tests rely on it).
   const fresh = await page.evaluate(async () => { game.startFloor(1); const a = game.floor; game.startFloor(1); return a !== game.floor; });

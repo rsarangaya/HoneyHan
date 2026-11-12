@@ -26,13 +26,17 @@ const THEMES = [
   { name: 'The Frozen Chapel',     wall: '#6c7e90', floor: '#4a5868', ceil: '#202a36', fog: 0x0a1018, light: 0xc8e4ff },
 ];
 
+// The placeholder final stage's look: a darker, colder chamber (not part of the theme pool; the run never picks it as a stage 1 to 4 theme).
+const FINAL_THEME = { name: 'The Final Chamber', wall: '#3a3040', floor: '#241c2c', ceil: '#0c0a12', fog: 0x050309, light: 0xc080ff };
+
 const MAP_W = 45, MAP_H = 45;               // the boss arena's size
 const SAFE_PAD = 12;                        // rock added north of the arena (the map grows to 57 x 57) for the safe room behind the boss's hidden door
 // Ordinary floors start small and grow a little: floor 1 is a compact 32 x 32 so the first minutes are not a long walk.
 const mapSizeFor = floorNum => [32, 36, 40, 44][Math.min(floorNum, 4) - 1];
 const weightedPick = (rng, w) => { let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return 0; };   // a seeded weighted choice by index
 // Chest grade by depth: wooden mostly early, Silver and Ornate more often deeper, Golden rare (and never on floor 1 early).
-const chestTierWeights = floorNum => [Math.max(22, 62 - 8 * floorNum), 26 + 2 * floorNum, 8 + 3 * floorNum, 1.5 + 1.4 * floorNum, 0.1 + 0.3 * floorNum];
+let genDepth = 0;                           // extra loot depth of the stage being generated (generateFloor sets it from opts.depth, js/main.js effFloor)
+const chestTierWeights = floorNum => (floorNum += genDepth, [Math.max(22, 62 - 8 * floorNum), 26 + 2 * floorNum, 8 + 3 * floorNum, 1.5 + 1.4 * floorNum, 0.1 + 0.3 * floorNum]);
 const CHEST_ODDS = { locked: 0.12, trap: 0.10 };   // share of ordinary chests that are locked (floor 1 on) or trapped (floor 2 on); never both, never a mimic, same exclusions as mimics
 const MIMIC_CHANCE = 0.08;   // share of ordinary chests (floor 2 on) that are mimics; never vault chests, key holders, locked rooms, the shop or the arena
 const roomTargetFor = floorNum => [8, 9, 10, 11][Math.min(floorNum, 4) - 1];
@@ -90,6 +94,7 @@ function roomPoint(f, r, k) {
 // opts.armory: this floor must contain the armory (retries with new layouts until it fits). opts.quest: an encounter
 // type from js/quests.js ('miniboss', 'shrine', 'wanted', 'thief', 'prisoner' or 'ally'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
+  genDepth = opts.depth || 0;
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
   for (let attempt = 0; attempt < 24; attempt++) {

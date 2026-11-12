@@ -173,6 +173,10 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - **Not changed, needs real play:** stealth (vision 10 m, 100 degree cone, hearing), enemy counts, respawns, weapons, armor, statuses, wands, uniques.
 - Not play-tested by a real person.
 
+### Stages (2026-11-12): 4 themed stages of 5 floors plus a placeholder final boss
+- `stage` 1..4 (themes: stage 1 is the seed's usual theme, stages 2 to 4 are three other seeded themes) and 5 (one boss arena, "The Final Boss" placeholder, killing it shows "Run complete"). `floorNum` is the floor within the stage. Safe-room stairs lead to the next stage; floor 1 of stages 2+ has stairs up to the previous stage's safe room. Per stage: shop, armory, encounter plan and prisoner state. Numbers in `TUNE` (stage*, finalBoss*) and the tuning panel (key bumped to -20; Stage up/down buttons). Cache bounded to 6 floors (`trimCaches`).
+- Open: balance of the stage scaling is a guess; the final boss is a placeholder.
+
 ## Decisions made
 - Name: HoneyHan (formerly "Prototype Test").
 - Scope for now: floors 1 to 5, first boss on floor 5. Run length is up to the player.

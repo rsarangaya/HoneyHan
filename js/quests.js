@@ -94,7 +94,7 @@ const QUEST_TYPES = {
       if (q.done) { flash('"Thank you again. The dungeon is a little safer."'); return; }
       if (q.boss && q.boss.dead) {                                                                 // reward: rolled once from the quest seed, handed over when there is room
         const rng = makeRng((q.seed ^ 0x3a17) >>> 0), W = QUESTS.wanted;
-        const d = q.reward || (q.reward = rng() < W.potionShare ? { type: 'potion', kind: rng.pick(W.potionKinds), n: W.potionN } : rollEquipment(floorNum, rng, { minTier: W.gearMinTier, boost: floorNum >= 3 ? 1 : 0 }));
+        const d = q.reward || (q.reward = rng() < W.potionShare ? { type: 'potion', kind: rng.pick(W.potionKinds), n: W.potionN } : rollEquipment(effFloor(), rng, { minTier: W.gearMinTier, boost: floorNum >= 3 ? 1 : 0 }));
         const got = inv.add(d);
         if (!got) { flash('"Make room in your pack first."'); return; }
         q.done = true; flash(`"${q.name} is dead? Take this." You receive: ${got}.`); return;
@@ -162,11 +162,12 @@ QUEST_TYPES.ally = {
     const n = new Enemy({ x: q.npc.x, y: q.npc.y, route: [q.npc, q.npc], seed: (q.seed ^ 0x51ed) >>> 0, type: 'ally', skin: gob ? 0x7a9a4a : 0xd0a888 }, f);   // built and posed once; allyStep drives it after the recruit
     n.yaw = Math.atan2(-((f.start.x + 0.5) * T - n.x), -((f.start.y + 0.5) * T - n.z)); n.sync(0); n.icon.visible = false; n.cone.visible = false;
     group.add(n.mesh);
-    const sol = { x: n.x, z: n.z, r: 0.45 }, o = { p: { kind: 'questnpc', who: 'ally', x: q.npc.x, y: q.npc.y, opened: false }, mesh: n.mesh, x: n.x, z: n.z, r: 0.45, lid: null, mats: [] };
+    const sol = { x: n.x, z: n.z, r: 0.45 }, o = { p: { kind: 'questnpc', who: 'ally', x: q.npc.x, y: q.npc.y, opened: false, ally: null }, mesh: n.mesh, x: n.x, z: n.z, r: 0.45, lid: null, mats: [] };
     f.solids.push(sol); ctx.propObjs.push(o);
-    allyRun = { e: n, f, n: floorNum, o, sol, name: gob ? 'goblin defector' : 'wounded adventurer', ask: q.ask, price: QUESTS.ally.goldBase + QUESTS.ally.goldPerFloor * floorNum,
+    if (allyRun && allyRun.recruited && allyRun.mode !== 'gone' && allyRun.mode !== 'safe') { allyRun.mode = 'gone'; allyRun.carry = false; allyRun.o.p.opened = true; Enemy.ally = null; if (allyRun.e.mesh.parent) allyRun.e.mesh.parent.remove(allyRun.e.mesh); }   // one ally per stage: an earlier stage's recruit leaves when a new one is met
+    allyRun = { depth: effFloor() - floorNum, e: n, f, n: floorNum, o, sol, name: gob ? 'goblin defector' : 'wounded adventurer', ask: q.ask, price: QUESTS.ally.goldBase + QUESTS.ally.goldPerFloor * floorNum,
       recruited: false, mode: 'idle', dist: null, ptile: -1, re: 0, think: 0, nz: 0, walk: false, foeE: null, fightT: 0, carry: false, dying: false, reward: null };
-    q.ally = allyRun;
+    q.ally = allyRun; o.p.ally = allyRun;                                                    // the prop keeps its own ally: allyRun is replaced by the next stage's recruit
   },
   line() { return ''; },                                                                     // allyLine (the run-level line) covers it on every floor
 };
@@ -204,8 +205,8 @@ function allyTalk(A) {
 function allyReward(A) {
   const P = QUESTS.ally;
   if (!A.reward) {
-    const rng = makeRng((runSeed ^ 0xa11e5) >>> 0);
-    A.reward = rng() < P.rewardGearShare ? rollEquipment(A.n, rng, { minTier: P.gearMinTier, boost: A.n >= 3 ? 1 : 0 }) : { type: 'gold', n: rng.int(P.goldMin, P.goldMax) + P.rewardGoldPerFloor * A.n };
+    const rng = makeRng((stageSeed ^ 0xa11e5) >>> 0);
+    A.reward = rng() < P.rewardGearShare ? rollEquipment(A.n + (A.depth | 0), rng, { minTier: P.gearMinTier, boost: A.n >= 3 ? 1 : 0 }) : { type: 'gold', n: rng.int(P.goldMin, P.goldMax) + P.rewardGoldPerFloor * A.n };   // A.depth: the stage's extra loot depth
   }
   const got = inv.add(A.reward);
   if (!got) { flash('"Make room in your pack first."'); return; }
@@ -343,7 +344,7 @@ function prisonerFree() {
   const f = floor, q = f.quest; if (!q || q.type !== 'prisoner' || q.freed) return;
   const c = q.cell, P = QUESTS.prisoner, sp = nearPoint(f, f.stairs.x, f.stairs.y, 0), dist = new Int32Array(f.w * f.h);
   q.freed = true; c.o.r = 0;
-  prisonerRun = prisonerRun || { floor: floorNum, paid: false, reward: null };
+  prisonerRun = prisonerRun || { floor: effFloor(), paid: false, reward: null };   // one per stage (main.js keeps one per stage)
   const i = f.solids.indexOf(c.sol); if (i >= 0) f.solids.splice(i, 1);
   const j = propObjs.indexOf(c.o); if (j >= 0) propObjs.splice(j, 1);                       // out of the prop list, so distance culling leaves the walking mesh alone
   c.e.yaw = Math.atan2(-(player.x - c.e.x), -(player.z - c.e.z)); c.e.mesh.visible = true; c.e.sync(0);
@@ -382,17 +383,18 @@ function prisonerStep(dt) {
 // After the boss: the freed prisoner stands in the safe room, by the stairs (called from questBuild on the boss floor).
 function prisonerSafeBuild(f, ctx) {
   const x = f.stairs.x + 2, y = f.stairs.y + 1, d = f.safe.door, T = TILE;
-  const n = new Enemy({ x, y, route: [{ x, y }, { x, y }], seed: (runSeed ^ 0x51ed) >>> 0, type: 'prisoner' }, f);
+  f.prisonerRun = prisonerRun;
+  const n = new Enemy({ x, y, route: [{ x, y }, { x, y }], seed: (stageSeed ^ 0x51ed) >>> 0, type: 'prisoner' }, f);
   n.yaw = Math.atan2(-((d.x + 0.5) * T - n.x), -((d.y + 0.5) * T - n.z)); n.sync(0); n.icon.visible = false; n.cone.visible = false;
   group.add(n.mesh);
   f.solids.push({ x: n.x, z: n.z, r: 0.45 });
-  ctx.propObjs.push({ p: { kind: 'questnpc', who: 'prisoner', x, y, opened: false }, mesh: n.mesh, x: n.x, z: n.z, r: 0.45, lid: null, mats: [] });
+  ctx.propObjs.push({ p: { kind: 'questnpc', who: 'prisoner', x, y, opened: false, run: prisonerRun }, mesh: n.mesh, x: n.x, z: n.z, r: 0.45, lid: null, mats: [] });
 }
 // Hold E on it: the reward, rolled once from the run seed (the kind by weight, the gear scaled by the floor it was freed on). Needs room in the pack for gear or potions.
 function prisonerTalk(o) {
-  const R = prisonerRun, P = QUESTS.prisoner; if (!R || R.paid) return;
+  const R = o.p.run || prisonerRun, P = QUESTS.prisoner; if (!R || R.paid) return;
   if (!R.reward) {
-    const rng = makeRng((runSeed ^ 0x7e55) >>> 0), k = weightedIndex(rng, [P.gearWeight, P.potionWeight, P.goldWeight]);
+    const rng = makeRng((stageSeed ^ 0x7e55) >>> 0), k = weightedIndex(rng, [P.gearWeight, P.potionWeight, P.goldWeight]);
     R.reward = k === 0 ? rollEquipment(R.floor, rng, { minTier: P.gearMinTier, boost: R.floor >= 3 ? 1 : 0 }) : k === 1 ? { type: 'potion', kind: rng.pick(P.potionKinds), n: P.potionN } : { type: 'gold', n: rng.int(P.goldMin, P.goldMax) + P.goldPerFloor * R.floor };
   }
   const got = inv.add(R.reward);
@@ -401,10 +403,10 @@ function prisonerTalk(o) {
   flash(`"You saved me. Take this." You receive: ${got}.`);
 }
 // The Hold E label and the talk action of a quest NPC (main.js: targetInfo, finishSearch): the wanted guard's quest-giver, or the freed prisoner in the safe room.
-const questPrompt = (f, o) => o && o.p.who === 'ally' ? allyPrompt(allyRun) : o && o.p.who === 'prisoner' ? 'Take the prisoner\'s reward' : f.quest && f.quest.type === 'wanted' ? QUEST_TYPES.wanted.prompt(f.quest) : 'Talk';
+const questPrompt = (f, o) => o && o.p.who === 'ally' ? allyPrompt(o.p.ally || allyRun) : o && o.p.who === 'prisoner' ? 'Take the prisoner\'s reward' : f.quest && f.quest.type === 'wanted' ? QUEST_TYPES.wanted.prompt(f.quest) : 'Talk';
 function questTalk(o) {
   player.keys[KEYS.interact] = false;                                                              // one talk per press, not one every hold
-  if (o && o.p.who === 'ally') { allyTalk(allyRun); return; }
+  if (o && o.p.who === 'ally') { allyTalk(o.p.ally || allyRun); return; }
   if (o && o.p.who === 'prisoner') { prisonerTalk(o); return; }
   if (floor.quest && QUEST_TYPES[floor.quest.type].talk) QUEST_TYPES[floor.quest.type].talk(floor);
 }
@@ -434,7 +436,7 @@ function rollQuests(seed, maxFloor, shopFloor) {
 
 const questSpawn = f => { if (f.quest) QUEST_TYPES[f.quest.type].spawn(f); };               // after assignEnemyTypes
 const questBuild = (f, ctx) => { if (f.quest) QUEST_TYPES[f.quest.type].build(f, ctx); if (f.safe && prisonerRun) prisonerSafeBuild(f, ctx); };   // after the floor's meshes and enemies exist
-const questLine = f => [f.quest ? QUEST_TYPES[f.quest.type].line(f) : f.safe && prisonerRun && !prisonerRun.paid ? 'The prisoner you freed waits in the safe room beyond the boss (hold E to talk).' : '', allyLine(f)].filter(Boolean).join(' ');   // the inventory screen's line
+const questLine = f => [f.quest ? QUEST_TYPES[f.quest.type].line(f) : f.safe && f.prisonerRun && !f.prisonerRun.paid ? 'The prisoner you freed waits in the safe room beyond the boss (hold E to talk).' : '', allyLine(f)].filter(Boolean).join(' ');   // the inventory screen's line
 function questDoorOpened(o) {                                                               // a quest room's door was unlocked
   if (o.p.room === 'cell') { prisonerFree(); return; }
   if (o.p.room !== 'lair' || !floor.quest) return;
@@ -498,7 +500,7 @@ const dealUI = (() => {
     root.addEventListener('click', e => {
       const t = e.target.closest('[data-act]'); if (!t || t.disabled) return;
       if (t.dataset.act === 'accept') {
-        const r = applyDeal(inv, deal, floor.quest.seed, floorNum);
+        const r = applyDeal(inv, deal, floor.quest.seed, effFloor());
         if (!r.ok) { note = r.msg; render(); return; }
         floor.quest.used = true; altar.p.opened = true;
         flash(r.msg); addLog(r.msg, '#c8a0ff');

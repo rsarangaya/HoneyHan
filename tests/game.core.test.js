@@ -23,7 +23,7 @@ run('Core gameplay: floors, stairs, collision, combat basics, statuses', async (
       await T.sleep(800);
       return document.getElementById('floor').textContent;
     });
-    check('stairs lead to floor 2', /^Floor 2/.test(floorText), floorText);
+    check('stairs lead to floor 2', /Floor 2 \//.test(floorText), floorText);
 
     // 3. A swarm of alerted guards spreads out round the player instead of stacking on one spot.
     const swarm = await page.evaluate(async () => {

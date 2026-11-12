@@ -13,6 +13,10 @@ const TUNE = {
   bossSpeed: 4.2,                     // a sprinting player (4.6) can outrun it
   bossWindMul: 1.35, bossReachMul: 1.4, bossAtkSpd: 0.7, bossWeaponTier: 3,   // wind-up x (longer telegraph), reach x, own attack-speed stat, mace tier
   bossLegendary: 0.10,                // chance its guaranteed Epic drop upgrades to Legendary
+  // Stages (js/main.js): per stage past the first, enemies get HP x (1 + stageHpScale) and damage x (1 + stageDmgScale) on top of the per-floor scaling;
+  // stage bosses HP x (1 + stageBossHp) and damage x (1 + stageBossDmg). The placeholder final boss is the stage 1 boss x finalBossHp / finalBossDmg, drawn finalBossScale times bigger.
+  // stageLootDepth: loot, shop and chest tiers use floor + this x (stage - 1).
+  stageHpScale: 0.35, stageDmgScale: 0.20, stageBossHp: 0.5, stageBossDmg: 0.2, finalBossHp: 3.0, finalBossDmg: 1.8, finalBossScale: 1.25, stageLootDepth: 1.5,
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,
 };
@@ -57,7 +61,7 @@ function findMeleeTarget(player, eyeY, enemies, floor, reach) {
   if (best.quad) {                                  // rats and wolves are low: any aim at their height lands, low aim is a leg hit
     const y = eyeY + Math.tan(player.pitch) * bestD, h = best.T.height;
     zone = y > h || y < -0.1 ? null : y < h * 0.4 ? 'legs' : 'body';
-  } else zone = aimZone(eyeY, player.pitch, bestD, best.boss ? BOSS_SCALE : best.T.scale || 1);
+  } else zone = aimZone(eyeY, player.pitch, bestD, best.boss ? best.scaleK : best.T.scale || 1);
   return zone ? { e: best, zone, dist: bestD } : { e: best, zone: null, dist: bestD };
 }
 

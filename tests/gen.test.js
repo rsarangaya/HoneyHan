@@ -11,6 +11,8 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
+Object.defineProperty(ctx, 'stageSeed', { get: () => ctx.runSeed });   // main.js keeps the seed of the current stage (equal to the run seed on stage 1)
+ctx.effFloor = n => n === undefined ? ctx.floorNum : n;                    // main.js: floor plus the stage's loot depth (none on stage 1)
 for (const f of ['js/gen.js', 'js/loot.js', 'js/wands.js', 'js/enemytypes.js', 'js/quests.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS, THEMES, THEME_GIMMICK })', ctx);
 const THEME_NAMES = G.THEMES.map(t => t.name);
@@ -764,5 +766,71 @@ const per = supply.map((v, i) => Math.round(v / floorsBy[i]));
 console.log(`food in props per floor (hunger points, floors 1 to 5): ${per.join(', ')}`);
 // Drain is 100 per 11 minutes (round 2 retune). A floor takes roughly 3 to 6 minutes, so 27 to 55 points. Supply should beat that by about 1.2 to 1.5 times (cooks drop food too), but not drown it.
 for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1}`, `food supply ${per[i]} is outside 25 to 110 per floor`);
+// Stages (generator side, js/main.js passes these): later stages add loot depth (opts.depth = 1.5 x (stage - 1), effFloor);
+// layouts stay valid at every depth, the final arena (boss floor, depth 6) has its boss, safe room and healing potion,
+// FINAL_THEME is not in the theme pool, the depth moves chest grades and rollTier up, and every stage's encounter plan
+// (rollQuests) gives at most one prisoner and one ally, on floors 2 to 4, never the shop floor.
+{
+  const FINAL_THEME = vm.runInContext('FINAL_THEME', ctx);
+  const SIZES = [32, 36, 40, 44];
+  check_stage: {
+    if (THEME_NAMES.includes(FINAL_THEME.name)) fail('final theme', 'FINAL_THEME is in the theme pool');
+    let stageLayouts = 0;
+    for (const depth of [1.5, 3, 4.5]) {
+      for (let s = 1; s <= 120; s++) {
+        const seed = (s * 2246822519 + Math.round(depth * 10)) >>> 0;
+        for (let n = 1; n <= 4; n++) {
+          const where = `stage depth ${depth} seed ${seed} floor ${n}`;
+          const armory = n === 1 + (s % 4), shop = n === 1 + ((s + 2) % 4), quest = s % 3 === 0 && n >= 2 ? 'miniboss' : undefined;
+          const themeName = THEME_NAMES[(s + n) % THEME_NAMES.length];
+          const f = G.generateFloor(seed, n, { armory, shop, boss: false, quest, themeName, depth });
+          stageLayouts++;
+          if (f.w !== SIZES[n - 1] || f.h !== SIZES[n - 1]) fail(where, `map ${f.w}x${f.h} with depth`);
+          if (!touchable(f, flood(f, true), f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable at this depth');
+          if (shop && !f.shop) fail(where, 'shop floor without a shop');
+          if (armory && !f.rooms.some(r => r.theme === 'armory')) fail(where, 'armory floor without an armory');
+          if (quest && !f.quest) fail(where, 'encounter floor without its encounter');
+        }
+        const fb = G.generateFloor(seed, 5, { boss: true, depth: 6 });
+        const where = `final arena seed ${seed}`;
+        if (fb.enemies.filter(e => e.boss).length !== 1) fail(where, 'want exactly one boss');
+        if (fb.props.filter(p => p.fixed === 'heal').length !== 1) fail(where, 'want exactly one healing potion');
+        if (!fb.safe || !touchable(fb, flood(fb, true), fb.stairs.x, fb.stairs.y)) fail(where, 'no safe room or stairs behind the hidden door');
+        checked++;
+      }
+    }
+    console.log(`stage layouts: ${stageLayouts} (depths 1.5, 3, 4.5) and final arenas checked`);
+  }
+  // Chest grades: stage 4 floor 1 (depth 4.5) has far more silver or better chests than stage 1 floor 1.
+  const silverShare = depth => {
+    let n = 0, hi = 0;
+    for (let s = 1; s <= 150; s++) {
+      const f = G.generateFloor((s * 40503 + 17) >>> 0, 1, { armory: false, boss: false, shop: false, themeName: THEME_NAMES[s % THEME_NAMES.length], depth });
+      for (const p of f.props) if (p.kind === 'chest') { n++; if (p.tier >= 2) hi++; }
+    }
+    return hi / Math.max(1, n);
+  };
+  const low = silverShare(0), high = silverShare(4.5);
+  if (!(high > low + 0.1)) fail('stage chests', `silver or better share ${(low * 100).toFixed(1)}% at depth 0, ${(high * 100).toFixed(1)}% at depth 4.5`);
+  console.log(`stage chests: silver or better ${(low * 100).toFixed(1)}% at stage 1, ${(high * 100).toFixed(1)}% at depth 4.5 (stage 4 floor 1)`);
+  // Rolled tiers (rollTier with effFloor): the mean tier rises with the effective floor.
+  const rollTier = vm.runInContext('rollTier', ctx), makeRng = vm.runInContext('makeRng', ctx);
+  const meanTier = fl => { const rng = makeRng(99); let t = 0; for (let i = 0; i < 4000; i++) t += rollTier(fl, rng); return t / 4000; };
+  if (!(meanTier(1 + 4.5) > meanTier(1) + 0.3)) fail('stage tiers', `mean tier ${meanTier(1).toFixed(2)} at floor 1, ${meanTier(5.5).toFixed(2)} at effective floor 5.5`);
+  // Encounter plans: one plan per stage (rollQuests), prisoner and ally at most once each, floors 2 to 4, never the shop floor.
+  const rollQuests = vm.runInContext('rollQuests', ctx);
+  let prisoners = 0, allies = 0;
+  for (let s = 1; s <= 400; s++) {
+    const seed = (s * 2654435761) >>> 0, shopFloor = 1 + (s % 4);
+    const plan = rollQuests(seed, 5, shopFloor), keys = Object.keys(plan).map(Number);
+    const pr = Object.values(plan).filter(t => t === 'prisoner').length, al = Object.values(plan).filter(t => t === 'ally').length;
+    prisoners += pr; allies += al;
+    if (keys.some(k => k < 2 || k > 4 || k === shopFloor)) fail(`plan seed ${seed}`, `encounter on floor ${keys.join(',')} (shop ${shopFloor})`);
+    if (pr > 1 || al > 1) fail(`plan seed ${seed}`, `${pr} prisoners and ${al} allies in one stage`);
+  }
+  if (!prisoners || !allies) fail('stage plans', 'prisoner or ally never rolled in 400 stage plans');
+  console.log(`stage plans: 400 rolled, ${prisoners} prisoners and ${allies} allies in all (at most one each per stage)`);
+}
+
 console.log(`${checked} floors checked, ${fails} failures`);
 process.exit(fails ? 1 : 0);

@@ -165,19 +165,21 @@ run('The safe room behind the boss', async ({ open, check }) => {
   check('back in the arena: attacks work again', back.swing);
   check('the boss body and the opened chest are kept', back.bodies && back.chestOpen);
 
-  // 5. The stairs in the safe room: walking onto them ends stage 1 through enterNextStage, with the Stage 1 complete screen.
+  // 5. The stairs in the safe room: walking onto them goes through enterNextStage into stage 2 floor 1 (the run goes on; the pack carries over).
   await page.evaluate(() => {
     window.hookCalls = 0; const orig = enterNextStage; window.enterNextStage = () => { hookCalls++; orig(); };
+    window.packBefore = game.inv.pack.length + '/' + game.inv.gold;
     const P = game.player, f = game.floor;
     P.x = (f.safe.gate.x + 0.5) * TILE; P.z = (f.safe.gate.y + 0.5) * TILE; P.keys = { [KEYS.forward]: true }; P.yaw = 0;
     game.inv.hp = game.inv.maxHp;
   });
-  const won = await page.evaluate(() => T.until(() => game.state === 'won', 15000));
+  const next = await page.evaluate(() => T.until(() => game.stage === 2, 15000));
   const end = await page.evaluate(() => { game.player.keys = {}; return {
-    hook: window.hookCalls, state: game.state, h1: document.querySelector('#overlay h1') && document.querySelector('#overlay h1').textContent,
-    shown: document.getElementById('overlay').style.display, button: !!document.querySelector('#overlay button'),
+    hook: window.hookCalls, state: game.state, stage: game.stage, floorNum, text: document.getElementById('floor').textContent,
+    pack: game.inv.pack.length + '/' + game.inv.gold === window.packBefore, boss: game.floor.boss === undefined || !game.floor.boss,
   }; });
-  check('the stairs in the safe room end the run through enterNextStage with a Stage 1 complete screen', won && end.hook === 1 && end.h1 === 'Stage 1 complete' && end.shown === 'flex' && end.button, JSON.stringify(end));
+  check('the stairs in the safe room go through enterNextStage to stage 2 floor 1 with the pack kept', next && end.hook === 1 && end.state === 'play' && end.floorNum === 1 && /Stage 2 \/ 4 - Floor 1 \/ 5/.test(end.text) && end.pack && end.boss, JSON.stringify(end));
+  await page.evaluate(() => finishRun());   // end the run for the restart check below
 
   // 6. The restart button starts a fresh run on a new seed.
   const url0 = page.url();

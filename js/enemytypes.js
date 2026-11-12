@@ -211,4 +211,6 @@ const THEME_BOSS = {
   'The Goblin Market':     { name: 'Goblin Warlord',    dress: 'warlord', skin: 0x7a9a3a },
   'The Frozen Chapel':     { name: 'Frost Giant',       dress: 'frost',   skin: 0x9ac4e0 },
 };
-const bossNameFor = themeName => (THEME_BOSS[themeName] || { name: 'Cave Warlord' }).name;
+// The placeholder final boss (stage 5): the Cave Warlord's fight with a darker tint, 1.25x bigger, a name tag that says so (js/main.js).
+const FINAL_BOSS = { name: 'The Final Boss', tag: '??? (final boss, placeholder)', dress: 'warlord', skin: 0x4a2a5a };
+const bossNameFor = themeName => themeName === FINAL_THEME.name ? FINAL_BOSS.name : (THEME_BOSS[themeName] || { name: 'Cave Warlord' }).name;

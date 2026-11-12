@@ -12,7 +12,7 @@ const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} 
 const f = { w: 20, h: 20, tiles: new Uint8Array(400).fill(1), solids: [{ x: 0, z: 0, r: 1.5 }] };
 for (let y = 0; y < 20; y++) { f.tiles[y * 20] = 0; f.tiles[y * 20 + 19] = 0; f.tiles[y] = 0; f.tiles[19 * 20 + y] = 0; }
 for (let y = 0; y < 20; y++) f.tiles[y * 20 + 10] = 0;
-const goblin = (x, z, extra = {}) => ({ x, z, r: 0.4, dead: false, quad: false, boss: false, T: { scale: 0 }, ...extra });
+const goblin = (x, z, extra = {}) => ({ x, z, r: 0.4, dead: false, quad: false, boss: false, scaleK: 1.6, T: { scale: 0 }, ...extra });   // scaleK: the boss model scale (js/enemy.js BOSS_SCALE), read by zoneAtHeight
 const fly = (a, e, secs, step = 1 / 30) => { let ev = null; for (let t = 0; t < secs && !ev; t += step) ev = stepArrow(a, step, f, e, null); return ev; };
 const mk = (x, y, z, sp, pitch = 0, owner = 'player') => ({ x, y, z, vx: sp * Math.cos(pitch), vy: sp * Math.sin(pitch), vz: 0, owner });
 

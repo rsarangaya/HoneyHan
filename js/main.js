@@ -1,8 +1,11 @@
 // Scene building, HUD, minimap, and the floor-to-floor loop.
-const MAX_FLOOR = 5;
+const MAX_FLOOR = 5;       // floors per stage: floorNum is the floor WITHIN the stage, and floor 5 is the stage's boss arena (with the safe room)
+const STAGES = 4, FINAL_STAGE = 5;   // 4 themed stages, then stage 5: one boss arena with the placeholder final boss
 const params = new URLSearchParams(location.search);
 const runSeed = params.has('seed') ? (parseInt(params.get('seed'), 10) >>> 0) : (Math.random() * 4294967296) >>> 0;
-const theme = makeRng(runSeed).pick(THEMES);     // one theme per run, picked from the seed
+// Stage 1 keeps the theme the seed always picked; stages 2 to 4 take three other themes, shuffled from the seed (no repeats).
+const stageThemes = (() => { const t0 = makeRng(runSeed).pick(THEMES); return [t0, ...makeRng((runSeed ^ 0x7e3a11) >>> 0).shuffle(THEMES.filter(t => t !== t0)).slice(0, STAGES - 1)]; })();
+let stage = 1, stageSeed = runSeed, theme = stageThemes[0];   // stageSeed is the run seed for stage 1 (so stage 1 generates exactly as before) and a seeded mix of it for the others
 
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -27,18 +30,28 @@ const mctx = hud.mini.getContext('2d');
 const player = new Player();
 let cullChunks = [];        // the merged furniture and torches of the current floor, for distance culling (js/perf.js)
 let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null, upBox = null, upLight = null;
-const floorCache = {};      // floors you have left, kept exactly as they were (guards, opened chests, bodies, explored map)
+const stageCaches = { 1: {} };   // stage -> the floors you have left there, kept exactly as they were (guards, opened chests, bodies, explored map); bounded by trimCaches
+let floorCache = stageCaches[1];   // the current stage's, keyed by floor within the stage
+const bossDead = {}, prisonerRuns = {};   // per stage: its boss is dead (a rebuilt arena has no boss and an open door); its prisoner's state
 const SAFE_CEIL = 4;       // the safe room's ceiling height (m)
 const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) has room
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5, UP_RISE = 1.4;   // the way down sinks 1.5 m; the way back up rises 1.4 m
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
 const PATCH_KINDS = ['puddle', 'grass', 'glowcap', 'bell', 'ice'];
-const HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the Library's dead silence: every sound you make carries farther
+let HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the Library's dead silence: every sound you make carries farther
 const THEME_HINT = { 'The Sunken Tavern': 'Shallow puddles splash when you step in them, even when you creep.', 'The Moonlit Orchard': 'Tall grass hides a crouching player. Scarecrows are not all scenery.', 'The Clockwork Library': 'The library is eerily silent: every sound you make carries 40% farther.', 'The Mushroom Cellar': 'Glowing spores light you up: guards see you from farther in them.', 'The Goblin Market': 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.', 'The Frozen Chapel': 'Patches of ice make you slide.' };
-const shopFloor = makeRng((runSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);   // the one floor of this stage with a shop (not the boss arena); the player is not told which
-
-const questPlan = rollQuests(runSeed, MAX_FLOOR, shopFloor);   // which floors carry an optional encounter, and which type (js/quests.js)
+const stageSeedOf = s => s === 1 ? runSeed : (runSeed ^ Math.imul(s, 0x9e3779b1)) >>> 0;
+let shopFloor = 0, armoryFloor = 0, questPlan = {};
+// This stage's plan, all seeded: its shop floor (not the boss arena; the player is not told which), its armory floor, and which floors carry an optional encounter (js/quests.js).
+function planStage(s) {
+  stageSeed = stageSeedOf(s);
+  shopFloor = makeRng((stageSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);
+  armoryFloor = makeRng((stageSeed ^ 0x5bd1e995) >>> 0).int(1, MAX_FLOOR - 1);   // never the boss floor, which has no rooms
+  questPlan = rollQuests(stageSeed, MAX_FLOOR, shopFloor);
+}
+planStage(1);
+function effFloor(n = floorNum) { return n + TUNE.stageLootDepth * (stage - 1); }   // loot depth: tiers, gold, potions and shop stock follow this, not the floor alone
 
 // Procedural textures. Smooth filtering with mipmaps (no chunky pixels), a seeded pattern per colour so a theme looks
 // the same every run: brick walls, plank or flagstone floors, a dark plank ceiling.
@@ -178,7 +191,7 @@ function buildFloor() {
 
   // the stairs back up (floors 2 and deeper): a flight of steps on the start tile, rising from the open side
   upBox = null; upLight = null; floor.up = null;
-  if (floorNum > 1) {
+  if (floorNum > 1 || stage > 1) {                         // (floor 1 of stage 2 and later leads back to the previous stage's safe room)
     const st = floor.start, open = (x, y) => floor.tiles[y * w + x] === T_FLOOR || floor.tiles[y * w + x] === T_START;
     const dir = open(st.x, st.y + 1) && !floor.blocked[(st.y + 1) * w + st.x] ? 1 : -1;      // which side you step on from
     const ux = (st.x + 0.5) * TILE, uz = (st.y + 0.5) * TILE;
@@ -223,6 +236,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
+  const fb = enemies.find(e => e.final); if (fb) nameTag(fb, FINAL_BOSS.tag, '#c060ff');                // the placeholder final boss says what it is
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   scene.add(group);
@@ -265,7 +279,7 @@ function openSafeDoor() {
 // through him, and an invisible trading spot at the counter. The stock is seeded per floor.
 function buildShop() {
   const sh = floor.shop;
-  floor.shopStock = makeStock(runSeed, floorNum);
+  floor.shopStock = makeStock(stageSeed, effFloor());
   const mn = new Enemy({ x: sh.merchant.x, y: sh.merchant.y, route: [sh.merchant, sh.merchant], seed: sh.seed, type: 'cook' }, floor);
   mn.yaw = sh.merchant.yaw; mn.sync(0); mn.icon.visible = false; mn.cone.visible = false;
   group.add(mn.mesh);
@@ -617,13 +631,16 @@ function updateArrows(dt) {
 
 // The boss always leaves a body holding: one Epic piece (small chance of Legendary), one more rolled
 // piece of equipment (Rare or better) and gold.
+let winTimer = 0;   // the final boss's delayed Run complete; cleared when a stage is restarted
 function bossDefeated(e) {
   e.corpseDone = true;
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
-  const epic = rollEquipment(floorNum, rng, {});
+  bossDead[stage] = true;
+  if (e.final) { flash('The Final Boss falls!'); clearTimeout(winTimer); winTimer = setTimeout(() => { if (state === 'play') finishRun(); }, 2500); return; }   // placeholder: the run ends
+  const epic = rollEquipment(effFloor(), rng, {});
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
   const uniq = epic.tier === 4 ? rollUniqueGear(rng, rng() < 0.5) : null, bust = rollBust(rng, 0.12);    // a Legendary body may hold a one-of-a-kind piece
-  const extra = rollEquipment(floorNum, rng, { boost: 1, minTier: 2 });
+  const extra = rollEquipment(effFloor(), rng, { boost: 1, minTier: 2 });
   const left = [uniq || epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : []), ...(bust ? [bust] : [])];
   propObjs.push({
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
@@ -638,7 +655,7 @@ function makeCorpse(e, sneak) {
   e.corpseDone = true;
   if (e.T.mimic) return mimicCorpse(e);
   const bonus = sneak ? 0.15 : 0;
-  if (!dryRoll(() => rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot && !e.spec.carry) return;
+  if (!dryRoll(() => rollLoot('corpse', effFloor(), makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot && !e.spec.carry) return;
   propObjs.push({
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot || e.spec.carry ? [...(e.loot ? [{ type: 'gold', n: e.loot }] : []), ...(e.spec.carry ? [e.spec.carry] : [])] : undefined },   // stolen gold, and the cell key a prisoner quest guard carries
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
@@ -648,8 +665,8 @@ function makeCorpse(e, sneak) {
 // A dead mimic pays out like a chest one grade better, with gear guaranteed (it is a lootable body, like the boss's).
 function mimicCorpse(e) {
   const rng = makeRng((e.seed ^ 0x31c1c) >>> 0), t = Math.min(4, (e.spec.tier | 0) + 1);
-  const left = rollLoot('chest', floorNum, rng, 0, [], undefined, t);
-  if (!left.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield')) left.push(rollEquipment(floorNum, rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
+  const left = rollLoot('chest', effFloor(), rng, 0, [], undefined, t);
+  if (!left.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield')) left.push(rollEquipment(effFloor(), rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
   propObjs.push({ p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left }, mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [] });
 }
 
@@ -974,7 +991,7 @@ function damage(n) {
   if (inv.hp <= 0) {
     state = 'dead';
     document.exitPointerLock();
-    hud.overlayText.innerHTML = `<h1>You died on floor ${floorNum}</h1><p>Click to start a new run.</p>`;
+    hud.overlayText.innerHTML = `<h1>You died on stage ${stage}, floor ${floorNum}</h1><p>Click to start a new run.</p>`;
     hud.overlay.style.display = 'flex';
   }
 }
@@ -1057,7 +1074,7 @@ function finishSearch(o, smashed) {
     flash(`Unlocked the ${o.p.room}`); questDoorOpened(o);
     return;
   }
-  let drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
+  let drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, effFloor(), makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
   const got = [], left = [], notes = [];
   if (smashed && !o.p.left) {                                                       // smashing a lock rattles what is inside
     let broke = 0;
@@ -1125,8 +1142,7 @@ const torch = new THREE.PointLight(theme.light, 0.75, 16, 1.6);   // player lant
 scene.add(ambient);
 camera.add(torch);
 
-// The armory is on one random floor of the run, picked from the seed. It is always a locked room.
-const armoryFloor = makeRng((runSeed ^ 0x5bd1e995) >>> 0).int(1, MAX_FLOOR - 1);   // never the boss floor, which has no rooms
+// The armory (a locked room) is on one floor of each stage, picked from the seed (planStage).
 let respawnT = Infinity, baseGuards = 0;
 
 function disposeGroup(g) {   // free a floor's GPU memory: geometry, materials and their textures
@@ -1164,8 +1180,9 @@ function arriveBy(dir) {
 function floorBanner(n) {
   el('boss').firstElementChild.textContent = bossNameFor(theme.name);
   if (n === 1 && THEME_HINT[theme.name]) addLog(THEME_HINT[theme.name], '#9ac8ff');
-  hud.floor.textContent = `Floor ${n} / ${MAX_FLOOR}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
+  hud.floor.textContent = stage === FINAL_STAGE ? 'Final stage' : `Stage ${stage} / ${STAGES} - Floor ${n} / ${MAX_FLOOR} - ${theme.name}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
 }
+const bossFloorAt = n => stage === FINAL_STAGE || n === MAX_FLOOR;   // the final stage is one boss arena (its floorNum is 1, so the way up leads back to stage 4's safe room)
 
 // A brand new floor n (also what the dev keys and the tests use): any old copy of it is thrown away.
 function startFloor(n) {
@@ -1173,21 +1190,27 @@ function startFloor(n) {
   if (floorCache[n]) { disposeGroup(floorCache[n].group); delete floorCache[n]; }
   generateAndEnter(n, n > 1 ? 'down' : null);
   const locked = floor.doors.map(d => d.room).join(', ');
-  if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
+  if (floor.boss) flash(bossMsg());
   else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
+const bossMsg = () => stage === FINAL_STAGE ? 'The final chamber. Something huge waits in the middle. One healing potion hides along the walls.' : 'The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.';
 function generateAndEnter(n, arrive) {
   clearBombs();
-  gameRng = makeRng(((runSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
+  gameRng = makeRng(((stageSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
-  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, quest: questPlan[n], themeName: theme.name });
-  assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
+  const final = stage === FINAL_STAGE, gn = final ? MAX_FLOOR : n;   // the final stage's one floor is generated as a floor 5 arena
+  floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, depth: effFloor(0) });
+  assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
-  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; } }   // each theme's boss has its own look
+  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; } }   // each theme's boss has its own look
   floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
   buildFloor();
+  if (floor.boss && !final && bossDead[stage]) {            // a stage arena rebuilt after its boss fell (the cache was trimmed): no boss, the safe room door already open
+    const bi = enemies.findIndex(e => e.boss); if (bi >= 0) { group.remove(enemies[bi].mesh); enemies.splice(bi, 1); }
+    const s = floor.safe; s.open = true; floor.tiles[s.door.y * floor.w + s.door.x] = T_SAFEDOOR; s.o.anim = 1; s.o.mesh.position.y = WALL_H; s.o.mesh.visible = false;
+  }
   player.props = propObjs;
   player.mobs = enemies;
   search = null;
@@ -1203,6 +1226,7 @@ function generateAndEnter(n, arrive) {
 // Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
 // dir: 'down' (you go to floor n and arrive by its stairs up) or 'up' (you arrive by its stairs down).
 function changeFloor(n, dir) {
+  if (dir === 'up' && !floorCache[n]) { sealedUp(); return; }   // never rebuild a floor you already left
   allyDepart();                                       // a following ally within a few metres comes too (js/quests.js)
   saveFloor();
   search = null; cb.draw = null; cb.eat = null;
@@ -1214,7 +1238,7 @@ function changeFloor(n, dir) {
     group = null;                                     // the floor we left is cached: buildFloor must not dispose it
     generateAndEnter(n, dir);
     const locked = floor.doors.map(d => d.room).join(', ');
-    if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
+    if (floor.boss) flash(bossMsg());
     else flash(`Floor ${n}. Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
   }
   allyArrive();
@@ -1310,24 +1334,74 @@ function upProgress() {
 function eyeY() { return player.eye - stairProgress() * STAIR_DEPTH + upProgress() * UP_RISE; }
 
 let sealedMsgT = 0;
+function sealedUp() { if (performance.now() - sealedMsgT > 2500) { sealedMsgT = performance.now(); flash('The way back is sealed.'); } }
 function checkStairs() {
   if (floor.boss && enemies.some(e => e.boss && !e.dead) && stairProgress() > 0.25) {   // sealed until the boss falls
     player.z = stairBox.z0 - 0.45; player.vz = 0;
     if (performance.now() - sealedMsgT > 2500) { sealedMsgT = performance.now(); flash('The way down is sealed until the boss falls.'); }
     return;
   }
-  if (upProgress() >= 0.85 && floorNum > 1) { changeFloor(floorNum - 1, 'up'); return; }   // climbed back up
+  const up = upProgress();                                                          // climbing back up works only into floors still cached (never rebuilds one you left)
+  if (up > 0.25) {
+    const dest = floorNum > 1 ? floorCache[floorNum - 1] : stageCaches[stage - 1] && stageCaches[stage - 1][MAX_FLOOR];
+    if (!dest) { player.z = upBox.dir > 0 ? upBox.z1 + 0.45 : upBox.z0 - 0.45; player.vz = 0; sealedUp(); return; }
+    if (up >= 0.85) { if (floorNum > 1) changeFloor(floorNum - 1, 'up'); else changeStage(stage - 1, 'up'); return; }   // climbed back up (from floor 1: to the previous stage's safe room)
+  }
   if (stairProgress() < 0.85) return;
-  if (floorNum < MAX_FLOOR) changeFloor(floorNum + 1, 'down');
+  if (floorNum < MAX_FLOOR && stage !== FINAL_STAGE) changeFloor(floorNum + 1, 'down');
   else enterNextStage();
 }
-// The one hook for the stairs in the safe room. Until stages 2 to 4 exist it ends the run; the stage work replaces the body
-// (build the next stage's first floor, carry the pack over, reset floorNum and the cache).
-function enterNextStage() { finishRun(); }
+// Switch to stage s: its theme, look, seed and plan (shop, armory, encounters). The pack, hunger and health are untouched, so everything carries over.
+function useStage(s) {
+  prisonerRuns[stage] = prisonerRun;
+  stage = s; floorCache = stageCaches[s] || (stageCaches[s] = {});
+  theme = s === FINAL_STAGE ? FINAL_THEME : stageThemes[s - 1];
+  HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;
+  if (s < FINAL_STAGE) planStage(s); else { stageSeed = stageSeedOf(s); questPlan = {}; }
+  prisonerRun = prisonerRuns[s] || null;
+  for (const l of torchLights) l.color.setHex(theme.light);
+  torch.color.setHex(theme.light);
+  scene.background = new THREE.Color(theme.fog); scene.fog = new THREE.FogExp2(theme.fog, 0.085);
+  hud.theme.textContent = theme.name;
+}
+// Memory: at most 6 floors stay cached. Going down into stage cur keeps only the previous stage's boss floor (its safe room); climbing keeps the stage you left on its floor 1.
+function disposeCache(c, keep) { for (const k of Object.keys(c)) if (!keep || !keep(+k)) { disposeGroup(c[k].group); delete c[k]; } }
+function trimCaches(cur, dir) {
+  for (const k of Object.keys(stageCaches)) {
+    const t = +k; if (t === cur) continue;
+    if (t === cur - 1 && dir === 'down') disposeCache(stageCaches[t], n => n === MAX_FLOOR);
+    else if (t === cur + 1 && dir === 'up') disposeCache(stageCaches[t], n => n === 1);
+    else { disposeCache(stageCaches[t]); delete stageCaches[t]; }
+  }
+}
+// The stairs between stages. dir 'down': into stage s floor 1 (from the previous stage's safe room); 'up': into stage s's boss floor, its safe room, from the stage after it.
+function changeStage(s, dir) {
+  if (dir === 'up' && !(stageCaches[s] && stageCaches[s][MAX_FLOOR])) { sealedUp(); return; }
+  allyDepart();
+  saveFloor();                                         // into the old stage's cache
+  search = null; cb.draw = null; cb.eat = null;
+  useStage(s); trimCaches(s, dir);
+  const n = dir === 'up' ? MAX_FLOOR : 1, c = floorCache[n];
+  if (c) { loadFloor(n, c); arriveBy(dir); floorBanner(n); }
+  else { group = null; generateAndEnter(n, dir); }
+  flash(s === FINAL_STAGE ? 'The final stage. Whatever waits here has no name yet.' : dir === 'up' ? `You climb back up to stage ${s}: ${theme.name}, the safe room.` : `Stage ${s} of ${STAGES}: ${theme.name}. ${floor.boss ? '' : 'Find the stairs.'}`);
+  allyArrive();
+  hunger.fight = 0;
+}
+// The stairs in the safe room lead to the next stage; after the last stage (the final boss) the run is over.
+function enterNextStage() { if (stage < FINAL_STAGE) changeStage(stage + 1, 'down'); else finishRun(); }
+// Dev and tests: a fresh stage s (all caches thrown away, no ally, no prisoner).
+function startStage(s) {
+  clearTimeout(winTimer);
+  s = Math.max(1, Math.min(FINAL_STAGE, s | 0));
+  for (const k of Object.keys(stageCaches)) { disposeCache(stageCaches[k]); delete stageCaches[k]; }
+  allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
+  useStage(s); startFloor(1);
+}
 function finishRun() {
   state = 'won';
   document.exitPointerLock();
-  hud.overlayText.innerHTML = `<h1>Stage 1 complete</h1><p>The boss is dead and you took the safe room stairs down. The next stage is not built yet, so this is the end of the run.</p><p><button type="button" style="font:inherit;padding:6px 18px;cursor:pointer">Start a new run</button></p>`;
+  hud.overlayText.innerHTML = `<h1>Run complete</h1><p>The placeholder final boss is dead. You made it through all ${STAGES} stages. The real final fight is not designed yet.</p><p><button type="button" style="font:inherit;padding:6px 18px;cursor:pointer">Start a new run</button></p>`;
   hud.overlay.style.display = 'flex';
 }
 
@@ -1356,7 +1430,7 @@ addEventListener('mousemove', e => { if (document.pointerLockElement === canvas)
 addEventListener('keydown', e => {
   if (!e.repeat && e.code === 'Backquote') setDev(!dev.on);
   if (dev.on && !e.repeat && state === 'play') {
-    if (e.code === 'KeyN') { if (floorNum < MAX_FLOOR) startFloor(floorNum + 1); else finishRun(); }
+    if (e.code === 'KeyN') { if (floorNum < MAX_FLOOR && stage !== FINAL_STAGE) startFloor(floorNum + 1); else enterNextStage(); }
     if (e.code === 'KeyM') explored.fill(1);
   }
   const slot = [KEYS.slot1, KEYS.slot2, KEYS.slot3, KEYS.slot4].indexOf(e.code);
@@ -1454,7 +1528,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, inv, cb, pst, hunger, arrows, floorCache, perfStats, shopFloor, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
