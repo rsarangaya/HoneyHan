@@ -340,7 +340,7 @@ function dealHit(e, zone, base, w, noise) {
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
   else {
     const pr = w.proc;                              // weapon passive: dagger bleeds, mace stuns, sword sometimes cripples, bow slows
-    const proc = pr && pr.zone === zone && Math.random() < pr.chance && e.addStatus(pr.status, pr.dur);
+    const proc = pr && pr.zone === zone && gameRng() < pr.chance && e.addStatus(pr.status, pr.dur);
     if (proc) discover('status:' + pr.status, STATUS[pr.status].name);
     mark(`${zone.toUpperCase()}${sneak ? ' SNEAK' : ''}${guarded ? ' GUARDED' : ''} ${Math.round(dmg)}${proc ? ' +' + STATUS[pr.status].name.toUpperCase() : ''}`, zone === 'head' ? '#ff9a3a' : '#fff');
   }
@@ -484,7 +484,7 @@ Enemy.burst = e => {
 function spawnEnemyShot(s) {
   const gravity = s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
   const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
-  const jitter = () => (Math.random() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
+  const jitter = () => (gameRng() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
   const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff' }[s.kind]) };
   a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
 }
@@ -498,7 +498,7 @@ function enemyShotHit(a) {
   }
   if (a.kind === 'hex') {                                                            // a hex slows or dazes, and no block stops it
     hitReaction(4);
-    const s = Math.random() < 0.5 ? 'slow' : 'daze';
+    const s = gameRng() < 0.5 ? 'slow' : 'daze';
     if (pst.apply(s, 4)) discover('status:' + s, STATUS[s].name);
     mark('HEXED', '#c58aff'); addLog(`Hexed: ${STATUS[s].name}!`, '#c58aff');
     return;
@@ -528,7 +528,7 @@ function fireArrow(frac) {
 }
 function stickArrow(a, hitEnemy) {
   a.stuck = true; a.vx = a.vy = a.vz = 0;
-  const keep = Math.random() < (hitEnemy ? BOW.recoverHit : BOW.recoverWorld) && arrows.filter(q => q.stuck).length <= BOW.maxStuck;
+  const keep = gameRng() < (hitEnemy ? BOW.recoverHit : BOW.recoverWorld) && arrows.filter(q => q.stuck).length <= BOW.maxStuck;
   if (!keep) { group.remove(a.mesh); arrows.splice(arrows.indexOf(a), 1); return; }
   if (!hitEnemy && a.px !== undefined) { a.x = a.px; a.z = a.pz; }                     // lie in front of the wall, not inside it
   a.y = 0.05; a.mesh.position.set(a.x, 0.05, a.z); a.mesh.rotation.set(0, Math.atan2(a.dirx || 0, a.dirz || 1), 0);
@@ -652,7 +652,7 @@ function updateCombat(dt) {
   if (bleed > 0 && !dev.on && inv.hp > 1) inv.hp = Math.max(1, inv.hp - bleed);   // bleeding never kills on its own
   if (pst.has('daze')) spend(STATUS.daze.drain * dt);
   if (!dev.on) {                                    // hunger drains while you play (frozen in dev mode)
-    const r = hunger.update(dt, { sprinting: player.sprinting, still: Math.hypot(player.vx, player.vz) < 0.2, crouching: player.crouching });
+    const r = hunger.update(dt, { sprinting: player.sprinting, still: Math.hypot(player.vx, player.vz) < 0.2, crouching: player.crouching }, gameRng);
     if (r.growl) loud(r.growl);                     // a stomach growl is a faint noise
     if (r.hp && inv.hp > 1) inv.hp = Math.max(1, inv.hp - r.hp);   // starving hurts but never kills
     if (r.stage) { flash(HUNGER_MSG[r.stage]); if (r.stage !== 'fed') discover('item:hunger', 'Hunger'); }
@@ -965,6 +965,7 @@ function startFloor(n) {
   else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
 function generateAndEnter(n, arrive) {
+  gameRng = makeRng(((runSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
   floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
@@ -981,7 +982,7 @@ function generateAndEnter(n, arrive) {
   if (arrive) arriveBy(arrive); else player.place(floor);
   updateCulling(player, cullChunks, propObjs, enemies);
   baseGuards = floor.enemies.length;
-  respawnT = n >= 3 && !floor.boss ? 35 + Math.random() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
+  respawnT = n >= 3 && !floor.boss ? 35 + gameRng() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
   floorBanner(n);
 }
 
@@ -1009,16 +1010,16 @@ function updateRespawn(dt) {
   if (floorNum < 3 || floor.boss) return;
   respawnT -= dt;
   if (respawnT > 0) return;
-  respawnT = 35 + Math.random() * 35;
+  respawnT = 35 + gameRng() * 35;
   if (enemies.filter(e => !e.dead).length >= Math.ceil(baseGuards * 1.5)) return;
   const open = floor.rooms.filter(r => !r.locked && r.theme !== 'shop');
   const homes = open.filter((r, i) => r !== floor.rooms[0]
     && Math.hypot((r.cx + 0.5) * TILE - player.x, (r.cy + 0.5) * TILE - player.z) > 24
     && !hasLOS(floor, player.x, player.z, (r.cx + 0.5) * TILE, (r.cy + 0.5) * TILE));
   if (!homes.length) { respawnT = 8; return; }
-  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-  const a = roomPoint(floor, pick(homes), Math.floor(Math.random() * 8)), b = roomPoint(floor, pick(open), Math.floor(Math.random() * 8));
-  const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (Math.random() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, Math.random) }, floor);
+  const pick = arr => arr[Math.floor(gameRng() * arr.length)];
+  const a = roomPoint(floor, pick(homes), Math.floor(gameRng() * 8)), b = roomPoint(floor, pick(open), Math.floor(gameRng() * 8));
+  const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (gameRng() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, gameRng) }, floor);
   e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
 }
 

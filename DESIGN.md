@@ -365,8 +365,8 @@ Goal: food is a real resource, not a second healing potion. Hunger adds a slow p
   - Tier multiplier (price rises faster than power): Common x1, Uncommon x2, Rare x3.5, Epic x6, Legendary x12 (Legendary only matters for selling).
   - Weapon base (Common): Dagger 30, Sword 45, Mace 50.
   - Armor base (Common) = class base x slot factor. Class base: light 20, medium 45, heavy 80. Slot factor: helmet 0.8, chest 1.4, boots 0.8.
-  - Potion price (flat, no tier): Healing 20, Vigor 25, Swiftness 30, Might 40, Stoneskin 40, Shadow 45. Arrows: 2 gold each, sold in packs of 5 for 10.
-- **Price table (buy price in gold):**
+  - Potion price (flat, no tier), current values from `js/shop.js`: Healing 45, Vigor (stamina) 40, Swiftness 50, Might 65, Stoneskin 65, Shadow 70. Food (flat): Bread 12, Cheese 15, Jerky 20, Apple 8, Stew 45. Arrows: 2 gold each, sold in packs of 5 for 10.
+- **Price table (buy price in gold; potion and food prices above are the current ones, see `js/shop.js`):**
 
 | Item | Common | Uncommon | Rare | Epic | Legendary (sell only) |
 |---|---|---|---|---|---|

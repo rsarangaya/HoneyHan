@@ -58,7 +58,7 @@ const ENEMY_TYPES = {
   thief:   { name: 'Thief Goblin', zones: [0, 1, 0], skin: 0x3a5a3a, noGear: true, weapon: 'dagger', hpMul: 0.7, dmgMul: 0.3, speed: 1.15, vis: 1.1, thief: true,
     info: ['Does not fight: it steals up to 25 gold and runs away. Kill it and the gold drops with its body.', 'Fast, so shoot it or trap it. Keep your gold low near one.'] },
   captain: { name: 'Market Captain', elite: true, zones: [0.3, 0.5, 0.2], weapon: 'sword', heavy: true, hpMul: 2, dmgMul: 1.3, reach: 1.1, scale: 1.15, shout: 3, callAll: true, sneakCap: 3,
-    info: ['An elite in plate. When it spots you it bellows so loudly that every enemy in about 30 m turns alerted. Take it out quietly, or not at all.'] },
+    info: ['An elite in plate. When it spots you it bellows so loudly that every enemy in about 33 m (11 m x 3) turns alerted. Take it out quietly, or not at all.'] },
   cultist: { name: 'Cultist', zones: [0.3, 0.5, 0.2], skin: 0x8aa0a0, robe: 0xd8d8e8, orb: 0x9adaff, look: 'staff', noGear: true, weapon: 'sword', hpMul: 0.8, dmgMul: 0.6, vis: 0.7, hear: 1.2,
     ranged: { kind: 'curse', min: 5, max: 11, wind: 0.9, cd: 2.8, speed: 12 },
     info: ['A robed caster that curses you with a Slow for 5 s. The bolt is slow enough to dodge.'] },

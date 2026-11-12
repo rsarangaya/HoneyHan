@@ -11,6 +11,7 @@ const TUNE = {
   bossHp: 220, bossDmgMul: 1.4,       // the boss wears Rare plate, so its real toughness is higher than its HP
   bossWake: 12,                       // metres: the boss stays asleep until you are this close
   bossSpeed: 4.2,                     // a sprinting player (4.6) can outrun it
+  bossWindMul: 1.35, bossReachMul: 1.4, bossAtkSpd: 0.7, bossWeaponTier: 3,   // wind-up x (longer telegraph), reach x, own attack-speed stat, mace tier
   bossLegendary: 0.10,                // chance its guaranteed Epic drop upgrades to Legendary
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,

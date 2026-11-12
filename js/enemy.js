@@ -19,7 +19,8 @@ const ATTACK_POSES = {
   shoot: [[0, 0, 1.5, 1.5, 0],     [0, 0, 1.5, 1.5, 0]],       // archers and shamans: both arms out in front
 };
 const ATTACK_RANGE = 1.4;            // hp, damage, windup and cooldown live in TUNE (combat.js)
-const pickZone = w => { const r = Math.random() * (w[0] + w[1] + w[2]); return r < w[0] ? 'head' : r < w[0] + w[1] ? 'body' : 'legs'; };
+let gameRng = makeRng(1);   // gameplay RNG, re-seeded per floor in main.js (separate from the generator's, so floors are unchanged)
+const pickZone = w => { const r = gameRng() * (w[0] + w[1] + w[2]); return r < w[0] ? 'head' : r < w[0] + w[1] ? 'body' : 'legs'; };
 
 const wallAt = (floor, tx, ty) => tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h || floor.tiles[ty * floor.w + tx] === T_WALL || floor.tiles[ty * floor.w + tx] === T_DOOR;
 
@@ -177,8 +178,8 @@ class Enemy {
     const crowned = this.boss && ['innkeeper', 'king', 'warlord', 'frost', 'fungus'].includes(this.spec.dress);
     const kind = this.boss ? 'mace' : this.T.weapon || (rg.pick ? rg.pick(['dagger', 'sword', 'mace']) : 'mace');
     this.weaponKind = kind;
-    const weapon = { type: 'weapon', base: kind, tier: this.boss ? 3 : tierOf() };
-    this.spdRoll = this.boss ? 0.7 : (WSTATS[kind].spd || 1) * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
+    const weapon = { type: 'weapon', base: kind, tier: this.boss ? TUNE.bossWeaponTier : tierOf() };
+    this.spdRoll = this.boss ? TUNE.bossAtkSpd : (WSTATS[kind].spd || 1) * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
     this.gear = this.quad ? [] : [helmet, vest, boots, weapon].filter(Boolean);   // animals carry nothing
     const cut = it => it ? Math.min(0.5, ARMOR_RED[it.cls] * TIERS[it.tier].mul) : 0;
     this.resist = { head: 1 - cut(helmet), body: 1 - cut(vest), legs: 1 - cut(boots) };
@@ -466,8 +467,8 @@ class Enemy {
   get r() { return this.boss ? 0.65 : this.T.r; }   // body radius: guards keep this far apart and out of the player
 
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
-  get windT_() { if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? 1.35 : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
-  get reach() { return TUNE.enemyReach * (this.boss ? 1.4 : this.T.reach); }
+  get windT_() { if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
+  get reach() { return TUNE.enemyReach * (this.boss ? TUNE.bossReachMul : this.T.reach); }
   get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
   get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul * this.dmgScale; }
   get cooldown() { return TUNE.enemyCooldown / this.atkSpd * this.T.cdMul; }

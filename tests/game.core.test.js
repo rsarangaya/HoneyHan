@@ -102,7 +102,7 @@ run('Core gameplay: floors, stairs, collision, combat basics, statuses', async (
       const swing = async (base, pitch, status) => {
         T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base, tier: 0 });
         const e = T.guard(1.2, 'toward', true); e.hp = e.maxHp = 500;
-        game.player.pitch = pitch; Math.random = () => 0;       // chance rolls always succeed
+        game.player.pitch = pitch; Math.random = () => 0; gameRng = () => 0;       // chance rolls always succeed
         await T.sleep(100); game.cb.press = true;
         const got = await T.until(() => e.st.has(status), 4000);
         return { got, hp: e.hp, e };
