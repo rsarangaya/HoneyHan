@@ -366,12 +366,14 @@ function makeDecor(d) {
     }
     case 'beam': {
       RB(inner, d.len, 0.28, 0.3, wood, 0, WALL_H - 0.14, 0, d.alongZ ? Math.PI / 2 : 0);
+      break;
     }
     case 'urn': {
       const clay = lam(0x8a5a3a);
       LA(inner, [[0, 0], [0.16, 0], [0.26, 0.12], [0.29, 0.3], [0.22, 0.5], [0.12, 0.62], [0.15, 0.72], [0.17, 0.74], [0.0, 0.74]], clay, 0, 0, 0, 12);   // a belly and a flared neck
       TR(inner, 0.28, 0.02, lam(0x2a2a30), 0, 0.3, 0);                                                 // iron band
       for (const s of [-1, 1]) { const h = new THREE.Mesh(cached('urnh', () => new THREE.TorusGeometry(0.07, 0.015, 5, 10)), clay); h.position.set(s * 0.17, 0.55, 0); h.rotation.y = Math.PI / 2; inner.add(h); }   // handles
+      break;
     }
     case 'banner': {
       C(inner, 0.025, 0.025, 1.1, iron, 0, 2.35, 0, 6).rotation.z = Math.PI / 2;
@@ -388,6 +390,7 @@ function makeDecor(d) {
       for (const x of [-0.6, 0.6]) { C(inner, 0.04, 0.045, 0.3, bone, x, 1.12, 0, 6); flame(inner, x, 1.3, 0); }
       LA(inner, [[0, 0], [0.06, 0], [0.025, 0.07], [0.03, 0.14], [0.07, 0.2], [0.0, 0.2]], lam(0xc9a23a, 0x2a2008), 0, 0.95, 0.1, 10);   // goblet
       SP(inner, 0.18, 0.3, 0.18, lam(0xc9a23a, 0x2a2008), 0, 1.12, -0.2);                              // small idol
+      break;
     }
     case 'statue': {
       LA(inner, [[0, 0], [0.42, 0], [0.38, 0.08], [0.32, 0.45], [0.36, 0.5], [0.0, 0.5]], dstone, 0, 0, 0, 14);   // a moulded plinth

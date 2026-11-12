@@ -37,6 +37,8 @@ const HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the 
 const THEME_HINT = { 'The Sunken Tavern': 'Shallow puddles splash when you step in them, even when you creep.', 'The Moonlit Orchard': 'Tall grass hides a crouching player. Scarecrows are not all scenery.', 'The Clockwork Library': 'The library is eerily silent: every sound you make carries 40% farther.', 'The Mushroom Cellar': 'Glowing spores light you up: guards see you from farther in them.', 'The Goblin Market': 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.', 'The Frozen Chapel': 'Patches of ice make you slide.' };
 const shopFloor = makeRng((runSeed ^ 0x51ed270b) >>> 0).int(1, MAX_FLOOR - 1);   // the one floor of this stage with a shop (not the boss arena); the player is not told which
 
+const questPlan = rollQuests(runSeed, MAX_FLOOR, shopFloor);   // which floors carry an optional encounter, and which type (js/quests.js)
+
 // Procedural textures. Smooth filtering with mipmaps (no chunky pixels), a seeded pattern per colour so a theme looks
 // the same every run: brick walls, plank or flagstone floors, a dark plank ceiling.
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -219,6 +221,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
+  questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot
 
   scene.add(group);
   scene.background = new THREE.Color(theme.fog);
@@ -793,7 +796,7 @@ function updateCombat(dt) {
 
   if (player.sprinting) spend(TUNE.sprintDrain * dt);
   else if (cb.delay > 0) cb.delay -= dt;
-  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * (inv.buffs.hearty > 0 ? 1.5 : 1) * hunger.regenMul() * dt);
+  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * (inv.buffs.hearty > 0 ? 1.5 : 1) * (1 + inv.stamBonus) * hunger.regenMul() * dt);
   cb.stamina = Math.min(cb.stamina, STAMINA_MAX * hunger.maxStaminaMul());   // Weak: max stamina is cut
   if (dev.on) cb.stamina = STAMINA_MAX;
   if (cb.stamina <= 1) cb.canSprint = false; else if (cb.stamina > 25) cb.canSprint = true;
@@ -964,6 +967,7 @@ function updateSearch(dt) {
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
+  if (o.p.kind === 'altar') { dealUI.open(o); return; }
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
     discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
@@ -991,7 +995,7 @@ function finishSearch(o, smashed) {
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
-    flash(`Unlocked the ${o.p.room}`);
+    flash(`Unlocked the ${o.p.room}`); questDoorOpened(o);
     return;
   }
   let drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
@@ -1116,8 +1120,9 @@ function generateAndEnter(n, arrive) {
   clearBombs();
   gameRng = makeRng(((runSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
-  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
+  floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, quest: questPlan[n], themeName: theme.name });
   assignEnemyTypes(floor, runSeed, n, theme.name);          // natives, rat packs, wolves and their handlers (js/enemytypes.js)
+  questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
   if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; } }   // each theme's boss has its own look
   floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
@@ -1349,7 +1354,7 @@ function frame(now) {
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
     updateBombs(dt); updateGas(dt);
-    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
+    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();

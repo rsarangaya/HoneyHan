@@ -120,6 +120,7 @@ const invUI = (() => {
       </div>
       <div class="quick">${slots}</div>
       <div class="sum">Armor cuts damage: ${arm}. Armor noise +${inv.armorNoise()} m.${buffs ? ' Active: ' + buffs + '.' : ''}${note ? '<br><b>' + note + '</b>' : ''}</div>
+      ${questLine(floor) ? `<div class="sum">Optional: ${questLine(floor)}</div>` : ''}
       <div class="sum dim">Pickups go to the backpack only. Assign weapons and potions to a quickslot with the → buttons, then press ${[1, 2, 3, 4].map(n => keyName(KEYS['slot' + n])).join(', ')} in the game.</div>
     </div>`;
   }
@@ -169,7 +170,7 @@ const invUI = (() => {
       e.preventDefault();
       if (e.repeat) return;
       if (state === 'play') open(); else if (state === 'inv') close();
-    } else if (e.code === 'Escape' && state === 'inv') close();
+    } else if (e.code === 'Escape' && state === 'inv') { e.stopImmediatePropagation(); close(); }   // handled here: the pause menu's Esc listener must not reopen on the same key
   });
   return { open, close, render };
 })();

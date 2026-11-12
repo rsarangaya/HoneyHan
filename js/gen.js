@@ -72,6 +72,7 @@ const LOCKED_ROOMS = {
   armory:     { w: 7, h: 6, theme: 'armory',     name: 'armory',  key: 'Armory Key' },
   vault:      { w: 5, h: 5, theme: 'vault',      name: 'vault',   key: 'Vault Key' },
   brewery:    { w: 6, h: 5, theme: 'lockedbrew', name: 'brewery', key: 'Brewery Key' },
+  lair:       { w: 6, h: 5, theme: 'lair',       name: 'lair',    key: 'Lair Key' },       // the mini-boss room (opts.quest = 'miniboss'), never rolled as a plain locked room
 };
 const NEIGH8 = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]];
 
@@ -84,13 +85,14 @@ function roomPoint(f, r, k) {
   return { x: r.cx, y: r.cy - 1 };
 }
 
-// opts.armory: this floor must contain the armory (retries with new layouts until it fits).
+// opts.armory: this floor must contain the armory (retries with new layouts until it fits). opts.quest: an encounter
+// type from js/quests.js ('miniboss' or 'shrine'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
   for (let attempt = 0; attempt < 24; attempt++) {
     f = layoutFloor(seed + attempt * 7777, floorNum, opts);
-    if ((!opts.armory || f.rooms.some(r => r.theme === 'armory')) && (!opts.shop || f.shop)) break;
+    if ((!opts.armory || f.rooms.some(r => r.theme === 'armory')) && (!opts.shop || f.shop) && (!opts.quest || f.quest)) break;
   }
   return f;
 }
@@ -315,9 +317,9 @@ function layoutFloor(seed, floorNum, opts) {
   // ---- locked rooms: carved into solid rock, joined to the map by a short corridor with a locked
   // door at the vault end. Nothing else connects to them, so the key is the only way in.
   const doors = [];
-  const placeLocked = (type, lock) => {
+  const placeLocked = (type, lock, maxTries = 700, avoid = null) => {
     const spec = LOCKED_ROOMS[type];
-    for (let tries = 0; tries < 700; tries++) {
+    for (let tries = 0; tries < maxTries; tries++) {
       const rw = spec.w, rh = spec.h;
       const x = rng.int(3, w - rw - 4), y = rng.int(3, h - rh - 4);
       let clear = true;                                   // the room plus a 1 tile ring must be solid rock
@@ -334,6 +336,7 @@ function layoutFloor(seed, floorNum, opts) {
         if (k < 2 || k > 12 || wallAt(s.ex + s.dx * k, s.ey + s.dy * k) || at(s.ex + s.dx * k, s.ey + s.dy * k) === T_DOOR) continue;
         const hx = s.ex + s.dx * k, hy = s.ey + s.dy * k;   // never join one locked room to another
         if (rooms.some(o => o.locked && hx >= o.x && hx < o.x + o.w && hy >= o.y && hy < o.y + o.h)) continue;
+        if (avoid && avoid(hx, hy)) continue;             // the join tile must be open, reachable floor (late placement: furniture is already down)
         let clean = true;                                 // keep the corridor from touching other floor beside it
         for (let i = 2; i < k && clean; i++) {
           const cx = s.ex + s.dx * i, cy = s.ey + s.dy * i;
@@ -561,5 +564,50 @@ function layoutFloor(seed, floorNum, opts) {
     else if (floorNum >= 2 && roll < CHEST_ODDS.locked + CHEST_ODDS.trap) p.trap = ['dart', 'gas', 'alarm'][Math.floor(makeRng((p.seed ^ 0x7a9) >>> 0)() * 3)];
   }
 
-  return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, steps: dist[stairs.y * w + stairs.x] };
+  // ---- encounters (js/quests.js picks the floor and the type): drawn last, so floors without one are identical to before.
+  // miniboss: one more locked room (the lair) whose key goes into an ordinary chest. shrine: one of the shrine rooms' altars. ----
+  let quest = null;
+  if (opts.quest === 'miniboss') {
+    const holder = rng.shuffle(props.filter(p => (p.kind === 'chest' || p.kind === 'barrel' || p.kind === 'rubble') && !p.holdsKey && !p.mimic && !p.locked && !p.trap && !inShop(p) && !rooms.some(r => r.locked && p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h)))
+      .sort((p, q) => (p.kind === 'chest' ? 0 : 1) - (q.kind === 'chest' ? 0 : 1))[0];   // a chest, or a barrel or rubble pile turned into one
+    const seen = new Uint8Array(w * h), fq = [start.y * w + start.x];   // floor reachable from the start without keys
+    seen[fq[0]] = 1;
+    for (let n = 0; n < fq.length; n++) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = fq[n] % w + dx, ny = ((fq[n] / w) | 0) + dy, ni = ny * w + nx;
+      if (!wallAt(nx, ny) && !seen[ni] && !blocked[ni] && at(nx, ny) !== T_DOOR && !(nx === stairs.x && ny === stairs.y)) { seen[ni] = 1; fq.push(ni); }
+    }
+    const avoid = (x, y) => at(x, y) !== T_FLOOR || !seen[y * w + x] || blocked[y * w + x] || used.has(y * w + x) || props.some(p => p.x === x && p.y === y);
+    const room = holder && placeLocked('lair', wanted.length + 1, 6000, avoid);   // lock ids 1..wanted.length are taken by the planned locked rooms, even ones that failed to place
+    if (room) {
+      holder.kind = 'chest'; if (holder.tier === undefined) holder.tier = pickWeighted([0, 1, 2], chestTierWeights(floorNum).slice(0, 3));
+      holder.extra = [...(holder.extra || []), { type: 'key', lock: room.lock, label: LOCKED_ROOMS.lair.key }]; holder.holdsKey = true;
+      const lit = [];
+      for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++)
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy)) lit.push({ x, y, dx, dy });
+      rng.shuffle(lit);
+      for (let n = 0, i = 0; n < 3 && i < lit.length; i++) if (torches.every(t => Math.hypot(t.x - lit[i].x, t.y - lit[i].y) >= 3)) { torches.push(lit[i]); n++; }
+      decor.push({ kind: 'rug', x: room.cx, y: room.cy, seed: seedOf(), edge: false, yaw: 0 });
+      for (const [x, y] of [[room.x + 1, room.y + 1], [room.x + room.w - 2, room.y + room.h - 2]]) decor.push({ kind: 'bones', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+      quest = { type: 'miniboss', lock: room.lock, route: [{ x: room.cx - 2, y: room.cy }, { x: room.cx + 2, y: room.cy }], seed: seedOf() };
+    }
+  } else if (opts.quest === 'shrine') {
+    let altar = rng.shuffle(decor.filter(d => d.kind === 'altar'))[0];
+    if (!altar) {                                         // no shrine room on this floor: set an altar in the biggest ordinary room that has a spare inner tile (the floor must stay connected)
+      for (const r of rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop' && r.w * r.h >= 20).sort((a, b) => b.w * b.h - a.w * a.h)) {
+        const spots = [];
+        for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y)) spots.push({ x, y });
+        for (const c of rng.shuffle(spots)) {
+          blocked[c.y * w + c.x] = 1;
+          if (reachCount() !== reach - 1) { blocked[c.y * w + c.x] = 0; continue; }
+          reach--; used.add(c.y * w + c.x);
+          altar = { kind: 'altar', x: c.x, y: c.y, seed: seedOf(), edge: false, yaw: rng.int(0, 3) * Math.PI / 2 };
+          decor.push(altar); break;
+        }
+        if (altar) break;
+      }
+    }
+    if (altar) quest = { type: 'shrine', altar: { x: altar.x, y: altar.y }, seed: seedOf() };
+  }
+
+  return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, quest, steps: dist[stairs.y * w + stairs.x] };
 }

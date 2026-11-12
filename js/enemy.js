@@ -543,6 +543,7 @@ class Enemy {
   set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; if (this.T.bomb && this.fuse < 0) this.fuse = BOMB.fuse; } }   // a bomb goblin lights up when it is alerted
 
   die() {
+    if (this.tag) this.tag.visible = false;                                                           // a mini-boss's name tag goes with it
     this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
     if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
     if (this.T.bomb) { if (this.spark) this.spark.visible = false; if (!this.exploded && Enemy.dropBomb) Enemy.dropBomb(this); }   // killed first: the bomb falls and goes off on the floor

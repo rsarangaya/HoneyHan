@@ -112,6 +112,7 @@ const PROP_INFO = {
   vaultchest:{ label: 'Open vault chest', time: 1.2 },
   door:      { label: 'Unlock door',      time: 0.6 },
   merchant:  { label: 'Trade with the merchant', time: 0.35 },
+  altar:     { label: 'Kneel at the altar', time: 0.5 },
 };
 
 // Locked and trapped chests (js/gen.js CHEST_ODDS places them; main.js runs them). A lockpick picks a lock (hold E, quiet, may
@@ -236,6 +237,12 @@ function rollLootBase(kind, floorNum, rng, bonus, gear, type, tier) {
     if (type === 'archer' && rng() < 0.7) { out.push({ type: 'arrows', n: rng.int(3, 6) }); return out; }                  // archers carry arrows
     if (type === 'shaman') { if (rng() < 0.1) out.push({ type: 'wand', kind: rollWandKind(rng) }); else if (rng() < 0.5) out.push(potion()); return out; }
     if (type === 'brute') { if (rng() < 0.6) out.push(rollEquipment(floorNum, rng, { minTier: 2 })); out.push({ type: 'gold', n: rng.int(5, 12) }); return out; }
+    if (type === 'miniboss') {                                                                                    // guaranteed Rare or better gear plus gold, richer deeper down (QUESTS.miniboss)
+      const q = QUESTS.miniboss;
+      out.push(rollEquipment(floorNum, rng, { minTier: q.minTier }), { type: 'gold', n: rng.int(q.goldMin, q.goldMax) + q.goldPerFloor * floorNum });
+      if (rng() < q.potion) out.push(potion());
+      return out;
+    }
     if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
     if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(6, 15) }); return out; }   // the elite always pays
     if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(5, 15) }); return out; }          // robbers carry gold
@@ -291,6 +298,7 @@ class Inventory {
     this.buffs = {};                                      // name -> seconds left
     this.rageReq = null;                                  // Hanahan's Rage: main.js plays it
     this.eatReq = null;                                   // food the player wants to eat; main.js starts the eating
+    this.stamBonus = 0;                                   // permanent stamina regen bonus for the run (shrine bargain), as a fraction
     this.refillStamina = false;                           // set by the vigor potion, read by main
   }
 

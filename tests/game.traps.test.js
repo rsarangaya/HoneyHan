@@ -471,7 +471,11 @@ run('Mimic, locked and trapped chests and bomb goblins', async ({ open, check })
   check('crouched search disarms a trapped chest silently: no damage, status, gas or noise, and loot is still given', disarm.crouch && disarm.noise === 0 && disarm.hp === 100 && !disarm.bleed && !disarm.daze && !disarm.slow && !disarm.gas && !disarm.enemyDazed && !disarm.trapLeft && disarm.opened && disarm.loot, JSON.stringify(disarm));
 
   // 25. Real placement: a chest the game built with a padlock (locked) or a wire (trapped) loses that tell when it is opened or disarmed.
-  const built = await page.evaluate(async () => {
+  // This part runs on its own page with seed 1: no encounter on floors 1 to 4 there (SEED's floor 3 holds the mini-boss, which
+  // re-lays the floor and leaves no locked chest on it). Seed 1 has a locked chest on floors 2 and 4 and two trapped ones.
+  const built7 = await open(1);
+  await built7.evaluate(QHELP); await built7.evaluate(CHESTHELP);
+  const built = await built7.evaluate(async () => {
     const found = { lock: null, traps: [] };
     for (const n of [1, 2, 3, 4]) {
       game.startFloor(n);
@@ -505,6 +509,7 @@ run('Mimic, locked and trapped chests and bomb goblins', async ({ open, check })
     }
     return out;
   });
+  await built7.close();
   check('a built padlock comes off when the chest is picked', built.lockFound && built.lockOpened && built.padlockGone, JSON.stringify(built));
   check('a built trap wire comes off when the trap is disarmed or sprung', built.trapsFound >= 2 && built.disarmTellGone && !built.disarmTrapLeft && built.disarmHp === 100 && built.triggerTellGone && !built.triggerTrapLeft, JSON.stringify(built));
 

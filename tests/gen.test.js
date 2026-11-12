@@ -8,7 +8,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
-for (const f of ['js/gen.js', 'js/loot.js', 'js/wands.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['js/gen.js', 'js/loot.js', 'js/wands.js', 'js/enemytypes.js', 'js/quests.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 const G = vm.runInContext('({ generateFloor, T_WALL, T_DOOR, T_STAIRS, THEMES, THEME_GIMMICK })', ctx);
 const THEME_NAMES = G.THEMES.map(t => t.name);
 
@@ -210,6 +210,77 @@ for (let s = 1; s <= N; s++) {
     if (JSON.stringify(a) !== JSON.stringify(b)) mismatch++;
   }
   if (mismatch) fail('lockpick', `${mismatch} loot tables changed apart from the lockpick`);
+}
+
+// Encounters (js/quests.js rollQuests; gen.js opts.quest 'miniboss' lays out the lair). Plain Node, no browser.
+{
+  const Q = vm.runInContext('({ rollQuests, QUESTS, makeRng, rollLoot, MINIBOSS_NAMES })', ctx);
+  const seen = { 0: 0, 1: 0, 2: 0 }, types = {}, qbad = [];
+  const RS = 20000;
+  for (let s = 1; s <= RS; s++) {
+    const seed = (s * 2654435761) >>> 0, shop = Q.makeRng((seed ^ 0x51ed270b) >>> 0).int(1, 4);
+    const plan = Q.rollQuests(seed, 5, shop), floors = Object.keys(plan).map(Number);
+    seen[floors.length]++;
+    for (const n of floors) { if (n < 2 || n > 4) qbad.push(`floor ${n} outside 2 to 4`); if (n === shop) qbad.push(`encounter on the shop floor ${n}`); types[plan[n]] = (types[plan[n]] || 0) + 1; }
+    if (s <= 2000 && JSON.stringify(Q.rollQuests(seed, 5, shop)) !== JSON.stringify(plan)) qbad.push('roll changed between two calls');
+  }
+  const pct = k => 100 * seen[k] / RS, want = { 0: 25, 1: 45, 2: 30 };
+  console.log(`encounters per stage: none ${pct(0).toFixed(1)}%, one ${pct(1).toFixed(1)}%, two ${pct(2).toFixed(1)}%; types ${JSON.stringify(types)}`);
+  for (const k of [0, 1, 2]) if (Math.abs(pct(k) - want[k]) > 1.5) fail('roll', `${k} encounters ${pct(k).toFixed(1)}%, want about ${want[k]}%`);
+  for (const m of qbad.slice(0, 3)) fail('roll', m);
+  if (!types.miniboss || !types.shrine) fail('roll', 'both encounter types should be rolled');
+
+  // Lair layout: 300 seeds, floors 2 to 4, mini-boss forced. The door is reachable from the start with no key; the lair interior is
+  // reachable only through the door; the key sits on a reachable chest; the mini-boss waits inside on its route.
+  let lairs = 0, noFit = 0;
+  const lairFails = [];
+  for (let s = 1; s <= 300; s++) for (let n = 2; n <= 4; n++) {
+    const seed = (s * 2654435761 + 1213) >>> 0, where = `lair seed ${seed} floor ${n}`;
+    const f = G.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'miniboss' });
+    if (f.quest) vm.runInContext('questSpawn', ctx)(f);                   // as main.js does after the layout
+    const lair = f.rooms.find(r => r.theme === 'lair');
+    if (!f.quest) {                                                       // the layout never fit: no half-built lair anywhere
+      noFit++;
+      if (lair || f.doors.some(d => d.room === 'lair') || f.enemies.some(e => e.type === 'miniboss')) fail(where, 'no encounter, but lair pieces are left on the floor');
+      continue;
+    }
+    lairs++;
+    const door = f.doors.find(d => d.room === 'lair');
+    if (!lair || !door || f.quest.type !== 'miniboss') { fail(where, 'quest miniboss without a lair room and door'); continue; }
+    const closed = flood(f, false), open = flood(f, true);
+    if (!touchable(f, closed, door.x, door.y)) lairFails.push(`${where}: lair door not reachable from the start without a key`);
+    const interior = [];
+    for (let y = lair.y; y < lair.y + lair.h; y++) for (let x = lair.x; x < lair.x + lair.w; x++) interior.push(y * f.w + x);
+    if (interior.some(i => closed[i])) lairFails.push(`${where}: lair interior reachable without the door`);
+    if (!interior.some(i => open[i])) lairFails.push(`${where}: lair interior unreachable even through the door`);
+    const holders = f.props.filter(p => (p.extra || []).some(it => it.type === 'key' && it.lock === f.quest.lock));
+    if (holders.length !== 1 || holders[0].kind !== 'chest' || !touchable(f, closed, holders[0].x, holders[0].y)) lairFails.push(`${where}: lair key is not on one reachable chest`);
+    if (holders.length === 1 && lair && inRoom(lair, holders[0].x, holders[0].y)) lairFails.push(`${where}: lair key inside the lair`);
+    const boss = f.enemies.filter(e => e.type === 'miniboss');
+    if (boss.length !== 1 || !boss[0].mini || !Q.MINIBOSS_NAMES.includes(boss[0].mini.name)) lairFails.push(`${where}: want exactly one named mini-boss`);
+    if (boss.length === 1 && !(f.quest.route.every(p => inRoom(lair, p.x, p.y)) && boss[0].x === f.quest.route[0].x && boss[0].y === f.quest.route[0].y)) lairFails.push(`${where}: mini-boss not on its lair route`);
+  }
+  for (const m of lairFails.slice(0, 5)) fail('lair', m);
+  if (lairFails.length) fail('lair', `${lairFails.length} lair checks failed in total`);
+  console.log(`lair layouts: ${lairs} floors with the lair, ${noFit} floors where it did not fit (no encounter, nothing left behind)`);
+
+  // Mini-boss drop (QUESTS.miniboss): Rare or better gear, gold 30 to 50 plus 10 a floor, a potion about half the time.
+  const q = Q.QUESTS.miniboss, N = 4000;
+  for (const n of [2, 4]) {
+    let gearOk = 0, goldOk = 0, pots = 0;
+    for (let i = 0; i < N; i++) {
+      const d = Q.rollLoot('corpse', n, Q.makeRng((i * 7919 + n) >>> 0), 0, [], 'miniboss', 0);
+      const gear = d.filter(x => x.type === 'weapon' || x.type === 'armor' || x.type === 'shield');
+      const gold = d.filter(x => x.type === 'gold').reduce((a, x) => a + x.n, 0);
+      if (gear.length === 1 && gear[0].tier >= q.minTier) gearOk++;
+      if (gold >= q.goldMin + q.goldPerFloor * n && gold <= q.goldMax + q.goldPerFloor * n) goldOk++;
+      if (d.some(x => x.type === 'potion')) pots++;
+    }
+    if (gearOk !== N) fail(`miniboss drop floor ${n}`, `${N - gearOk} drops without exactly one Rare+ gear piece`);
+    if (goldOk !== N) fail(`miniboss drop floor ${n}`, `${N - goldOk} drops with gold outside ${q.goldMin + q.goldPerFloor * n} to ${q.goldMax + q.goldPerFloor * n}`);
+    const share = pots / N;
+    if (Math.abs(share - q.potion) > 0.03) fail(`miniboss drop floor ${n}`, `potion share ${(share * 100).toFixed(1)}%, want about ${q.potion * 100}%`);
+  }
 }
 
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);

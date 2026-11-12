@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-15';   // bumped so old saved values don't override the new defaults (last: chest numbers)
+  const KEY = 'prototype-test-tune-16';   // bumped so old saved values don't override the new defaults (last: encounter numbers)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -9,12 +9,15 @@ const tunePanel = (() => {
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
-    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'mimic', 'bomber'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'mimic', 'bomber', 'miniboss'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
     ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
     ['bomb', BOMB, [['fuse', 0.1], ['warn', 0.1], ['trigger', 0.1], ['radius', 0.1], ['dmg', 1], ['falloff', 0.05], ['noise', 1], ['dropDelay', 0.1], ['chain', 0.1], ['fx', 0.05]]],
     ['lockpick', LOCKPICK, [['time', 0.5], ['noise', 1], ['breakChance', 0.05], ['drop', 0.01], ['corpseDrop', 0.05]]],
     ['locked chest', LOCKED, [['hits', 1], ['maceHits', 1], ['noise', 1], ['potionBreak', 0.05], ['gradeUp', 1]]],
     ['trapped chest', TRAP, [['dart', 1], ['bleed', 0.5], ['gasRadius', 0.5], ['gasDaze', 0.5], ['gasSlow', 0.5], ['alarmNoise', 1], ['disarmMul', 0.5], ['fx', 0.1]]],
+    ['quest rolls', QUESTS.roll, [['none', 1], ['one', 1], ['two', 1], ['floorMin', 1], ['floorMax', 1]]],
+    ['mini-boss reward', QUESTS.miniboss, [['minTier', 1], ['goldMin', 1], ['goldMax', 1], ['goldPerFloor', 1], ['potion', 0.05]]],
+    ['shrine bargain', QUESTS.shrine, [['priceHp', 0.5], ['priceGear', 0.5], ['pricePotions', 0.5], ['boonWeapon', 0.5], ['boonStamina', 0.5], ['boonTreasure', 0.5], ['hpLoss', 1], ['minMaxHp', 5], ['stamBonus', 0.05], ['weaponMinTier', 1], ['weaponMaxTier', 1]]],
     ['mimic', MIMIC, [['springWind', 0.05], ['springReach', 0.1]]],
     ['archer shots', ENEMY_TYPES.archer.ranged, [['min', 0.5], ['max', 0.5], ['wind', 0.05], ['cd', 0.1], ['speed', 1]]],
     ['shaman', ENEMY_TYPES.shaman.ranged, [['min', 0.5], ['max', 0.5], ['wind', 0.05], ['cd', 0.1], ['speed', 1], ['healAt', 0.05], ['healAmt', 1], ['healCd', 0.5]]],
