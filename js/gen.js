@@ -32,6 +32,7 @@ const mapSizeFor = floorNum => [32, 36, 40, 44][Math.min(floorNum, 4) - 1];
 const weightedPick = (rng, w) => { let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return 0; };   // a seeded weighted choice by index
 // Chest grade by depth: wooden mostly early, Silver and Ornate more often deeper, Golden rare (and never on floor 1 early).
 const chestTierWeights = floorNum => [Math.max(22, 62 - 8 * floorNum), 26 + 2 * floorNum, 8 + 3 * floorNum, 1.5 + 1.4 * floorNum, 0.1 + 0.3 * floorNum];
+const CHEST_ODDS = { locked: 0.12, trap: 0.10 };   // share of ordinary chests that are locked (floor 1 on) or trapped (floor 2 on); never both, never a mimic, same exclusions as mimics
 const MIMIC_CHANCE = 0.08;   // share of ordinary chests (floor 2 on) that are mimics; never vault chests, key holders, locked rooms, the shop or the arena
 const roomTargetFor = floorNum => [8, 9, 10, 11][Math.min(floorNum, 4) - 1];
 
@@ -548,6 +549,16 @@ function layoutFloor(seed, floorNum, opts) {
     if (p.kind !== 'chest' || p.holdsKey || inShop(p)) continue;
     const r = rooms.find(r => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
     if (r && !r.locked && rng() < MIMIC_CHANCE) p.mimic = true;
+  }
+  // ---- locked and trapped chests: one more roll per eligible chest, after the mimic pass so nothing earlier shifts (the roll is
+  // always drawn, even for a mimic, so each chest costs the same). The trap kind comes from the chest's own seed. ----
+  for (const p of props) {
+    if (p.kind !== 'chest' || p.holdsKey || inShop(p)) continue;
+    const r = rooms.find(r => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+    const roll = rng();
+    if (!r || r.locked || p.mimic) continue;
+    if (roll < CHEST_ODDS.locked) p.locked = true;
+    else if (floorNum >= 2 && roll < CHEST_ODDS.locked + CHEST_ODDS.trap) p.trap = ['dart', 'gas', 'alarm'][Math.floor(makeRng((p.seed ^ 0x7a9) >>> 0)() * 3)];
   }
 
   return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, steps: dist[stairs.y * w + stairs.x] };

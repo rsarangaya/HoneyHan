@@ -279,8 +279,9 @@ function updateTorches(now) {
   });
 }
 
+const dropTell = o => { if (o.tell && o.tell.parent) o.tell.parent.remove(o.tell); };   // a padlock or tripwire goes when its job is done (they are not part of any merged chunk)
 function markOpened(o) {
-  o.p.opened = true;
+  o.p.opened = true; dropTell(o);
   if (o.lid) o.lid.rotation.x = -1.15;
   else o.mats.forEach(m => m.color.multiplyScalar(0.45));
 }
@@ -328,7 +329,7 @@ function startAttack() {
 function playerHit() {
   const w = wstats();
   const t = findMeleeTarget(player, eyeY(), enemies, floor, w.reach);
-  if (!t) { loud(2); return; }                    // swung at nothing
+  if (!t) { if (!smashChest(w)) loud(2); return; }   // swung at nothing (or at a locked chest)
   if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
   dealHit(t.e, t.zone, w.dmg, w, w.noise);
 }
@@ -621,7 +622,7 @@ const bombs = (() => {
     return { g, sp, t: 0, x: 0, z: 0, on: false };
   });
 })();
-function clearBombs() { for (const b of bombs) { b.on = false; b.g.visible = false; } for (const f of blastFx) { f.on = false; f.m.visible = false; } }
+function clearBombs() { gasFx.on = false; gasFx.m.visible = false; for (const b of bombs) { b.on = false; b.g.visible = false; } for (const f of blastFx) { f.on = false; f.m.visible = false; } }
 const blastDmg = d => BOMB.dmg * (1 - BOMB.falloff * d / BOMB.radius);          // full at the centre, (1 - falloff) of it at the edge
 function explodeAt(x, z, src) {
   let fx = blastFx[0]; for (const f of blastFx) if (!f.on) { fx = f; break; }
@@ -660,6 +661,51 @@ function updateBombs(dt) {
     if (k >= 1) { f.on = false; f.m.visible = false; continue; }
     f.m.scale.setScalar(f.r * (1 - (1 - k) * (1 - k)) + 0.05); f.m.material.opacity = 0.7 * (1 - k);
   }
+}
+
+// ---- trapped chests (numbers: TRAP in js/loot.js). The gas cloud is one pooled translucent sphere built once, no light; its effects are
+// applied in a single pass over the enemies when it spawns, and nothing runs per frame once it has faded. ----
+const gasFx = (() => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x9bd86a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); m.visible = false; scene.add(m); return { m, t: 0, on: false }; })();
+function springTrap(kind, o) {
+  if (kind === 'dart') {
+    damage(TRAP.dart);
+    if (pst.apply('bleed', TRAP.bleed)) discover('status:bleed', 'Bleed');
+    hitReaction(TRAP.dart); flash('A dart shoots out of the chest!'); addLog(`A trap dart hits you: ${TRAP.dart} damage and bleeding.`, '#ff6a6a');
+  } else if (kind === 'gas') {
+    gasFx.on = true; gasFx.t = 0; gasFx.m.position.set(o.x, 0.9, o.z); gasFx.m.visible = true;
+    if (Math.hypot(player.x - o.x, player.z - o.z) < TRAP.gasRadius) {
+      if (pst.apply('daze', TRAP.gasDaze)) discover('status:daze', 'Daze'); if (pst.apply('slow', TRAP.gasSlow)) discover('status:slow', 'Slow');
+    }
+    for (const e of enemies) {
+      if (e.dead || Math.hypot(e.x - o.x, e.z - o.z) >= TRAP.gasRadius || !hasLOS(floor, o.x, o.z, e.x, e.z)) continue;
+      e.addStatus('daze', TRAP.gasDaze); e.addStatus('slow', TRAP.gasSlow);
+    }
+    flash('A cloud of gas bursts from the chest!'); addLog('Trap gas: daze and slow.', '#9bd86a');
+  } else {
+    loud(TRAP.alarmNoise); flash('An alarm bell clangs!'); addLog(`An alarm bell rings (${TRAP.alarmNoise} m).`, '#d8a030');
+  }
+}
+function updateGas(dt) {
+  if (!gasFx.on) return;
+  gasFx.t += dt; const k = gasFx.t / TRAP.fx;
+  if (k >= 1) { gasFx.on = false; gasFx.m.visible = false; return; }
+  gasFx.m.scale.setScalar(TRAP.gasRadius * (1 - (1 - k) * (1 - k)) + 0.05); gasFx.m.material.opacity = 0.5 * (1 - k);
+}
+// Smashing a locked chest: each melee swing that hits no enemy but lands on its chest counts (a mace needs fewer). Returns whether one did.
+function smashChest(w) {
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), reach = w.reach + 0.9;
+  for (const o of propObjs) {
+    if (o.p.kind !== 'chest' || !o.p.locked || o.p.opened) continue;
+    const dx = o.x - player.x, dz = o.z - player.z, d = Math.hypot(dx, dz);
+    if (d > reach || (dx * fx + dz * fz) / (d || 1) < 0.7 || !hasLOS(floor, player.x, player.z, o.x, o.z)) continue;
+    const need = inv.equip.weapon.base === 'mace' ? LOCKED.maceHits : LOCKED.hits;
+    loud(LOCKED.noise);
+    o.p.hits = (o.p.hits | 0) + 1;
+    if (o.p.hits >= need) finishSearch(o, true);
+    else flash(`The lock rattles (${o.p.hits}/${need})`);
+    return true;
+  }
+  return false;
 }
 
 function resolveEnemyAttack(e, zone, ranged = false) {
@@ -889,8 +935,13 @@ function lookTarget() {
 // What the prompt shows and how long the hold takes. A locked door cannot be held open without its key.
 function targetInfo(o) {
   if (o.p.kind === 'door' && !inv.has('key', o.p.lock)) return { label: `Locked: needs the ${o.p.keyLabel}`, time: 0, locked: true };
-  if (o.p.kind === 'chest') { const t = o.p.tier | 0; return { label: `Open ${CHEST_NAMES[t]}`, time: 0.9 + 0.15 * t }; }   // better chests take a little longer
-  return PROP_INFO[o.p.kind];
+  if (o.p.kind === 'chest') {
+    const t = o.p.tier | 0, base = 0.9 + 0.15 * t;                                  // better chests take a little longer
+    if (o.p.locked) { const pk = inv.pack.find(i => i.type === 'lockpick'); return pk ? { label: `Pick the lock of the ${CHEST_NAMES[t]} (${pk.n} lockpick${pk.n > 1 ? 's' : ''})`, time: LOCKPICK.time } : { label: `Locked: needs a lockpick, or smash it with a weapon`, time: 0, locked: true }; }
+    return player.crouching ? { label: `Search carefully: ${CHEST_NAMES[t]}`, time: base * TRAP.disarmMul } : { label: `Open ${CHEST_NAMES[t]}`, time: base };   // crouched is slower for every chest, so the bar never gives a trap away (a trapped one is then disarmed)
+  }
+  const pi = PROP_INFO[o.p.kind];
+  return player.crouching && (o.p.kind === 'barrel' || o.p.kind === 'rubble') ? { label: 'Search carefully', time: pi.time * TRAP.disarmMul } : pi;
 }
 
 function updateSearch(dt) {
@@ -911,23 +962,45 @@ function updateSearch(dt) {
 }
 
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
-function finishSearch(o) {
+function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
     discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
     return;
   }
-  loud((SEARCH_NOISE[o.p.kind] || 0) + (o.p.kind === 'chest' ? 0.5 * (o.p.tier | 0) : 0));
-  if (o.p.kind === 'chest') discover('item:chest', 'Chests');
+  const chest = o.p.kind === 'chest', unlocked = chest && o.p.locked;
+  let noise = (SEARCH_NOISE[o.p.kind] || 0) + (chest ? 0.5 * (o.p.tier | 0) : 0);
+  if (unlocked) {
+    const pk = inv.pack.find(i => i.type === 'lockpick');
+    if (smashed) noise = 0;                                                         // the blows were loud already
+    else {
+      if (!pk) return;
+      noise = LOCKPICK.noise; discover('item:lockpick', 'Lockpick');
+      if (gameRng() < LOCKPICK.breakChance) { if (--pk.n <= 0) inv.remove(pk); flash('The lockpick snapped!'); addLog('The lockpick snapped.', '#c8ccd4'); }
+    }
+    o.p.locked = false; o.p.grade = LOCKED.gradeUp; dropTell(o); discover('chest:locked', 'Locked chests');
+  } else if (chest && o.p.trap) {
+    const kind = o.p.trap; o.p.trap = null; dropTell(o); discover('chest:trap', 'Trapped chests');
+    if (player.crouching) { noise = 0; flash('You disarm the trap.'); addLog('You disarmed the trap.', '#9ac8ff'); }   // quiet, and the trap is gone
+    else springTrap(kind, o);
+    if (state === 'dead') return;
+  }
+  loud(noise);
+  if (chest) discover('item:chest', 'Chests');
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
     flash(`Unlocked the ${o.p.room}`);
     return;
   }
-  const drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, o.p.tier), ...(o.p.extra || [])]);
+  let drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
   const got = [], left = [], notes = [];
+  if (smashed && !o.p.left) {                                                       // smashing a lock rattles what is inside
+    let broke = 0;
+    drops = drops.filter(d => { if (d.type !== 'potion') return true; let keep = 0; for (let i = d.n || 1; i > 0; i--) if (gameRng() >= LOCKED.potionBreak) keep++; broke += (d.n || 1) - keep; d.n = keep; return keep > 0; });
+    if (broke) notes.push(`${broke} potion${broke > 1 ? 's' : ''} broke`);
+  }
   for (const d of drops) {
     const text = inv.add(d);
     if (text) got.push(text);
@@ -1275,7 +1348,7 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
-    updateBombs(dt);
+    updateBombs(dt); updateGas(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

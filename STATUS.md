@@ -6,6 +6,7 @@ Last updated: 2026-11-12 (branch `impatience`: steps 2 to 8 of the build order, 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
 ## Done
+- Locked and trapped chests plus the lockpick (2026-11-12, untested by the tester yet): `CHEST_ODDS` in `js/gen.js` (12% locked from floor 1, 10% trapped from floor 2), `LOCKPICK` / `LOCKED` / `TRAP` in `js/loot.js`, padlock and tripwire tells in `js/props.js`, `springTrap` / `smashChest` / pooled gas cloud in `js/main.js`, lockpick in the shop, glossary and tuning panel. Tune storage key is now `-15`.
 - Mimic chest and bomb goblin (2026-11-12, untested by the tester yet): see `js/enemytypes.js` (`mimic`, `bomber`, `MIMIC`, `BOMB`), `js/enemy.js` (buildMimic, updateBomber), `js/main.js` (explodeAt, pooled blast and dropped-bomb effects), `js/gen.js` (`MIMIC_CHANCE`). Tune storage key is now `-14`.
 - Design doc written: `DESIGN.md` (concept, floors and themes, stealth and noise, combat, weapons, statuses, wands, architecture, build order, risks).
 - Reference projects reviewed (read only, not changed), both in `C:\Users\rsarangaya\OneDrive - JSSI\Documents\ClaudeCodeCloudTest`:

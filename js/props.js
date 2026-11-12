@@ -101,6 +101,17 @@ function makeProp(p) {
     }
     if (p.holdsKey) SP(inner, 0.07, 0.07, 0.07, glow(0xffe060), 0, 0.5 * s + 0.14, 0.34 * s);                                  // a faint spark on the chest that holds a key
     inner.add(pivot); o.lid = pivot;
+    if (p.locked) {                                                                                                             // a brass padlock hangs from the lock plate (a tell that goes when it is opened)
+      const brass = mat(0xd8b030, 0x403008), tell = new THREE.Group(); o.tell = tell;
+      const body = new THREE.Mesh(cached('padbody', () => new THREE.BoxGeometry(0.13, 0.11, 0.05)), brass); body.position.set(0, 0.4 * s, 0.4 * s); tell.add(body);
+      const shackle = new THREE.Mesh(cached('padshackle', () => new THREE.TorusGeometry(0.04, 0.014, 5, 10, Math.PI)), brass); shackle.position.set(0, 0.4 * s + 0.055, 0.4 * s); tell.add(shackle);
+      inner.add(tell);
+    } else if (p.trap) {                                                                                                        // a trap's tell: a hair-thin wire across the chest's foot, glinting, between two tiny pegs
+      const wire = new THREE.MeshBasicMaterial({ color: 0xaab4c0 }), peg = mat(0x2a2218), tell = new THREE.Group(); o.mats.push(wire); o.tell = tell;
+      const w = new THREE.Mesh(cached('trapwire', () => new THREE.BoxGeometry(1.1, 0.012, 0.012)), wire); w.position.set(0, 0.06, 0.58); tell.add(w);
+      for (const x of [-0.55, 0.55]) { const g = new THREE.Mesh(cached('trappeg', () => new THREE.CylinderGeometry(0.012, 0.016, 0.12, 5)), peg); g.position.set(x, 0.06, 0.58); tell.add(g); }
+      inner.add(tell);
+    }
   } else if (p.kind === 'barrel') {
     LA(inner, BARREL, mat(wood), 0, 0, 0, 14);
     for (const [y, r] of [[0.2, 0.362], [0.74, 0.382]]) TR(inner, r, 0.022, lam(0x3a3a3a), 0, y, 0);                        // iron hoops

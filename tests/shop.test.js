@@ -46,7 +46,7 @@ for (let s = 1; s <= N; s++) for (let fl = 1; fl <= 4; fl++) {
   if (st.some(e => e.qty < 1 || e.price < 5)) dup++;
 }
 check('the stock is deterministic per seed and floor', determ === 0);
-check('8 to 12 slots', minLen >= 8 && maxLen <= 12, `${minLen} to ${maxLen}`);
+check('9 to 13 slots (a lockpick is always stocked)', minLen >= 9 && maxLen <= 13, `${minLen} to ${maxLen}`);
 check('never Legendary, never keys or the recorder', legendary === 0 && rage === 0);
 check('one featured piece of gear, a tier up at +25%', featuredBad === 0 && noFeatured < N * 4 * 0.05, `no featured on ${noFeatured}`);
 check('no repeated potion kinds, sane quantities and prices', dup === 0);

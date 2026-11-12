@@ -4,6 +4,7 @@
 // stairs reachable from the start without keys, every prop and guard waypoint reachable,
 // every locked door has exactly one key in a chest outside the locked rooms, locked rooms
 // are reachable only through their door, and the boss arena has one boss and one healing potion.
+// Also: mimic, locked and trapped chest placement (shares, exclusions, same seed, rest of floor unchanged) and lockpick drop rates.
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
@@ -129,6 +130,88 @@ for (let s = 1; s <= N; s++) {
   console.log(`mimic chests on floors 2 to 4: ${mimics} of ${eligible} eligible chests (${(share * 100).toFixed(1)}%)`);
   if (share < 0.06 || share > 0.10) fail('mimics', `share ${(share * 100).toFixed(1)}% is outside 6% to 10% (want about 8%)`);
 }
+// Locked and trapped chests (gen.js CHEST_ODDS): locked from floor 1 (about 12% of eligible chests), trapped from floor 2 (about 10%).
+// Eligible is the mimic rule: an ordinary chest in an unlocked room, outside the shop and not holding a key. Never both, never a mimic.
+// Each eligible chest costs one roll, so with the odds at 0 the rest of the floor must come out exactly the same.
+{
+  const inR = (r, p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  const eligible = (f, p) => { const shopRoom = f.shop && f.shop.room, r = f.rooms.find(q => inR(q, p)); return !!(p.kind === 'chest' && !p.holdsKey && !(shopRoom && inR(shopRoom, p)) && r && !r.locked); };
+  const floorFor = (s, n) => G.generateFloor((s * 2654435761 + 4219) >>> 0, n, { armory: false, boss: false, shop: n >= 2 && n <= 4 && s % 2 === 0, themeName: THEME_NAMES[(s + n) % THEME_NAMES.length] });
+  const odds = vm.runInContext('CHEST_ODDS', ctx), saved = { ...odds };
+  const kinds = { dart: 0, gas: 0, alarm: 0 };
+  let el1 = 0, lock1 = 0, elT = 0, trapT = 0, lockT = 0, trapOn1 = 0;
+  // Floor 1 runs over more seeds (chests cluster within a seed, so 300 seeds leave the share too noisy to hold to 12%).
+  for (let s = 1; s <= Math.max(N, 1000); s++) for (let n = 1; n <= (s <= N ? 4 : 1); n++) {
+    const f = floorFor(s, n), where = `locked/trap seed ${s} floor ${n}`;
+    for (const p of f.props) {
+      const isEl = eligible(f, p), locked = !!p.locked, trapped = !!p.trap;
+      if (locked && trapped) fail(where, 'a chest is both locked and trapped');
+      if ((locked || trapped) && !isEl) fail(where, `a ${p.kind} is locked or trapped but is not an ordinary chest in an unlocked room outside the shop`);
+      if ((locked || trapped) && p.mimic) fail(where, 'a mimic chest is also locked or trapped');
+      if (trapped && kinds[p.trap] === undefined) fail(where, `trap kind ${p.trap}`);
+      if (trapped) kinds[p.trap]++;
+      if (n === 1 && isEl) { el1++; if (locked) lock1++; }
+      if (n === 1 && trapped) trapOn1++;
+      if (n >= 2 && isEl && !p.mimic) { elT++; if (trapped) trapT++; if (locked) lockT++; }
+    }
+  }
+  const share1 = lock1 / Math.max(1, el1), shareT = trapT / Math.max(1, elT);
+  console.log(`locked chests: ${(share1 * 100).toFixed(1)}% of eligible chests on floor 1; floors 2 to 4: trapped ${(shareT * 100).toFixed(1)}%, locked ${(100 * lockT / Math.max(1, elT)).toFixed(1)}% (of non-mimic eligible); trap kinds ${JSON.stringify(kinds)}`);
+  if (share1 < 0.09 || share1 > 0.15) fail('locked', `${(share1 * 100).toFixed(1)}% of eligible floor 1 chests, want about 12%`);
+  if (shareT < 0.07 || shareT > 0.13) fail('trapped', `${(shareT * 100).toFixed(1)}% of eligible floor 2 to 4 chests, want about 10%`);
+  if (trapOn1) fail('trapped', `${trapOn1} trapped chests on floor 1`);
+  for (const k of Object.keys(kinds)) if (kinds[k] < 0.2 * Math.max(1, trapT)) fail('trapped', `${k} is only ${kinds[k]} of ${trapT} traps`);
+
+  // Same seed, same placement.
+  for (let s = 1; s <= Math.min(N, 60); s++) for (let n = 1; n <= 4; n++) {
+    const flags = () => JSON.stringify(floorFor(s, n).props.map(p => [p.locked, p.trap, p.mimic]));
+    if (flags() !== flags()) fail(`locked/trap seed ${s} floor ${n}`, 'placement changed between two runs of the same seed');
+  }
+
+  // The rest of the floor is unchanged: generate each floor with the odds at 0 (every roll still drawn) and compare everything else.
+  const strip = f => JSON.stringify({ ...f, props: f.props.map(p => ({ ...p, locked: undefined, trap: undefined })) });
+  let compared = 0;
+  for (let s = 1; s <= Math.min(N, 100); s++) for (let n = 1; n <= 4; n++) {
+    const where = `locked/trap seed ${s} floor ${n}`, withPass = floorFor(s, n);
+    odds.locked = 0; odds.trap = 0;
+    const without = floorFor(s, n);
+    Object.assign(odds, saved);
+    if (without.props.some(p => p.locked || p.trap)) fail(where, 'chests still locked or trapped with the odds at 0');
+    compared++;
+    if (strip(withPass) !== strip(without)) fail(where, 'the locked and trapped pass changed something else on the floor');
+  }
+  console.log(`locked/trapped pass: ${compared} floors compared with the odds at 0`);
+}
+
+// Lockpicks in loot (loot.js LOCKPICK): about 6% of barrels and rubble, about 25% of bandit and thief bodies, none from anything else.
+// The lockpick roll is last in rollLoot, so the rest of each table matches rollLootBase (the table before that roll).
+{
+  const L = vm.runInContext('({ rollLoot, rollLootBase, makeRng })', ctx);
+  const tries = 20000;
+  const rate = (kind, type) => {
+    let hits = 0;
+    for (let i = 0; i < tries; i++) {
+      const d = L.rollLoot(kind, 1 + (i % 4), L.makeRng((i * 2654435761 + 31) >>> 0), 0, [], type, 0);
+      const lp = d.filter(x => x.type === 'lockpick');
+      if (lp.length) { hits++; if (lp.length !== 1 || lp[0].n !== 1) fail(`lockpick ${kind}`, 'a drop should be one lockpick'); }
+    }
+    return hits / tries;
+  };
+  const want = [['barrel', 'goblin', 0.06], ['rubble', 'goblin', 0.06], ['corpse', 'bandit', 0.25], ['corpse', 'thief', 0.25]];
+  const got = want.map(([kind, type]) => rate(kind, type));
+  want.forEach(([kind, type, p], i) => { if (Math.abs(got[i] - p) > 0.015) fail(`lockpick ${kind} ${type}`, `${(got[i] * 100).toFixed(1)}%, want about ${p * 100}%`); });
+  console.log(`lockpick drops: barrel ${(got[0] * 100).toFixed(1)}%, rubble ${(got[1] * 100).toFixed(1)}%, bandit body ${(got[2] * 100).toFixed(1)}%, thief body ${(got[3] * 100).toFixed(1)}%`);
+  for (const [kind, type] of [['corpse', 'goblin'], ['chest', 'goblin'], ['pantry', 'goblin'], ['corpse', 'rat']]) if (rate(kind, type) !== 0) fail(`lockpick ${kind} ${type}`, 'should never drop a lockpick');
+  let mismatch = 0;
+  for (let i = 0; i < 2000; i++) for (const [kind, type] of [['barrel', 'goblin'], ['rubble', 'goblin'], ['corpse', 'bandit'], ['chest', 'goblin']]) {
+    const seed = (i * 7919 + 5) >>> 0;
+    const a = L.rollLoot(kind, 2, L.makeRng(seed), 0, [], type, 1).filter(d => d.type !== 'lockpick');
+    const b = L.rollLootBase(kind, 2, L.makeRng(seed), 0, [], type, 1);
+    if (JSON.stringify(a) !== JSON.stringify(b)) mismatch++;
+  }
+  if (mismatch) fail('lockpick', `${mismatch} loot tables changed apart from the lockpick`);
+}
+
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);
 console.log(`open tiles per floor (floors 1 to 4): ${avgOpen.map(v => Math.round(v)).join(', ')}; corridor share ${corrShare.map(v => Math.round(v * 100) + '%').join(', ')}`);
 if (avgOpen[0] < 230 || avgOpen[0] > 420) fail('floor 1', `floor 1 averages ${Math.round(avgOpen[0])} open tiles, want 230 to 420 (it was 725)`);

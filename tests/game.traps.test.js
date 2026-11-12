@@ -1,4 +1,4 @@
-// Mimic chests and bomb goblins: placement, the bite, the blast, the chain, Rage and the seeded layout. Run on its own: node tests/game.traps.test.js
+// Mimic chests and bomb goblins: placement, the bite, the blast, the chain, Rage and the seeded layout. Also locked chests (lockpick, smash), trapped chests (dart, gas, alarm, crouched disarm), the lockpick in shop stock. Run on its own: node tests/game.traps.test.js
 // Seed 2654435761 has one mimic chest on floor 2 (found with generateFloor; floor 2 is never the shop or armory floor for it).
 const { run } = require('./lib');
 const SEED = 2654435761;
@@ -49,7 +49,41 @@ const QHELP = () => {
   };
 };
 
-run('Mimic chests and bomb goblins', async ({ open, check }) => {
+// Page-side helpers for the locked and trapped chest checks. CHESTHELP is installed once per page: it records each search as it
+// finishes (how long it was held, the noise, HP and statuses straight after) and the hold time just before.
+const CHESTHELP = () => {
+  if (window.Q.fin !== undefined) return;
+  const realUS = window.updateSearch, realFS = window.finishSearch;
+  Q.fin = null; Q.prevT = 0;
+  window.updateSearch = function (dt) { Q.prevT = search ? search.t : 0; return realUS.call(this, dt); };
+  window.finishSearch = function (o, smashed) {
+    const at = search ? search.t : null, prev = Q.prevT;
+    const r = realFS.call(this, o, smashed);
+    Q.fin = {
+      o, at, prev, smashed: !!smashed, crouch: game.player.crouching, pulse, hp: game.inv.hp, state,
+      bleed: pst.t.bleed || 0, daze: pst.t.daze || 0, slow: pst.t.slow || 0, gas: gasFx.on,
+      enemies: game.enemies.map(e => ({ dc: Math.hypot(e.x - o.x, e.z - o.z), daze: e.st.t.daze || 0, slow: e.st.t.slow || 0 })),
+    };
+    return r;
+  };
+  // A chest prop to work on: not a mimic, not a key holder, not opened.
+  Q.chest = () => propObjs.find(o => o.p.kind === 'chest' && !o.p.mimic && !o.p.holdsKey && !o.p.opened);
+  // A spot d metres from o with a clear line to it, 2.6 m or more from the player and clear of furniture (the game pushes
+  // guards out of solids, so a spot inside one would not stay put); null if none of 16 directions works.
+  Q.spotNear = (o, d) => {
+    const P = game.player, f = game.floor;
+    for (let k = 0; k < 16; k++) {
+      const a = k * Math.PI / 8, x = o.x + Math.sin(a) * d, z = o.z + Math.cos(a) * d;
+      if (!P.blocked(f, x, z) && hasLOS(f, o.x, o.z, x, z) && Math.hypot(x - P.x, z - P.z) > 2.6
+        && f.solids.every(s => Math.hypot(x - s.x, z - s.z) > s.r + 0.6)) return [x, z];
+    }
+    return null;
+  };
+  Q.keys = on => { game.player.keys[KEYS.interact] = on; };
+  Q.crouchKey = on => { game.player.keys[KEYS.crouch] = on; };
+};
+
+run('Mimic, locked and trapped chests and bomb goblins', async ({ open, check }) => {
   let page = await open(SEED);
   await page.evaluate(QHELP);
 
@@ -288,6 +322,222 @@ run('Mimic chests and bomb goblins', async ({ open, check }) => {
     return out;
   });
   check('under Hanahan\'s Rage a bomb goblin rushes the other enemy and blows up beside it', rage.skip || (rage.toTarget < 1.5 && rage.toPlayer > 2.5 && rage.targetHurt > 0), JSON.stringify(rage));
+
+  // ---- Locked and trapped chests, the lockpick and the shop's lockpicks (numbers: LOCKPICK, LOCKED, TRAP in js/loot.js) ----
+  await page.evaluate(CHESTHELP);
+
+  // 16. A lockpick picks a locked chest after a 3 s hold: quiet (1 m), the loot one grade up, and the lockpicks stack.
+  const pick = await page.evaluate(async () => {
+    T.reset(); Q.only();
+    game.inv.add({ type: 'lockpick', n: 1 }); game.inv.add({ type: 'lockpick', n: 1 });
+    const stacks = game.inv.pack.filter(i => i.type === 'lockpick');
+    const o = Q.chest(); o.p.locked = true; Q.faceProp(o);
+    Q.fin = null; Q.keys(true);
+    const opened = await T.until(() => o.p.opened, 12000); Q.keys(false);
+    const f = Q.fin || {};
+    return { stacks: stacks.length, n: stacks[0] && stacks[0].n, opened, at: f.at, prev: f.prev, noise: f.pulse, lockedAfter: o.p.locked, grade: o.p.grade };
+  });
+  check('a lockpick picks a locked chest after a 3 s hold, and two lockpicks stack', pick.opened && pick.at >= 3 && pick.prev < 3 && pick.at < 3.5 && pick.stacks === 1 && pick.n === 2, JSON.stringify({ at: pick.at, prev: pick.prev, stacks: pick.stacks, n: pick.n }));
+  check('picking is quiet (1 m) and the chest is unlocked one grade up', pick.noise === 1 && !pick.lockedAfter && pick.grade === 1, JSON.stringify({ noise: pick.noise, grade: pick.grade }));
+
+  // 17. No lockpick: holding E on a locked chest does nothing, and the prompt says what is needed.
+  const nopick = await page.evaluate(async () => {
+    T.reset(); Q.only();
+    const o = Q.chest(); o.p.locked = true; Q.faceProp(o);
+    const info = targetInfo(o);
+    Q.keys(true); const opened = await T.until(() => o.p.opened, 4000); Q.keys(false);
+    return { opened, locked: o.p.locked, needs: !!info.locked, label: info.label };
+  });
+  check('no lockpick: a locked chest cannot be picked by holding E', !nopick.opened && nopick.locked && nopick.needs && /lockpick/.test(nopick.label), JSON.stringify(nopick));
+
+  // 18. Smashing: 3 sword blows (2 with a mace) open it, each blow is 10 m of noise, and the potions inside break about half the time.
+  const smash = await page.evaluate(() => {
+    T.reset(); Q.only();
+    const out = { sword: [], mace: [] };
+    const o = Q.chest();                                                       // one chest, locked again before each case
+    const lockIt = () => { o.p.locked = true; o.p.opened = false; o.p.hits = 0; o.p.grade = 0; delete o.p.left; Q.faceProp(o); };
+    lockIt();
+    game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+    for (let i = 0; i < 3; i++) { pulse = 0; playerHit(); out.sword.push({ noise: pulse, opened: o.p.opened, hits: o.p.hits }); }
+    lockIt();
+    game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'mace', tier: 0 });
+    for (let i = 0; i < 2; i++) { pulse = 0; playerHit(); out.mace.push({ noise: pulse, opened: o.p.opened, hits: o.p.hits }); }
+    game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+    // the potions: 400 of one kind inside the chest, so the kept share is measured
+    lockIt(); game.inv.pack = []; o.p.extra = [{ type: 'potion', kind: 'heal', n: 400 }];
+    for (let i = 0; i < 3; i++) playerHit();
+    out.kept = game.inv.pack.filter(i => i.type === 'potion' && i.kind === 'heal').reduce((a, i) => a + i.n, 0);
+    out.potionsOpened = o.p.opened;
+    return out;
+  });
+  check('three sword blows open a locked chest, each blow 10 m of noise', smash.sword.slice(0, 2).every(b => !b.opened && b.noise === 10) && smash.sword[2].opened && smash.sword[2].hits === 3, JSON.stringify(smash.sword));
+  check('a mace opens it in two blows', smash.mace[0] && !smash.mace[0].opened && smash.mace[1].opened && smash.mace[1].noise === 10, JSON.stringify(smash.mace));
+  check('smashing breaks about half the potions inside (400 in, 40% to 60% kept)', smash.kept >= 160 && smash.kept <= 240 && smash.potionsOpened, `kept ${smash.kept} of 400`);
+
+  // 19. A smash blow alerts a guard 6 m away (it is heard, though it is behind the player and unaware).
+  const blow = await page.evaluate(async () => {
+    T.reset(); Q.only(); const P = game.player;
+    const o = Q.chest(); o.p.locked = true; o.p.hits = 0; Q.faceProp(o);
+    game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+    let a = null;                                                              // a clear 6.5 m line behind the player
+    for (let k = 6; k <= 10 && a === null; k++) { const t = P.yaw + k * Math.PI / 8; if (Q.run(P.x, P.z, t) >= 6.5) a = t; }
+    if (a === null) return { skip: true };
+    const g = Q.at(P.x - Math.sin(a) * 6, P.z - Math.cos(a) * 6, 'goblin', { hp: 500 }); g.yaw = a; g.aware = 0;
+    pulse = 0; playerHit(); const noise = pulse;
+    const heard = await T.until(() => g.state !== 'unaware' || g.aware >= 0.5, 1500);
+    return { skip: false, noise, heard, dist: Math.hypot(g.x - P.x, g.z - P.z) };
+  });
+  check('a smash blow alerts a guard 6 m away', !blow.skip && blow.noise === 10 && blow.heard, JSON.stringify(blow));
+
+  // 20. Loot from a locked chest is one grade up: checked against the same chest's table at tier + 1 (gear and gold), on floor 1.
+  const grade = await page.evaluate(() => {
+    T.reset(); Q.only();
+    const sig = list => list.filter(d => ['weapon', 'armor', 'shield', 'wand', 'rechargewand', 'rage'].includes(d.type)).map(d => [d.type, d.tier, d.base, d.kind, d.cls, d.unique].join(':')).sort().join('|');
+    const gold = list => list.filter(d => d.type === 'gold').reduce((a, d) => a + d.n, 0);
+    const chests = propObjs.filter(o => o.p.kind === 'chest' && !o.p.mimic && !o.p.holdsKey && (o.p.tier | 0) < 4).slice(0, 12);
+    const out = { checked: 0, discriminating: 0, bad: [] };
+    for (const o of chests) {
+      o.p.locked = true; o.p.hits = 0; o.p.grade = 0; o.p.opened = false; delete o.p.left; delete o.p.extra;
+      game.inv.pack = [makeItem({ type: 'lockpick', n: 1000 })]; game.inv.gold = 0;
+      finishSearch(o);
+      const base = o.p.tier | 0, rolled = t => rollLoot('chest', floorNum, makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, t);
+      const plain = rolled(base), up = rolled(Math.min(4, base + 1));
+      const got = game.inv.pack.filter(i => i.type !== 'lockpick');
+      out.checked++;
+      if (sig(got) !== sig(up) || game.inv.gold !== gold(up)) out.bad.push(base);
+      if (sig(plain) !== sig(up) || gold(plain) !== gold(up)) out.discriminating++;
+    }
+    return { checked: out.checked, discriminating: out.discriminating, bad: out.bad };
+  });
+  check('a locked chest pays out its table one grade up', grade.checked > 0 && grade.bad.length === 0 && grade.discriminating > 0, JSON.stringify(grade));
+
+  // 21. Trapped chest, normal search: a dart does 12 damage and bleeds you; the loot is still given and the trap is gone.
+  const dart = await page.evaluate(async () => {
+    T.reset(); Q.only(); game.inv.hp = 100;
+    const o = Q.chest(); o.p.trap = 'dart'; o.p.extra = [{ type: 'potion', kind: 'heal', n: 1 }]; Q.faceProp(o);
+    Q.fin = null; Q.keys(true);
+    await T.until(() => Q.fin && Q.fin.o === o, 9000); Q.keys(false);
+    const f = Q.fin || {};
+    return { hp: f.hp, bleed: f.bleed, trapLeft: o.p.trap, loot: game.inv.pack.some(i => i.type === 'potion' && i.kind === 'heal'), opened: o.p.opened, noise: f.pulse };
+  });
+  check('a trap dart does 12 damage, bleeds you, still gives the loot, and the trap is gone', dart.hp === 88 && dart.bleed === 4 && !dart.trapLeft && dart.loot && dart.opened, JSON.stringify(dart));
+
+  // 22. Gas: daze and slow on you and on an enemy within 3 m (with a line to the chest); an enemy 4.6 m away gets nothing.
+  const gas = await page.evaluate(async () => {
+    T.reset(); Q.only(); game.inv.hp = 100;
+    const o = Q.chest(); o.p.trap = 'gas'; o.p.extra = [{ type: 'potion', kind: 'heal', n: 1 }]; Q.faceProp(o);
+    const near = Q.spotNear(o, 2), far = Q.spotNear(o, 4.6);
+    if (!near || !far) return { skip: true };
+    Q.at(near[0], near[1], 'goblin', { hp: 500 }); Q.at(far[0], far[1], 'goblin', { hp: 500 });
+    Q.fin = null; Q.keys(true);
+    await T.until(() => Q.fin && Q.fin.o === o, 9000); Q.keys(false);
+    // classified by the distance the game actually recorded (a guard can be nudged a little after it is placed)
+    const f = Q.fin || {}, [nearE = {}, farE = {}] = f.enemies || [];
+    return { skip: false, playerDaze: f.daze, playerSlow: f.slow, gasOn: f.gas, nearDc: nearE.dc, nearDaze: nearE.daze, nearSlow: nearE.slow, farDc: farE.dc, farDaze: farE.daze, farSlow: farE.slow, trapLeft: o.p.trap };
+  });
+  check('gas dazes and slows you and an enemy within 3 m, not one 4.6 m away', !gas.skip && gas.playerDaze === 4 && gas.playerSlow === 4 && gas.gasOn && gas.nearDc < 3 && gas.nearDaze === 4 && gas.nearSlow === 4 && gas.farDc > 3 && gas.farDaze === 0 && gas.farSlow === 0 && !gas.trapLeft, JSON.stringify(gas));
+
+  // 23. Alarm: a 18 m bell, and a guard 10 m away hears it.
+  const alarm = await page.evaluate(async () => {
+    T.reset(); Q.only(); const P = game.player;
+    const o = Q.chest(); o.p.trap = 'alarm'; o.p.extra = [{ type: 'potion', kind: 'heal', n: 1 }]; Q.faceProp(o);
+    let a = null;
+    for (let k = 6; k <= 10 && a === null; k++) { const t = P.yaw + k * Math.PI / 8; if (Q.run(P.x, P.z, t) >= 10.5) a = t; }
+    if (a === null) return { skip: true };
+    const g = Q.at(P.x - Math.sin(a) * 10, P.z - Math.cos(a) * 10, 'goblin', { hp: 500 }); g.yaw = a; g.aware = 0;
+    Q.fin = null; Q.keys(true);
+    await T.until(() => Q.fin && Q.fin.o === o, 9000); Q.keys(false);
+    const noise = Q.fin ? Q.fin.pulse : null;
+    const heard = await T.until(() => g.state !== 'unaware' || g.aware >= 0.5, 2500);
+    return { skip: false, noise, heard, trapLeft: o.p.trap, opened: o.p.opened };
+  });
+  check('an alarm rings 18 m and alerts a guard 10 m away; the trap is gone', !alarm.skip && alarm.noise === 18 && alarm.heard && !alarm.trapLeft && alarm.opened, JSON.stringify(alarm));
+
+  // 24. Crouched search disarms: silent, no damage, no status, no gas, and the loot is still given.
+  const disarm = await page.evaluate(async () => {
+    T.reset(); Q.only(); game.inv.hp = 100;
+    const o = Q.chest(); o.p.trap = 'gas'; o.p.extra = [{ type: 'potion', kind: 'heal', n: 1 }]; Q.faceProp(o);
+    const near = Q.spotNear(o, 2);
+    if (near) Q.at(near[0], near[1], 'goblin', { hp: 500 });
+    Q.fin = null; Q.keys(true); Q.crouchKey(true);
+    await T.until(() => Q.fin && Q.fin.o === o, 15000); Q.keys(false); Q.crouchKey(false);
+    const f = Q.fin || {};
+    return {
+      crouch: f.crouch, noise: f.pulse, hp: f.hp, bleed: f.bleed, daze: f.daze, slow: f.slow, gas: f.gas,
+      enemyDazed: (f.enemies || []).some(e => e.daze > 0), trapLeft: o.p.trap, opened: o.p.opened,
+      loot: game.inv.pack.some(i => i.type === 'potion' && i.kind === 'heal'),
+    };
+  });
+  check('crouched search disarms a trapped chest silently: no damage, status, gas or noise, and loot is still given', disarm.crouch && disarm.noise === 0 && disarm.hp === 100 && !disarm.bleed && !disarm.daze && !disarm.slow && !disarm.gas && !disarm.enemyDazed && !disarm.trapLeft && disarm.opened && disarm.loot, JSON.stringify(disarm));
+
+  // 25. Real placement: a chest the game built with a padlock (locked) or a wire (trapped) loses that tell when it is opened or disarmed.
+  const built = await page.evaluate(async () => {
+    const found = { lock: null, traps: [] };
+    for (const n of [1, 2, 3, 4]) {
+      game.startFloor(n);
+      propObjs.forEach((o, idx) => {
+        if (o.p.kind !== 'chest' || !o.tell || !o.tell.parent) return;
+        if (o.p.locked && !found.lock) found.lock = [n, idx];
+        if (o.p.trap && n >= 2) found.traps.push([n, idx]);
+      });
+    }
+    const out = { lockFound: !!found.lock, trapsFound: found.traps.length };
+    if (found.lock) {
+      game.startFloor(found.lock[0]); Q.only(); game.inv.hp = 100; game.inv.pack = [];
+      game.inv.add({ type: 'lockpick', n: 5 });
+      const o = propObjs[found.lock[1]];
+      Q.faceProp(o); Q.keys(true);
+      out.lockOpened = await T.until(() => o.p.opened, 12000); Q.keys(false);
+      out.padlockGone = !o.tell.parent;
+    }
+    if (found.traps.length >= 2) {
+      const [n1, i1] = found.traps[0], [n2, i2] = found.traps[1];
+      game.startFloor(n1); Q.only(); game.inv.hp = 100;
+      const o = propObjs[i1];
+      Q.faceProp(o); Q.fin = null; Q.keys(true); Q.crouchKey(true);
+      await T.until(() => Q.fin && Q.fin.o === o, 15000); Q.keys(false); Q.crouchKey(false);
+      out.disarmHp = game.inv.hp; out.disarmTrapLeft = o.p.trap; out.disarmTellGone = !o.tell.parent;
+      game.startFloor(n2); Q.only(); game.inv.hp = 100;
+      const t = propObjs[i2];
+      Q.faceProp(t); Q.fin = null; Q.keys(true);
+      await T.until(() => Q.fin && Q.fin.o === t, 9000); Q.keys(false);
+      out.triggerTellGone = !t.tell.parent; out.triggerTrapLeft = t.p.trap;
+    }
+    return out;
+  });
+  check('a built padlock comes off when the chest is picked', built.lockFound && built.lockOpened && built.padlockGone, JSON.stringify(built));
+  check('a built trap wire comes off when the trap is disarmed or sprung', built.trapsFound >= 2 && built.disarmTellGone && !built.disarmTrapLeft && built.disarmHp === 100 && built.triggerTellGone && !built.triggerTrapLeft, JSON.stringify(built));
+
+  // 26. The shop stocks lockpicks at 25 gold, one entry per shop, 1 to 3 of them.
+  const shop = await page.evaluate(() => {
+    let seeds = 0, withPick = 0, badPrice = 0, badQty = 0;
+    for (let s = 1; s <= 100; s++) for (let fl = 1; fl <= 4; fl++) {
+      seeds++;
+      const e = makeStock((s * 2654435761) >>> 0, fl).filter(x => x.item.type === 'lockpick');
+      if (e.length === 1) withPick++;
+      for (const x of e) { if (x.price !== 25) badPrice++; if (x.qty < 1 || x.qty > 3) badQty++; }
+    }
+    return { price: priceOf({ type: 'lockpick' }), seeds, withPick, badPrice, badQty };
+  });
+  check('the shop stocks one lockpick stack at 25 gold, 1 to 3 picks', shop.price === 25 && shop.withPick === shop.seeds && shop.badPrice === 0 && shop.badQty === 0, JSON.stringify(shop));
+
+  // 27. Seeded snap chance: 1000 picks, each attempt snaps the pick about 30% of the time. Run twice: the same count.
+  const snap = await page.evaluate(() => {
+    const runOnce = () => {
+      T.reset(); Q.only(); game.inv.pack = [makeItem({ type: 'lockpick', n: 2000 })];
+      const pk = game.inv.pack[0], o = Q.chest();
+      let tries = 0, snaps = 0;
+      for (let i = 0; i < 1000 && pk.n > 0; i++) {
+        o.p.locked = true; o.p.opened = false; o.p.grade = 0; o.p.hits = 0; delete o.p.left;
+        const before = pk.n; finishSearch(o); tries++;
+        if (pk.n < before) snaps++;
+      }
+      return { tries, snaps };
+    };
+    const a = runOnce(), b = runOnce();
+    return { tries: a.tries, snaps: a.snaps, rate: a.snaps / a.tries, same: a.snaps === b.snaps };
+  });
+  check('a lockpick snaps about 30% of the time (seeded, repeatable)', snap.tries === 1000 && snap.rate >= 0.25 && snap.rate <= 0.35 && snap.same, JSON.stringify(snap));
 
   await page.close();
 });

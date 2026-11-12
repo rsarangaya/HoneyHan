@@ -114,6 +114,12 @@ const PROP_INFO = {
   merchant:  { label: 'Trade with the merchant', time: 0.35 },
 };
 
+// Locked and trapped chests (js/gen.js CHEST_ODDS places them; main.js runs them). A lockpick picks a lock (hold E, quiet, may
+// break); otherwise smash it (loud, potions inside may break). Loot from a locked chest is one grade better (gradeUp).
+const LOCKPICK = { time: 3, noise: 1, breakChance: 0.3, drop: 0.06, corpseDrop: 0.25 };   // seconds, metres; drop: barrel/rubble share, corpseDrop: bandit and thief share
+const LOCKED = { hits: 3, maceHits: 2, noise: 10, potionBreak: 0.5, gradeUp: 1 };         // weapon hits to smash (mace needs fewer), metres per hit, share of potions lost
+const TRAP = { dart: 12, bleed: 4, gasRadius: 3, gasDaze: 4, gasSlow: 4, alarmNoise: 18, disarmMul: 2, fx: 0.9 };   // dart damage, bleed seconds, cloud metres and seconds, bell metres, disarm time multiplier, cloud fade seconds
+
 // ---- item construction and display ----
 let nextItemId = 1;
 // A drop descriptor (what loot tables return) becomes a real item with an id once picked up.
@@ -129,6 +135,7 @@ function makeItem(d) {
     case 'rage':   return { id, type: 'rage', tier: 4, charges: d.charges !== undefined ? d.charges : RAGE.charges };
     case 'shield': return { id, type: 'shield', slot: 'offhand', tier: d.tier };
     case 'food':   return { id, type: 'food', kind: d.kind, n: d.n || 1 };
+    case 'lockpick': return { id, type: 'lockpick', n: d.n || 1 };
   }
 }
 
@@ -142,9 +149,10 @@ function itemName(it) {
   if (it.type === 'shield') return it.tier === 4 ? 'Aegis of Dawn' : `${TIER_ADJ[it.tier]} Shield`;
   if (it.type === 'potion') return POTIONS[it.kind].name;
   if (it.type === 'food') return FOOD[it.kind].name;
+  if (it.type === 'lockpick') return 'Lockpick';
   return it.label;
 }
-const itemColor = it => it.type === 'wand' ? (WANDS[it.kind].legendary ? TIERS[4].color : WANDS[it.kind].color) : it.type === 'rechargewand' ? '#7fe8d8' : it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : TIERS[it.tier].color;
+const itemColor = it => it.type === 'wand' ? (WANDS[it.kind].legendary ? TIERS[4].color : WANDS[it.kind].color) : it.type === 'rechargewand' ? '#7fe8d8' : it.type === 'potion' ? POTIONS[it.kind].color : it.type === 'food' ? FOOD[it.kind].color : it.type === 'key' ? '#e8c860' : it.type === 'lockpick' ? '#c8ccd4' : TIERS[it.tier].color;
 const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 
 // Weapon stats with the tier multiplier applied to damage.
@@ -180,6 +188,7 @@ function itemLines(it) {
   if (it.type === 'shield') return [`Block costs ${Math.round(SHIELD.cost / TIERS[it.tier].mul)} stamina (less at higher tiers)`, `Parry window ${SHIELD.parryWin} s`, `Covers leg sweeps: only ${Math.round(SHIELD.legsTake * 100)}% of the hit gets through and no slow`, `Bash: attack while blocking. Stuns for ${SHIELD.bashStun} s and shoves, ${SHIELD.bashStam} stamina`, 'Lets a dagger block properly. Stowed while a bow is out.'];
   if (it.type === 'potion') return [POTIONS[it.kind].desc, `You have ${it.n}`];
   if (it.type === 'food') return [FOOD[it.kind].desc, `Takes ${FOOD[it.kind].time} s to eat. Food feeds you, it does not heal.`, `You have ${it.n}`];
+  if (it.type === 'lockpick') return [`Picks a locked chest: hold the interact key for about ${LOCKPICK.time} s. Quiet (${LOCKPICK.noise} m).`, `Each attempt has a ${Math.round(LOCKPICK.breakChance * 100)}% chance to snap the pick.`, `You have ${it.n}`];
   return ['Opens a locked door on this floor.'];
 }
 
@@ -213,6 +222,12 @@ function rollEquipment(floorNum, rng, { boost = 0, minTier = 0, kind } = {}) {
 // Returns a list of drop descriptors. rng is seeded per prop so a seed repeats.
 // bonus raises drop chances (clean sneak kills leave intact gear).
 function rollLoot(kind, floorNum, rng, bonus = 0, gear = [], type = 'goblin', tier = 0) {
+  const out = rollLootBase(kind, floorNum, rng, bonus, gear, type, tier);
+  // the lockpick roll comes last so the rest of every table keeps its seeded results
+  if (kind === 'barrel' || kind === 'rubble' ? rng() < LOCKPICK.drop : kind === 'corpse' && (type === 'bandit' || type === 'thief') && rng() < LOCKPICK.corpseDrop) out.push({ type: 'lockpick', n: 1 });
+  return out;
+}
+function rollLootBase(kind, floorNum, rng, bonus, gear, type, tier) {
   const out = [];
   const potion = () => ({ type: 'potion', kind: rollPotionKind(rng), n: 1 });
   if (kind === 'corpse') {
@@ -294,9 +309,9 @@ class Inventory {
       if (got <= 0) return null;
       this.arrows += got; return `${got} arrows`;
     }
-    if (d.type === 'potion' || d.type === 'food') {                   // these stack
+    if (d.type === 'potion' || d.type === 'food' || d.type === 'lockpick') {   // these stack
       const s = this.pack.find(i => i.type === d.type && i.kind === d.kind);
-      if (s) { s.n += d.n || 1; return d.type === 'food' ? FOOD[d.kind].name : POTIONS[d.kind].name; }
+      if (s) { s.n += d.n || 1; return itemName(s); }
     }
     if (this.full()) return null;
     const it = makeItem(d);

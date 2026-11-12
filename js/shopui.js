@@ -26,7 +26,7 @@ const shopUI = (() => {
 
   const nameHtml = it => `<span style="color:${it.type === 'arrows' ? '#c8c8c8' : itemColor(it)}">${it.type === 'arrows' ? 'Arrows (pack of 5)' : itemName(it)}</span>`;
   const subText = it => it.type === 'arrows' ? 'Ammo for the bow' : it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' ? tierName(it) + (it.type === 'armor' ? ' ' + ARMOR_LABEL[it.slot].toLowerCase() : it.type === 'shield' ? ' shield' : '')
-    : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : it.type === 'wand' ? `Wand · ${it.charges === undefined ? WANDS[it.kind].charges : it.charges} charges` : it.type === 'rechargewand' ? 'Recharge wand' : '';
+    : it.type === 'potion' ? 'Potion' : it.type === 'food' ? 'Food' : it.type === 'wand' ? `Wand · ${it.charges === undefined ? WANDS[it.kind].charges : it.charges} charges` : it.type === 'rechargewand' ? 'Recharge wand' : it.type === 'lockpick' ? 'Tool' : '';
   const tip = it => it.type === 'arrows' ? '' : itemLines(it).join(' · ').replace(/"/g, '&quot;');
 
   function render() {

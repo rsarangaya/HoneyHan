@@ -9,7 +9,7 @@ const ARMOR_SLOT_FACTOR = { helmet: 0.8, chest: 1.4, boots: 0.8 };
 const POTION_PRICE = { heal: 45, stamina: 40, swift: 50, might: 65, stoneskin: 65, shadow: 70 };
 const FOOD_PRICE = { bread: 12, cheese: 15, jerky: 20, apple: 8, stew: 45 };
 const WAND_PRICE = { fire: 90, frost: 80, lightning: 110, force: 95, sleep: 85, bust: 700 };   // for a full wand
-const OTHER_PRICE = { shield: 40, rechargewand: 60, grandrecharge: 140, rage: 1200, arrows: 2 };
+const OTHER_PRICE = { shield: 40, rechargewand: 60, grandrecharge: 140, rage: 1200, arrows: 2, lockpick: 25 };
 const SELL_SHARE = 0.35, FEATURED_MARKUP = 1.25, ARROW_PACK = 5;
 const MAX_SHOP_TIER = 3;                                            // the shop never stocks Legendary (Epic is the top)
 
@@ -28,6 +28,7 @@ function priceOf(it) {
     case 'rechargewand': return round5(it.full ? OTHER_PRICE.grandrecharge : OTHER_PRICE.rechargewand);
     case 'rage':   return OTHER_PRICE.rage;
     case 'arrows': return OTHER_PRICE.arrows * ARROW_PACK;
+    case 'lockpick': return OTHER_PRICE.lockpick;
   }
   return 0;
 }
@@ -57,6 +58,7 @@ function makeStock(seed, floorNum) {
   add({ type: 'arrows' }, 1);                                              // one pack of 5
   const gear = stock.filter(s => ['weapon', 'armor', 'shield'].includes(s.item.type) && s.item.tier < MAX_SHOP_TIER);
   if (gear.length) { const f = rng.pick(gear); f.item = { ...f.item, tier: f.item.tier + 1 }; f.featured = true; f.price = round5(priceOf(f.item) * FEATURED_MARKUP); }
+  add({ type: 'lockpick' }, rng.int(1, 3));                                // drawn last so the rest of the stock is unchanged
   return stock;
 }
 
