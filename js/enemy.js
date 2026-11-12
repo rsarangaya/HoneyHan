@@ -22,7 +22,11 @@ const ATTACK_RANGE = 1.4;            // hp, damage, windup and cooldown live in 
 let gameRng = makeRng(1);   // gameplay RNG, re-seeded per floor in main.js (separate from the generator's, so floors are unchanged)
 const pickZone = w => { const r = gameRng() * (w[0] + w[1] + w[2]); return r < w[0] ? 'head' : r < w[0] + w[1] ? 'body' : 'legs'; };
 
-const wallAt = (floor, tx, ty) => tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h || floor.tiles[ty * floor.w + tx] === T_WALL || floor.tiles[ty * floor.w + tx] === T_DOOR;
+const wallAt = (floor, tx, ty) => {
+  if (tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h) return true;
+  const t = floor.tiles[ty * floor.w + tx];
+  return t === T_WALL || t === T_DOOR || t === T_SAFEDOOR;   // the safe room's open door is a wall to guards: no path, sight or arrow goes through
+};
 
 function hasLOS(floor, x0, z0, x1, z1) {
   const d = Math.hypot(x1 - x0, z1 - z0), n = Math.ceil(d / 0.3);
@@ -101,7 +105,7 @@ function ellPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new T
 function torsoPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.44, 1, 14), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
 let SHADOW_GEO = null, SHADOW_MAT = null, SPARK_GEO = null, TOOTH_GEO = null;   // a soft dark disc under each creature, so it sits on the floor instead of floating
 
-const collider = { radius: 0.4, props: [] };   // borrows Player.blocked for wall collision
+const collider = { radius: 0.4, props: [], mob: true };   // borrows Player.blocked for wall collision
 
 // Bodies are circles: push overlapping living guards apart (half each) and push guards out of the
 // player. A guard pinned against a wall pushes the player instead. Runs once a frame after the guards move.

@@ -28,6 +28,7 @@ const player = new Player();
 let cullChunks = [];        // the merged furniture and torches of the current floor, for distance culling (js/perf.js)
 let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null, upBox = null, upLight = null;
 const floorCache = {};      // floors you have left, kept exactly as they were (guards, opened chests, bodies, explored map)
+const SAFE_CEIL = 4;       // the safe room's ceiling height (m)
 const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) has room
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5, UP_RISE = 1.4;   // the way down sinks 1.5 m; the way back up rises 1.4 m
 let state = 'menu';        // menu | play | won
@@ -208,6 +209,7 @@ function buildFloor() {
   }
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
   if (floor.shop) buildShop();
+  if (floor.safe) buildSafeRoom(walls.material, ce.material);
   // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
   cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell').map(o => o.mesh), group);
   buildTorches();
@@ -226,6 +228,35 @@ function buildFloor() {
   scene.add(group);
   scene.background = new THREE.Color(theme.fog);
   scene.fog = new THREE.FogExp2(theme.fog, 0.085);
+}
+
+// ---- the safe room behind the boss arena (floor.safe, built in js/gen.js layoutBoss). Until the boss dies its door is a slab that looks like
+// the wall around it; bossDefeated opens it (openSafeDoor) and updateDoors slides it up. The room gets a low ceiling (the arena's is 10 m) so it feels snug. ----
+function buildSafeRoom(wallMat, ceilMat) {
+  const s = floor.safe, d = s.door, r = s.rect, slab = new THREE.Group();
+  const block = new THREE.Mesh(new THREE.BoxGeometry(TILE, WALL_H, TILE), wallMat);      // the same material as the wall tiles: it does not show
+  block.position.y = WALL_H / 2; slab.add(block);
+  const x = (d.x + 0.5) * TILE, z = (d.y + 0.5) * TILE;
+  slab.position.set(x, 0, z); group.add(slab);
+  s.o = { p: { kind: 'door', opened: true, x: d.x, y: d.y }, mesh: slab, x, z, r: 0, lid: null, mats: [] };   // opened: true, so it is never a prompt target; updateDoors animates it once o.anim is set
+  propObjs.push(s.o);
+  const ceil = (tx, ty, tw, th) => {
+    const g = new THREE.PlaneGeometry(tw * TILE, th * TILE), uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * tw / floor.w, uv.getY(i) * th / floor.h);   // one texture repeat per tile, like the big ceiling
+    const m = new THREE.Mesh(g, ceilMat); m.rotation.x = Math.PI / 2; m.position.set((tx + tw / 2) * TILE, SAFE_CEIL, (ty + th / 2) * TILE); group.add(m);
+  };
+  s.inside = new Uint8Array(floor.w * floor.h);                                          // the room and its passage (not the door tile, not the arena): the tiles where you are safe
+  for (let y = r.y0; y <= r.y1; y++) for (let tx = r.x0; tx <= r.x1; tx++) s.inside[y * floor.w + tx] = 1;
+  for (let y = r.y1 + 1; y < d.y; y++) s.inside[y * floor.w + d.x] = 1;
+  ceil(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+  ceil(d.x, r.y1 + 1, 1, d.y - r.y1 - 1);                                                // the passage from the room to the door
+}
+// The boss is dead: the hidden door grinds open (once), the tile stops being solid for the player but stays a wall to every enemy.
+function openSafeDoor() {
+  const s = floor.safe;
+  if (!s || s.open) return;
+  s.open = true; floor.tiles[s.door.y * floor.w + s.door.x] = T_SAFEDOOR; s.o.anim = 0;
+  shake.mag = 0.03; shake.t = shake.dur;
 }
 
 // ---- light sources: wall torches plus glowing furniture (hearths, cauldrons, candles, altars).
@@ -260,11 +291,11 @@ function buildTorches() {
   torchGroups = [];
   torchPts = floor.torches.map(t => {
     const x = (t.x + 0.5) * TILE + t.dx * 1.42, z = (t.y + 0.5) * TILE + t.dy * 1.42;
-    const g = new THREE.Group(); g.position.set(x, floor.boss ? 3.6 : 2.0, z);       // higher on the tall arena walls
+    const g = new THREE.Group(); g.position.set(x, floor.boss && !t.low ? 3.6 : 2.0, z);       // higher on the tall arena walls (not in the low safe room)
     const stick = new THREE.Mesh(TORCH_STICK, iron); stick.position.y = -0.05;                                  // a round bracket and a tapering flame, not boxes
     const flame = new THREE.Mesh(TORCH_FLAME, fire); flame.position.y = 0.26;
     g.add(stick, flame); group.add(g); torchGroups.push(g);
-    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss ? 3.8 : 2.2, color: theme.light, str: 1 };
+    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss && !t.low ? 3.8 : 2.2, color: theme.light, str: 1 };
   });
   for (const o of decorObjs) {
     const l = DECOR_LIGHT[o.kind];
@@ -403,7 +434,7 @@ function bash() {
   const stunned = e.addStatus('stun', SHIELD.bashStun);
   if (stunned) discover('status:stun', 'Stun');
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;       // shove it back if there is room
-  if (!e.boss && !e.st.has('stuck') && !Player.wallHit(floor, e.x + dx / d * SHIELD.bashPush, e.z + dz / d * SHIELD.bashPush, e.r)) { e.x += dx / d * SHIELD.bashPush; e.z += dz / d * SHIELD.bashPush; }
+  if (!e.boss && !e.st.has('stuck') && !Player.wallHit(floor, e.x + dx / d * SHIELD.bashPush, e.z + dz / d * SHIELD.bashPush, e.r, true)) { e.x += dx / d * SHIELD.bashPush; e.z += dz / d * SHIELD.bashPush; }
   mark(stunned ? 'BASH +STUN' : 'BASH', '#7fe8ff');
 }
 
@@ -527,6 +558,7 @@ function startDraw(w) {
   cb.draw = { t: 0 };
 }
 function fireArrow(frac) {
+  if (inSafe) return;
   const w = wstats();
   const cp = Math.cos(player.pitch), dx = -Math.sin(player.yaw) * cp, dy = Math.sin(player.pitch), dz = -Math.cos(player.yaw) * cp;
   const sp = BOW.speedMin + (BOW.speedMax - BOW.speedMin) * frac;
@@ -589,7 +621,8 @@ function bossDefeated(e) {
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
-  flash('The boss falls! Loot its body. The way down is open.');
+  flash('The boss falls! Loot its body. A rumble shakes the arena: a hidden door in the north wall grinds open.');
+  openSafeDoor();
 }
 
 // A dead enemy leaves a lootable body only if its drop roll gave something.
@@ -633,7 +666,7 @@ function explodeAt(x, z, src) {
   fx.on = true; fx.t = 0; fx.r = BOMB.radius; fx.m.position.set(x, 0.7, z); fx.m.visible = true;
   pending.push({ x, z, r: BOMB.noise, src: null });                              // the bang is heard far and wide
   const dp = Math.hypot(player.x - x, player.z - z);
-  if (dp < BOMB.radius && hasLOS(floor, x, z, player.x, player.z)) {
+  if (!inSafe && dp < BOMB.radius && hasLOS(floor, x, z, player.x, player.z)) {
     damage(blastDmg(dp) * (1 - inv.armorRed('body')));
     pst.apply('daze', 2); discover('status:daze', 'Daze'); mark('BLASTED', '#ff9a3a'); addLog('Caught in the blast!', '#ff9a3a');
   }
@@ -677,7 +710,7 @@ function springTrap(kind, o) {
     hitReaction(TRAP.dart); flash('A dart shoots out of the chest!'); addLog(`A trap dart hits you: ${TRAP.dart} damage and bleeding.`, '#ff6a6a');
   } else if (kind === 'gas') {
     gasFx.on = true; gasFx.t = 0; gasFx.m.position.set(o.x, 0.9, o.z); gasFx.m.visible = true;
-    if (Math.hypot(player.x - o.x, player.z - o.z) < TRAP.gasRadius) {
+    if (!inSafe && Math.hypot(player.x - o.x, player.z - o.z) < TRAP.gasRadius && hasLOS(floor, o.x, o.z, player.x, player.z)) {
       if (pst.apply('daze', TRAP.gasDaze)) discover('status:daze', 'Daze'); if (pst.apply('slow', TRAP.gasSlow)) discover('status:slow', 'Slow');
     }
     for (const e of enemies) {
@@ -764,13 +797,16 @@ function finishEat() {
   flash(`Ate ${f.name}${hearth ? ' by the fire' : ''}. +${feed} food`);
 }
 
+// In the safe room (floor.safe, north of its door tile): nothing can hurt you, nothing drains, attacks do nothing. One flag, set once a frame.
+let inSafe = false, safeMsgT = 0;
 function updateCombat(dt) {
+  inSafe = floor.safe !== undefined && floor.safe.open && floor.safe.inside[player.tileY * floor.w + player.tileX] === 1;
   // gear and potions feed the player and the guards' senses
   player.speedMul = (dev.on ? 5 : 1) * (inv.buffs.swift > 0 ? 1.35 : 1) * pst.moveMul();
   const bleed = pst.update(dt);
-  if (bleed > 0 && !dev.on && inv.hp > 1) inv.hp = Math.max(1, inv.hp - bleed);   // bleeding never kills on its own
+  if (bleed > 0 && !dev.on && !inSafe && inv.hp > 1) inv.hp = Math.max(1, inv.hp - bleed);   // bleeding never kills on its own
   if (pst.has('daze')) spend(STATUS.daze.drain * dt);
-  if (!dev.on) {                                    // hunger drains while you play (frozen in dev mode)
+  if (!dev.on && !inSafe) {                         // hunger drains while you play (frozen in dev mode and in the safe room: it is not restored there either)
     const r = hunger.update(dt, { sprinting: player.sprinting, still: Math.hypot(player.vx, player.vz) < 0.2, crouching: player.crouching }, gameRng);
     if (r.growl) loud(r.growl);                     // a stomach growl is a faint noise
     if (r.hp && inv.hp > 1) inv.hp = Math.max(1, inv.hp - r.hp);   // starving hurts but never kills
@@ -808,7 +844,11 @@ function updateCombat(dt) {
   if (cb.limpMsg > 0) cb.limpMsg -= dt;
   if (inv.rageReq) { playRage(inv.rageReq); inv.rageReq = null; }
   if (cb.bash > 0) cb.bash -= dt;
-  if (cb.press) { startAttack(); cb.press = false; }
+  if (cb.press) {
+    cb.press = false;
+    if (!inSafe || cb.eat) startAttack();                                                    // in the safe room an attack does nothing (but still stops a meal)
+    else if (performance.now() - safeMsgT > 4000) { safeMsgT = performance.now(); flash('No one fights in the safe room.'); }
+  }
   if (cb.draw) {                                    // drawing the bow: slow, release to fire, block cancels
     const w = wstats();
     cb.draw.t += dt; player.speedMul *= 0.4;
@@ -910,6 +950,7 @@ function hitReaction(n) {
   requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 function damage(n) {
+  if (inSafe) return;                              // the safe room: nothing can hurt you
   hitReaction(n);
   hunger.fight = 3;
   if (cb.eat) { cb.eat = null; flash('Interrupted!'); }
@@ -1209,7 +1250,7 @@ function drawMinimap(step = 1) {
   for (let y = 0; y < floor.h; y++) for (let x = 0; x < floor.w; x++) {
     if (!explored[y * floor.w + x]) continue;
     const t = floor.tiles[y * floor.w + x];
-    mctx.fillStyle = t === T_WALL ? '#2a2a33' : t === T_STAIRS ? '#ffd24a' : t === T_START && floor.up ? '#5aa0ff' : t === T_DOOR ? '#c0702a' : '#6a6a78';   // gold: the way down, blue: the way back up
+    mctx.fillStyle = t === T_WALL || (t === T_DOOR && floor.safe) ? '#2a2a33' : t === T_STAIRS ? '#ffd24a' : t === T_START && floor.up ? '#5aa0ff' : t === T_DOOR ? '#c0702a' : '#6a6a78';   // gold: the way down, blue: the way back up
     mctx.fillRect(x * S, y * S, S + 0.5, S + 0.5);
   }
   if (dev.on) for (const e of enemies) {
@@ -1260,12 +1301,15 @@ function checkStairs() {
   if (upProgress() >= 0.85 && floorNum > 1) { changeFloor(floorNum - 1, 'up'); return; }   // climbed back up
   if (stairProgress() < 0.85) return;
   if (floorNum < MAX_FLOOR) changeFloor(floorNum + 1, 'down');
-  else finishRun();
+  else enterNextStage();
 }
+// The one hook for the stairs in the safe room. Until stages 2 to 4 exist it ends the run; the stage work replaces the body
+// (build the next stage's first floor, carry the pack over, reset floorNum and the cache).
+function enterNextStage() { finishRun(); }
 function finishRun() {
   state = 'won';
   document.exitPointerLock();
-  hud.overlayText.innerHTML = `<h1>Boss defeated</h1><p>You took the stairs down from floor ${MAX_FLOOR}. That is the end of this iteration.</p><p>Click to start a new run.</p>`;
+  hud.overlayText.innerHTML = `<h1>Stage 1 complete</h1><p>The boss is dead and you took the safe room stairs down. The next stage is not built yet, so this is the end of the run.</p><p><button type="button" style="font:inherit;padding:6px 18px;cursor:pointer">Start a new run</button></p>`;
   hud.overlay.style.display = 'flex';
 }
 

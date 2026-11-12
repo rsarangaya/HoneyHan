@@ -50,7 +50,7 @@ for (let s = 1; s <= N; s++) {
     const themeName = s % 7 === 6 ? undefined : THEME_NAMES[(s + n) % THEME_NAMES.length], gim = G.THEME_GIMMICK[themeName], f = G.generateFloor(seed, n, { armory, boss, themeName });
     checked++;
     const closed = flood(f, false), open = flood(f, true), guardOpen = flood(f, true, true), at = (x, y) => y * f.w + x;
-    if (!touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');
+    if (!touchable(f, f.safe ? open : closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');   // the boss floor's stairs are behind the hidden door until the boss dies
     if (!boss) {                                                             // map size, corridor share and chest grades
       const size = [32, 36, 40, 44][n - 1];
       if (f.w !== size || f.h !== size) fail(where, `map is ${f.w}x${f.h}, want ${size}`);
@@ -437,6 +437,48 @@ for (let s = 1; s <= N; s++) {
   // The thief line: shown only while the thief lives on the floor
   const tl = quest => QT.thief.line({ quest });
   if (!/loot sack/.test(tl({ thief: { dead: false } })) || tl({ thief: { dead: true } }) !== '' || tl({ thief: { dead: false }, gone: true }) !== '' || tl({ thief: null }) !== '') fail('thief line', 'the line should show only while the thief is alive and on the floor');
+}
+
+// Safe room behind the boss arena (layoutBoss: floor.safe). 300 seeds of the boss floor: the map is 57 x 57; the hidden door is a closed door
+// tile at the head of a passage; the room and its stairs are reachable only through the door; the arena (start, boss, guard routes, the
+// healing potion) stays reachable without it. main.js floor.safe.inside (the tiles where you are safe) must be exactly the room and its passage.
+{
+  const safeFloor = (seed) => G.generateFloor(seed, 5, { boss: true });
+  for (let s = 1; s <= N; s++) {
+    const seed = (s * 2654435761) >>> 0, where = `safe room, seed ${seed}`, f = safeFloor(seed), at = (x, y) => f.tiles[y * f.w + x];
+    const sf = f.safe;
+    if (!sf) { fail(where, 'boss floor has no safe room'); continue; }
+    const { door, rect: r } = sf;
+    if (f.w !== 57 || f.h !== 57) fail(where, `boss map is ${f.w}x${f.h}, want 57x57`);
+    if (at(door.x, door.y) !== G.T_DOOR) fail(where, 'the hidden door is not a closed door tile');
+    if (at(f.stairs.x, f.stairs.y) !== G.T_STAIRS || f.stairs.x < r.x0 || f.stairs.x > r.x1 || f.stairs.y < r.y0 || f.stairs.y > r.y1) fail(where, 'the stairs are not inside the safe room');
+    let rock = false;
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (at(x, y) === G.T_WALL) rock = true;
+    for (let y = r.y1 + 1; y < door.y; y++) if (at(door.x, y) === G.T_WALL) rock = true;
+    if (rock) fail(where, 'the safe room or its passage has rock in it');
+    const closed = flood(f, false), open = flood(f, true), idx = (x, y) => y * f.w + x;
+    let roomReached = false;
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (closed[idx(x, y)]) roomReached = true;
+    if (roomReached || touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'the safe room or its stairs are reachable before the boss dies');
+    let roomOpen = true;
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (!open[idx(x, y)]) roomOpen = false;
+    if (!roomOpen || !touchable(f, open, f.stairs.x, f.stairs.y)) fail(where, 'the safe room or its stairs are unreachable once the door is open');
+    if (!touchable(f, closed, f.boss.x, f.boss.y)) fail(where, 'the boss is not reachable without the safe room door');
+    for (const e of f.enemies) if (!e.boss) for (const p of e.route) if (!touchable(f, closed, p.x, p.y)) { fail(where, 'a guard route is not reachable'); break; }
+    for (const p of f.props) if (p.fixed === 'heal' && !touchable(f, closed, p.x, p.y)) fail(where, 'the healing potion is not reachable');
+    // The tiles where you are safe (main.js builds floor.safe.inside by this same rule): the room and its passage, never the door, never the arena.
+    const inside = new Uint8Array(f.w * f.h);
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) inside[idx(x, y)] = 1;
+    for (let y = r.y1 + 1; y < door.y; y++) inside[idx(door.x, y)] = 1;
+    let count = 0, arena = 0;
+    for (let i = 0; i < inside.length; i++) if (inside[i]) { count++; if (closed[i]) arena++; }
+    if (count !== (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1) + (door.y - r.y1 - 1)) fail(where, 'the safe-room mask is not exactly the room and its passage');
+    if (inside[idx(door.x, door.y)]) fail(where, 'the door tile is inside the safe-room mask');
+    if (arena) fail(where, `the safe-room mask covers ${arena} arena tiles`);
+  }
+  // The same seed gives the same floor (door, room, stairs, boss, props and the tile grid).
+  const sig = f => JSON.stringify([Array.from(f.tiles), f.safe, f.stairs, f.boss, f.props, f.decor.length]);
+  for (let s = 1; s <= 20; s++) { const seed = (s * 2654435761) >>> 0; if (sig(safeFloor(seed)) !== sig(safeFloor(seed))) fail(`safe room, seed ${seed}`, 'a repeat of the same seed gave a different floor'); }
 }
 
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);

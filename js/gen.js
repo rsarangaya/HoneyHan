@@ -1,5 +1,5 @@
 // Seeded RNG, themes, and the room-and-corridor floor generator.
-const T_WALL = 0, T_FLOOR = 1, T_STAIRS = 2, T_START = 3, T_DOOR = 4;   // T_DOOR: a locked door, solid until unlocked
+const T_WALL = 0, T_FLOOR = 1, T_STAIRS = 2, T_START = 3, T_DOOR = 4, T_SAFEDOOR = 5;   // T_DOOR: a locked door, solid until unlocked. T_SAFEDOOR: the opened safe room door, open to the player and a wall to every enemy (arrows and sight too)
 
 function makeRng(seed) {
   let s = seed >>> 0;
@@ -27,6 +27,7 @@ const THEMES = [
 ];
 
 const MAP_W = 45, MAP_H = 45;               // the boss arena's size
+const SAFE_PAD = 12;                        // rock added north of the arena (the map grows to 57 x 57) for the safe room behind the boss's hidden door
 // Ordinary floors start small and grow a little: floor 1 is a compact 32 x 32 so the first minutes are not a long walk.
 const mapSizeFor = floorNum => [32, 36, 40, 44][Math.min(floorNum, 4) - 1];
 const weightedPick = (rng, w) => { let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return 0; };   // a seeded weighted choice by index
@@ -98,12 +99,13 @@ function generateFloor(seed, floorNum, opts = {}) {
 }
 
 // Boss floor: no rooms, one big lumpy cave arena. The boss waits in the middle, guards patrol the rim,
-// loot and statues sit along the walls, you start at the south end and the stairs are at the north end.
+// loot and statues sit along the walls and you start at the south end. At the north end a hidden door (opened when the boss dies)
+// leads through the rock to the safe room, which holds the stairs down (floor.safe).
 // Every blocking object is placed so the open floor stays connected (pillars never touch each other
 // or the walls, props are checked with a flood fill).
 function layoutBoss(seed, floorNum) {
   const rng = makeRng(seed * 7919 + floorNum * 104729);
-  const w = MAP_W, h = MAP_H, cx = w >> 1, cy = h >> 1;
+  const w = MAP_W + SAFE_PAD, h = MAP_H + SAFE_PAD, cx = w >> 1, cy = (MAP_H >> 1) + SAFE_PAD;
   const tiles = new Uint8Array(w * h), blocked = new Uint8Array(w * h);
   const at = (x, y) => tiles[y * w + x];
   const wallAt = (x, y) => x < 0 || y < 0 || x >= w || y >= h || at(x, y) === T_WALL;
@@ -115,14 +117,20 @@ function layoutBoss(seed, floorNum) {
     if (dist(x, y, cx, cy) <= edgeR(Math.atan2(y - cy, x - cx))) tiles[y * w + x] = T_FLOOR;
 
   let sy = cy + Math.floor(edgeR(Math.PI / 2)) - 2; while (at(cx, sy) !== T_FLOOR) sy--;
-  let ty = cy - Math.floor(edgeR(-Math.PI / 2)) + 2; while (at(cx, ty) !== T_FLOOR) ty++;
-  const start = { x: cx, y: sy }, stairs = { x: cx, y: ty };
-  tiles[start.y * w + start.x] = T_START; tiles[stairs.y * w + stairs.x] = T_STAIRS;
+  // the safe room: 9 x 7 tiles carved into the rock north of the arena, joined to the arena's north tip by a short passage whose
+  // first tile is the hidden door. Planned here, carved after the props are placed (so the flood fills below never see it).
+  let topY = 0; while (at(cx, topY) !== T_FLOOR) topY++;                       // the arena's northmost floor tile on the centre column
+  let minY = topY;
+  for (let x = cx - 5; x <= cx + 5; x++) { let y = 0; while (y < minY && at(x, y) !== T_FLOOR) y++; if (y < minY) minY = y; }
+  const rB = minY - 3, rT = rB - 6, rX0 = cx - 4, rX1 = cx + 4;                // two wall rows between the arena and the room
+  const gate = { x: cx, y: topY }, door = { x: cx, y: topY - 1 };             // the arena tile in front of the door, and the door tile
+  const start = { x: cx, y: sy }, stairs = { x: cx, y: rT + 2 };               // the stairs sit two rows in from the north wall, so you can walk round to their open north side
+  tiles[start.y * w + start.x] = T_START;
 
   // rock pillars scattered over the arena (cover); none beside another pillar, a wall, the boss, the start or the stairs
   const open8 = (x, y) => { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (wallAt(x + dx, y + dy)) return false; return true; };
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    if (at(x, y) !== T_FLOOR || dist(x, y, cx, cy) < 7 || dist(x, y, start.x, start.y) < 5 || dist(x, y, stairs.x, stairs.y) < 4.5) continue;
+    if (at(x, y) !== T_FLOOR || dist(x, y, cx, cy) < 7 || dist(x, y, start.x, start.y) < 5 || dist(x, y, gate.x, gate.y) < 4.5) continue;
     if (open8(x, y) && rng() < 0.1) tiles[y * w + x] = T_WALL;
   }
 
@@ -146,7 +154,7 @@ function layoutBoss(seed, floorNum) {
   const wallDir = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => wallAt(x + dx, y + dy)) || [0, 1];
   const edge = [];                                         // open tiles touching a wall: where loot and statues go
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    if (at(x, y) !== T_FLOOR || dist(x, y, start.x, start.y) < 6 || dist(x, y, cx, cy) < 8) continue;
+    if (at(x, y) !== T_FLOOR || dist(x, y, start.x, start.y) < 6 || dist(x, y, cx, cy) < 8 || dist(x, y, gate.x, gate.y) < 4) continue;   // keep the door's front clear
     if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => wallAt(x + dx, y + dy))) edge.push({ x, y });
   }
   rng.shuffle(edge);
@@ -175,22 +183,35 @@ function layoutBoss(seed, floorNum) {
   const hang = (x, y) => decor.push({ kind: 'chandelier', x, y, seed: seedOf(), edge: false, yaw: 0, scale: 3 });
   hang(cx, cy);
   for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; hang(Math.round(cx + Math.cos(a) * 11), Math.round(cy + Math.sin(a) * 11)); }
-  hang(cx, Math.round((cy + sy) / 2 + 3)); hang(cx, Math.round((cy + ty) / 2 - 1));
+  hang(cx, Math.round((cy + sy) / 2 + 3)); hang(cx, Math.round((cy + topY + 2) / 2 - 1));
   for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.3; decor.push({ kind: 'candles', x: Math.round(cx + Math.cos(a) * 5), y: Math.round(cy + Math.sin(a) * 5), seed: seedOf(), edge: false, yaw: rng() * 6.28 }); }
   for (let i = 0; i < 14; i++) {
     const x = rng.int(cx - 14, cx + 14), y = rng.int(cy - 14, cy + 14);
     if (at(x, y) === T_FLOOR && dist(x, y, start.x, start.y) > 4) decor.push({ kind: 'bones', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
   }
 
-  // wall torches around the rim and on the pillars
+  // wall torches around the rim and on the pillars (none on the hidden door)
   const spots = [];
   for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
     if (wallAt(x, y) || at(x, y) === T_STAIRS) continue;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy)) spots.push({ x, y, dx, dy });
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy) && !(x + dx === door.x && y + dy === door.y)) spots.push({ x, y, dx, dy });
   }
   rng.shuffle(spots);
   const torches = [];
   for (const s of spots) { if (torches.length >= 60) break; if (torches.every(t => Math.hypot(t.x - s.x, t.y - s.y) >= 3)) torches.push(s); }
+
+  // carve the safe room and its passage; the door stays T_DOOR (solid) until the boss dies. Furnished for a rest: a hearth, a bench,
+  // candles, a rug and banners, plus two low wall torches (the light pool only ever lights the nearest four sources).
+  for (let y = rT; y <= rB; y++) for (let x = rX0; x <= rX1; x++) tiles[y * w + x] = T_FLOOR;
+  for (let y = rB + 1; y < door.y; y++) tiles[y * w + cx] = T_FLOOR;
+  tiles[door.y * w + door.x] = T_DOOR; tiles[stairs.y * w + stairs.x] = T_STAIRS;
+  const cosy = (kind, x, y, dx, dy, extra = {}) => decor.push({ kind, x, y, seed: seedOf(), edge: dx !== 0 || dy !== 0, yaw: dx || dy ? Math.atan2(-dx, -dy) : rng() * 6.28, ...extra });   // (dx, dy) = the wall it stands against
+  cosy('hearth', cx - 2, rT, 0, -1); cosy('banner', cx + 2, rT, 0, -1); cosy('banner', cx - 3, rT, 0, -1);
+  cosy('bench', rX1, rT + 4, 1, 0); cosy('banner', rX0, rT + 4, -1, 0);
+  cosy('rug', cx, rB - 1, 0, 0, { yaw: 0 });
+  for (const [x, y] of [[cx - 3, rT + 1], [cx + 3, rT + 1], [rX1 - 1, rT + 4], [cx + 2, rB]]) cosy('candles', x, y, 0, 0);
+  torches.push({ x: rX0, y: rT + 2, dx: -1, dy: 0, low: true }, { x: rX1, y: rT + 2, dx: 1, dy: 0, low: true });
+  const safe = { door, gate, open: false, rect: { x0: rX0, x1: rX1, y0: rT, y1: rB } };
 
   // the boss in the middle (asleep until you get close) and guards patrolling the rim
   const nearestOpen = (x, y) => {
@@ -210,7 +231,7 @@ function layoutBoss(seed, floorNum) {
   }
 
   const room = { x: cx - 19, y: cy - 19, w: 39, h: 39, cx, cy, theme: 'arena', locked: false };
-  return { w, h, tiles, blocked, rooms: [room], start, stairs, props, decor, doors: [], torches, enemies, boss: { x: cx, y: cy }, steps: 0 };
+  return { w, h, tiles, blocked, rooms: [room], start, stairs, props, decor, doors: [], torches, enemies, boss: { x: cx, y: cy }, safe, steps: 0 };
 }
 
 function layoutFloor(seed, floorNum, opts) {

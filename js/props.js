@@ -2,11 +2,11 @@
 // Local frame: the model's +z faces into the room and its back is at -z, so objects on a room's
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
-const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, cauldron: 0.75,
+const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, bench: 0.55, cauldron: 0.75,
   sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
-  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
+  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
   candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 },
@@ -312,6 +312,12 @@ function makeDecor(d) {
       const f1 = flame(inner, 0, 0.5, 0.28, 4); f1.scale.set(3.2, 4.2, 3.2); const f2 = flame(inner, 0.2, 0.42, 0.28, 3); f2.scale.set(2.4, 3.2, 2.4);
       C(inner, 0.05, 0.05, 0.7, lam(0x4a3018), 0, 0.12, 0.3, 6).rotation.z = Math.PI / 2 + 0.2; C(inner, 0.045, 0.045, 0.6, lam(0x3a2410), 0.05, 0.22, 0.28, 6).rotation.z = Math.PI / 2 - 0.3;   // logs
       C(inner, 0.07, 0.07, 0.25, bone, -0.7, 1.7, 0.1, 6);                                           // candle stub on the mantel
+      break;
+    }
+    case 'bench': {                                                // a plain plank bench along a wall (the safe room)
+      RB(inner, 1.6, 0.08, 0.4, wood2, 0, 0.45, 0);
+      for (const x of [-0.65, 0.65]) RB(inner, 0.08, 0.43, 0.34, wood, x, 0.215, 0);
+      break;
     }
     case 'cauldron': {
       for (const a of [0, 2.1, 4.2]) C(inner, 0.03, 0.05, 0.35, iron, Math.sin(a) * 0.4, 0.17, Math.cos(a) * 0.4, 6);

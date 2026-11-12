@@ -40,11 +40,12 @@ class Player {
   }
 
   // Circle against wall tiles (guards borrow this through Player.prototype.blocked, so it takes the radius).
-  static wallHit(floor, x, z, r) {
+  static wallHit(floor, x, z, r, mob) {   // mob: a guard's collider, for which the safe room's open door is solid too
     const x0 = Math.floor((x - r) / TILE), x1 = Math.floor((x + r) / TILE);
     const z0 = Math.floor((z - r) / TILE), z1 = Math.floor((z + r) / TILE);
     for (let ty = z0; ty <= z1; ty++) for (let tx = x0; tx <= x1; tx++) {
-      const wall = tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h || [T_WALL, T_DOOR].includes(floor.tiles[ty * floor.w + tx]);
+      let wall = tx < 0 || ty < 0 || tx >= floor.w || ty >= floor.h;
+      if (!wall) { const t = floor.tiles[ty * floor.w + tx]; wall = t === T_WALL || t === T_DOOR || (mob === true && t === T_SAFEDOOR); }
       if (!wall) continue;
       const cx = Math.max(tx * TILE, Math.min(x, (tx + 1) * TILE));
       const cz = Math.max(ty * TILE, Math.min(z, (ty + 1) * TILE));
@@ -55,7 +56,7 @@ class Player {
 
   blocked(floor, x, z) {
     const r = this.radius;
-    if (Player.wallHit(floor, x, z, r)) return true;
+    if (Player.wallHit(floor, x, z, r, this.mob)) return true;
     for (const p of this.props) if (p.r > 0 && (x - p.x) ** 2 + (z - p.z) ** 2 < (r + p.r) ** 2) return true;
     return false;
   }
