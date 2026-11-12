@@ -1,15 +1,11 @@
 # Status
 
 Project: HoneyHan (formerly Prototype Test), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-12 (branch `impatience`: steps 2 to 8 of the build order, each tested)
+Last updated: 2026-11-12 (branch `impatience`: build round 5, traps, encounters, safe room, stages)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
 ## Done
-- Prisoner rescue, encounter type 3 (2026-11-12, untested by the tester yet): `cell` locked room and patrol guard in `js/gen.js`, `QUESTS.prisoner` / `QUEST_TYPES.prisoner` / `prisonerFree` / `prisonerStep` / `prisonerSafeBuild` / `prisonerTalk` in `js/quests.js` (the cell key is `spec.carry` on a guard: gold key on its belt, in its corpse via `makeCorpse`; chest fallback), `prisoner` body in `js/enemytypes.js` / `js/enemy.js`, glossary card, tune panel section (key bumped to 18). Five encounter types now roll at 20% each (`tests/gen.test.js` updated; `tests/game.quests.test.js` seeds moved to 38 and 401 because the roll changed).
-- Safe room after the boss (2026-11-12, untested by the tester yet): `floor.safe` from `layoutBoss` in `js/gen.js` (map grows to 57 x 57; 9 x 7 room north of the arena behind a hidden door; stairs down inside), `buildSafeRoom` / `openSafeDoor` / `inSafe` / `enterNextStage()` in `js/main.js`, `T_SAFEDOOR` (a wall to enemies only) in `js/enemy.js`, `bench` decor and a missing `break` after the hearth model in `js/props.js`. No tunables added. Next-stage hook: `enterNextStage()` (now ends the run with a Stage 1 complete screen).
-- Locked and trapped chests plus the lockpick (2026-11-12, untested by the tester yet): `CHEST_ODDS` in `js/gen.js` (12% locked from floor 1, 10% trapped from floor 2), `LOCKPICK` / `LOCKED` / `TRAP` in `js/loot.js`, padlock and tripwire tells in `js/props.js`, `springTrap` / `smashChest` / pooled gas cloud in `js/main.js`, lockpick in the shop, glossary and tuning panel. Tune storage key is now `-15`.
-- Mimic chest and bomb goblin (2026-11-12, untested by the tester yet): see `js/enemytypes.js` (`mimic`, `bomber`, `MIMIC`, `BOMB`), `js/enemy.js` (buildMimic, updateBomber), `js/main.js` (explodeAt, pooled blast and dropped-bomb effects), `js/gen.js` (`MIMIC_CHANCE`). Tune storage key is now `-14`.
 - Design doc written: `DESIGN.md` (concept, floors and themes, stealth and noise, combat, weapons, statuses, wands, architecture, build order, risks).
 - Reference projects reviewed (read only, not changed), both in `C:\Users\rsarangaya\OneDrive - JSSI\Documents\ClaudeCodeCloudTest`:
   - `Test1`: Muay Thai FPS (Three.js, no build step). Source for movement, viewmodel, Fighter rig, `combat.js` tables, stamina.
@@ -177,6 +173,16 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - `stage` 1..4 (themes: stage 1 is the seed's usual theme, stages 2 to 4 are three other seeded themes) and 5 (one boss arena, "The Final Boss" placeholder, killing it shows "Run complete"). `floorNum` is the floor within the stage. Safe-room stairs lead to the next stage; floor 1 of stages 2+ has stairs up to the previous stage's safe room. Per stage: shop, armory, encounter plan and prisoner state. Numbers in `TUNE` (stage*, finalBoss*) and the tuning panel (key bumped to -20; Stage up/down buttons). Cache bounded to 6 floors (`trimCaches`).
 - Open: balance of the stage scaling is a guess; the final boss is a placeholder.
 
+### Build round 5 (2026-11-12): traps, encounters, safe room, stages
+Not play-tested by a real person. Each feature is covered by the test file named.
+- **Locked and trapped chests, lockpick** (`CHEST_ODDS` in `js/gen.js`, `LOCKPICK` / `LOCKED` / `TRAP` in `js/loot.js`, `springTrap` / `smashChest` in `js/main.js`, tells in `js/props.js`). 12% of ordinary chests are locked from floor 1, 10% trapped from floor 2 (dart, gas or alarm, never both). Tells: padlock on a locked chest, tripwire on a trapped one. Hold E to pick a lock: 3 s, 1 m noise, 30% the pick breaks. Lockpicks drop 6% from barrels and rubble, 25% from bandit and thief bodies, and sell in the shop. Gas is a pooled cloud. Tests: `tests/game.traps.test.js`, `tests/gen.test.js`.
+- **Mimic chest** (`MIMIC`, `js/enemytypes.js`; `buildMimic`, `js/enemy.js`). 8% of ordinary chests from floor 2 (never vault, key-holder, locked-room, shop or arena chests). Springs when searched from up to 2.4 m; its first bite has a 0.45 s wind-up and reaches 2.6 m. Tests: `tests/game.traps.test.js`, `tests/enemytypes.test.js`.
+- **Bomb goblin** (`BOMB`, `js/enemytypes.js`; `updateBomber`, `js/enemy.js`; `explodeAt`, `js/main.js`). Rushes you, fuse 2.5 s with a 0.8 s warning, blast 3.5 m radius, 55 damage with falloff, 14 m noise. Never carries the cell key. Tests: `tests/game.traps.test.js`.
+- **Encounters** (`QUESTS` / `QUEST_TYPES` in `js/quests.js`, layouts in `js/gen.js`). Six types, equal weight: mini-boss lair (locked room, Rare+ gear, gold 30 to 50 plus 10 a floor, 50% a potion), shrine bargain, wanted guard, sack thief chase, prisoner rescue, ally recruit. Each stage rolls 0 (25%), 1 (45%) or 2 (30%) encounters on floors 2 to 4, at most one a floor, never the shop floor. At most one prisoner and one ally per stage. Shrine shows the boon category only (weapon, stamina or treasure) before you accept; prices are a max HP cut (15, not below 40), a gear piece or potions. Prisoner cell key rides on a guard's belt (chest fallback). Glossary cards and tuning panel sections added. Tests: `tests/game.quests.test.js`.
+- **Safe room after the boss** (`floor.safe` in `js/gen.js`; `buildSafeRoom`, `openSafeDoor`, `inSafe` in `js/main.js`). The map grows to 57 x 57. A hidden door opens in the arena when the boss dies, behind it a 9 x 7 room with the stairs down. No attacks on you, inventory usable, no free healing. Enemies cannot cross the open door (`T_SAFEDOOR`, a wall for enemies, sight and arrows). You can go back up to the boss floor only. Tests: `tests/game.safe.test.js`.
+- **Stages 2 to 4 and the placeholder final boss** (`stage`, `changeStage`, `enterNextStage()` in `js/main.js`; numbers in `TUNE` under Stages and Final boss, tuning storage key `-20`). Four themed stages of 5 floors (themes shuffled by the run seed, no repeats), then stage 5: one arena, "The Final Boss" placeholder, killing it shows "Run complete". Per stage: shop, armory, encounter plan and prisoner state. Scaling per stage: enemy HP +35% and damage +20%, stage boss HP +50% and damage +20%, loot depth +1.5 floors. Final boss: 3x HP, 1.8x damage, 1.25x size of the stage 1 boss. HUD shows stage, floor and theme name; Stage up/down buttons in the dev panel. Floor cache bounded to 6 floors, old theme materials freed. Tests: `tests/game.stages.test.js`.
+- **Fixed along the way:** the boss-death crash came in balance pass 1. This round: lockpick stacking crash; lair and cell lock ids colliding; lair entrance hidden behind props; enemies could walk through the safe door; `inSafe` row bug; gas passing through walls; missing `break`s that drew statues on altars, banners on urns and brew on hearths; Esc opening the pause menu from the inventory; farming by climbing into freed floors (stairs back up); ally immunity and a foe-lock exploit.
+
 ## Decisions made
 - Name: HoneyHan (formerly "Prototype Test").
 - Scope for now: floors 1 to 5, first boss on floor 5. Run length is up to the player.
@@ -191,7 +197,7 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - The project lives in the GitHub repo `rsarangaya/HoneyHan` (it started in `C:\Users\rsarangaya\Downloads\Test2`).
 
 ## Planned items
-- Hanahan's Rage and the shop were planned here and are now built (see the `impatience` branch section above). Still planned only: the mimic, the thief and bomb goblins, locked and trapped chests, mini-bosses and quests (`DESIGN.md` sections 16 and 17).
+- Built now: Hanahan's Rage, the shop, the mimic, the bomb goblin, the thief, locked and trapped chests, mini-bosses and quests, stages 2 to 4, the safe room (see the `impatience` branch sections above). Still planned only: the real final boss and stage 5 design, and per-theme boss mechanics (`DESIGN.md` sections 3 and 15).
 
 ## Decided 2026-11-02: run structure and alpha goal (`DESIGN.md` section 15)
 - Full game: 5 stages. Stages 1 to 4 each get one random theme (no repeats, random order). Stage 5 is the boss stage with one fixed final boss. One shop floor per stage.
@@ -201,13 +207,14 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - Second round (2026-11-02): every stage has one boss on its last floor. Mini-bosses and quests are a separate optional system (`DESIGN.md` section 16: locked mini-boss room, wanted guard, prisoner rescue, shrine bargain, sneak thief chase, ally recruit). Stage 1's theme is fixed for now, randomized later. After the boss dies a hidden door opens in the boss room to a safe room with the stairs down: no attacks, inventory usable, no free healing.
 
 ## Undecided
-- Final stage (stage 5) look and final boss design (later, finish floors 1 to 5 first). Floors per stage (5 assumed). Whether the pack carries over between stages (assumed yes) and whether the player can go back up from the safe room.
+- Decided 2026-11-12: 5 floors per stage. The pack carries over fully between stages. From the safe room you can go back up to the boss floor only.
+- Open: the final boss design and the stage 5 look (placeholder now).
 
 ## Next
-- Steps 2 to 8 of the alpha build order are built on the `impatience` branch (statuses, enemy types and the wolf, hunger and food, bow and shield, wands and Hanahan's Rage, shop and stage structure, archer, shaman, brute and the Sunken Tavern). None of it has been played by a real person, so the next job is a real play and tuning pass on everything at once, using the dev panel (backtick key). Where to look first: how guard spacing and ranged enemies feel together, hunger supply against the drain, shop prices against the gold you actually find (the design guessed 500 to 700 by floor 5), wand and Rage balance, the bow against melee, whether the splash gimmick is readable, and whether 9 to 21 guards on a floor is too many now that wolves, archers and natives add to the count.
-- Then: the mimic chest and bomb goblin, locked and trapped chests, mini-bosses and quests (`DESIGN.md` section 16), stages 2 to 4 (the run picks one theme today; the design wants one per stage) and the final boss, and the safe room after a boss.
-- Add a test to `tests/` with each new system, and run `node tests/run-all.js` before every commit.
-- Full build order is in `DESIGN.md` section 9.
+1. A real play test of the full 4-stage run: stage 1 to its safe room, down to stage 4, then the placeholder final boss. Use the dev panel (backtick key) to skip ahead.
+2. Design the real final boss and stage 5 (placeholder now, see `finalBoss*` in `TUNE`).
+3. Per-theme boss mechanics. Bosses are renamed Cave Warlords now (one fight, renamed and tinted per theme), so each theme still needs its own mechanic.
+4. Tuning from play: stage scaling (`stage*`), loot depth, encounter odds, the mimic and bomb goblin numbers, lockpick timing, plus the open list from the `impatience` branch (hunger supply, shop prices, wands and Rage, the bow against melee).
 
 ## Open issues
 - Guard blocking time (`cb.blockT`) runs on real frame time, but guards run on time capped at 0.05 s per frame, so below about 20 fps the parry window gets harder to hit. Only matters on very slow machines.

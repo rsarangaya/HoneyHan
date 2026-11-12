@@ -424,7 +424,7 @@ function rollQuests(seed, maxFloor, shopFloor) {
   for (let f = R.floorMin; f <= Math.min(R.floorMax, maxFloor - 1); f++) if (f !== shopFloor) floors.push(f);
   rng.shuffle(floors);
   const types = Object.keys(QUEST_TYPES), w = types.map(t => QUEST_TYPES[t].weight);
-  const once = new Set();                                                                   // at most one prisoner and one ally per run (their walk, follow and reward are run-level state)
+  const once = new Set();                                                                   // at most one prisoner and one ally per stage (rollQuests runs once per stage; their reward is paid in that stage's safe room)
   for (const f of floors.slice(0, n)) {
     let t = types[weightedIndex(rng, w)];
     if (once.has(t)) { const w2 = w.map((x, i) => once.has(types[i]) ? 0 : x); t = types[weightedIndex(rng, w2)]; }

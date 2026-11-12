@@ -2,7 +2,7 @@
 
 "Prototype Test" is the working name for now.
 
-Status: ideas only, nothing built. All numbers are untested starting guesses.
+Status: most of this design is built on branch `impatience` (see STATUS.md for what is built and when). All numbers are starting guesses until play-tested.
 Written 2026-11-02, updated with the first round of decisions.
 
 ## 0. Decisions so far
@@ -42,7 +42,7 @@ Plan: start from the Test1 engine, extrude Test2's tile grid into 3D (walls to b
 ## 3. Floors and loot
 - Procedural rooms and corridors from the Test2 generator, with a guaranteed path from start to stairs. Stairs far from the start.
 - Room types: loot room (library, armory, crypt), guard room, empty hallway, locked vault (key elsewhere), secret room behind a breakable wall.
-- Chests: some locked, some trapped, some mimics.
+- Chests: some locked, some trapped, some mimics. Built 2026-11-12 (see STATUS.md).
 - Scavenge spots (barrels, shelves, corpses, rubble): hold E to search. The search time is the risk.
 - Stairs may be guarded by a patrol or trap. Some floors hide a shortcut.
 - Floor modifiers: Flooded, Pitch black, Heavily patrolled.
@@ -266,12 +266,15 @@ Prototype target: stages 1 to 9, which is five floors ending at the first boss.
   - Stage 1's theme is fixed during development and randomized later. Only the first theme needs designing now.
   - **Safe room:** after the boss dies, the boss room reveals a hidden door. Behind it is the safe room with the stairs to the next stage. Rules: guards and enemies cannot enter and the player cannot be attacked, the inventory is usable, and there is no free healing (healing only comes from an item the player holds, or from a purchase or reward if added later). It is a calm place to sort the pack before descending. No shop is implied there (the shop stays on a random floor), and the shop can be revisited later if that is wanted.
   - The final stage (stage 5) is still undecided. Finish floors 1 to 5 of stage 1 first.
+- **Built 2026-11-12 (see STATUS.md). Decided 2026-11-12:**
+  - Floors per stage: 5. The pack carries over fully between stages.
+  - Safe room one-way rules: enemies cannot enter, the open door stays open, and from inside you can only go up to the boss floor or down to the next stage.
+  - The safe room replaces the stairs on the boss floor only. You can go back up from it to the boss floor, and no further.
 - **Open points:**
-  - Floors per stage (5 assumed). Does the safe room replace the stairs on the boss floor only (yes, assumed), and can the player go back up from it?
-  - Does the pack carry over between stages (assumed yes)? Does any hunger or time pressure exist in the safe room (assumed none)?
+  - Does any hunger or time pressure exist in the safe room (assumed none)?
   - Final stage look and final boss design (later).
 
-## 16. Mini-bosses and quests (planned 2026-11-02, not implemented, do not build yet)
+## 16. Mini-bosses and quests (planned 2026-11-02, built 2026-11-12, see STATUS.md)
 Goal: optional, random encounters on regular floors that give a reason to explore, a risk and a reward. Loosely inspired by Pixel Dungeon's quest givers, but each type here plays differently. Not part of the alpha boss, and the alpha only needs one or two of these to prove the idea.
 - **Rolling:** each stage rolls 0 to 2 quest or mini-boss encounters on floors 2 to 4 from the run seed, never on the boss floor and never on the shop floor. A floor holds at most one.
 - **Types (first ideas):**
@@ -291,6 +294,7 @@ Goal: optional, random encounters on regular floors that give a reason to explor
 - **Shared rules:** quest NPCs are neutral and never attack the player. The encounter is shown in the inventory screen as one short line. Failing or skipping costs nothing, but the reward is lost. Encounters are seeded, so seeded runs repeat.
 - **Build order:** after the shop. Start with type 1 (it only needs a stronger guard and the existing locked rooms), then 4 (altar plus a small deal screen), then 2, then 5, then 3 (needs the safe room and cell logic), then 6 (needs the noise system and target selection). The bow helps type 5.
 - **Open points:** whether quest NPCs can be killed for loot, whether mini-bosses need their own models, whether the shrine bargain should show its boon before you accept, and how rewards scale by floor.
+- **Decided 2026-11-12:** quest NPCs cannot be killed. Mini-bosses reuse the guard models, scaled and recoloured. The shrine shows the boon category only before you accept. Rewards scale by floor. One prisoner and one ally per stage.
 
 ## 17. Enemy variety (planned 2026-11-03, not implemented, do not build yet)
 Goal: more than one kind of guard, so each floor asks for a different answer (sneak, block, flee, ranged, kill the handler first). Today there is one goblin guard with random gear, plus the floor 5 boss. Each new type should change how you play, not just add HP.
@@ -304,8 +308,8 @@ Goal: more than one kind of guard, so each floor asks for a different answer (sn
   2. **Shaman (mage):** priority silent kill. Weak in melee, casts a slow or a daze at range and heals other goblins. Hears well, sees poorly.
   3. **Brute (ogre):** large, slow, big damage, resists the dagger instakill and shrugs off stagger like the boss. Forces avoid, trap or loud fight.
   4. **Skeleton:** sees but does not hear, so noise is safe and light and line of sight are what matter. Resists bleed. Fits cellar and chapel themes.
-  5. **Mimic chest:** a chest that bites when searched (design section 3 already lists it). Punishes greedy looting. Needs the noise and stun logic first.
-  6. **Bomb goblin:** rushes you and explodes. Deadly in a pack, can be baited into hurting other enemies (works with Hanahan's Rage).
+  5. **Mimic chest:** a chest that bites when searched (design section 3 already lists it). Punishes greedy looting. Needs the noise and stun logic first. Built 2026-11-12 (see STATUS.md).
+  6. **Bomb goblin:** rushes you and explodes. Deadly in a pack, can be baited into hurting other enemies (works with Hanahan's Rage). Built 2026-11-12 (see STATUS.md).
   7. **Thief goblin:** the quest enemy from section 16, runs from you instead of fighting.
   8. **Theme natives:** see the next subsection. Every theme has its own enemies, built on the same type table.
 ### Theme-specific enemies
