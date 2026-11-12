@@ -9,6 +9,7 @@
 //   noStagger: ordinary hits do not interrupt it (only a parry does). r: body radius. scale: model size.
 //   elite: Aj's Bust and other "not elites" effects skip it (bosses count as elite too).
 //   height: quad only, how tall it is for aiming.
+//   mimic: a chest that bites (model 'mimic', see MIMIC). bomb: a goblin carrying a lit bomb (see BOMB).
 const ENEMY_TYPES = {
   goblin:  { name: 'Goblin Guard', zones: [0.3, 0.5, 0.2] },
   cook:    { name: 'Goblin Cook',  zones: [0.3, 0.5, 0.2], weapon: 'sword', noGear: true, hpMul: 1.1, dmgMul: 0.9 },
@@ -64,12 +65,26 @@ const ENEMY_TYPES = {
     info: ['A robed caster that curses you with a Slow for 5 s. The bolt is slow enough to dodge.'] },
   wisp:    { name: 'Frost Wisp', model: 'float', hover: 1.0, zones: [0.3, 0.7, 0], fur: 0x9adaff, hpMul: 0.5, dmgMul: 0.6, speed: 1.3, reach: 1.0, windMul: 0.7, r: 0.3, scale: 0.8, height: 1.7, vis: 1.2, onHit: 'slow',
     info: ['A floating ball of cold that drifts at head height. Its touch Slows you, and it is quick, so do not turn your back.', 'Fragile: one good hit.'] },
+  // Generic ambushers. The mimic is never placed by the spawn mix: js/gen.js turns about 8% of ordinary chests from floor 2 on
+  // into one (the prop's `mimic` flag) and main.js builds it. The bomb goblin comes from the mix in assignEnemyTypes.
+  mimic:   { name: 'Mimic', model: 'mimic', mimic: true, zones: [0.3, 0.7, 0], weapon: 'mace', noGear: true, hpMul: 2.5, dmgMul: 2, speed: 0.15, reach: 0.7, windMul: 1.1, cdMul: 1.3, r: 0.55, scale: 1, height: 0.75, noStagger: true, sneakCap: 2, resistBleed: true, hear: 0, shout: 0.5,
+    info: ['A chest that bites. Searching it springs it: a very short warning as the lid yawns open, then a bite for about twice a guard\'s damage. Back off the moment the lid lifts.', 'Spot it first: the lid sits a hair ajar and slowly breathes, and a pink tongue edge shows at the seam. Hit it before you search it and it wakes without the free bite.', 'Sturdy and slow, it barely leaves its spot and cannot be staggered or made to bleed. It drops loot one chest grade better than itself, with gear guaranteed.'] },
+  bomber:  { name: 'Bomb Goblin', zones: [0.3, 0.5, 0.2], skin: 0x9aa83a, noGear: true, weapon: 'dagger', hpMul: 0.3, dmgMul: 0.2, speed: 1.4, scale: 0.8, r: 0.35, vis: 1.1, hear: 1.2, shout: 1.2, bomb: true,
+    info: ['A small, quick goblin hugging a lit bomb. When it notices you it sprints straight at you and blows up at about 1.5 m, or when the fuse runs out (about 2.5 s). The last 0.8 s it flashes red and the spark goes wild.', 'The blast reaches about 3.5 m, hurts everything in range (other enemies too) and is heard 14 m away. Damage is highest at the centre.', 'Fragile: kill it at range and it drops the bomb, which goes off a moment later where it lies. Lure it into a crowd, or play Hanahan\'s Rage and it rushes the other enemies instead.'] },
   iceknight: { name: 'Ice Knight', elite: true, zones: [0.3, 0.5, 0.2], skin: 0x9ac4e0, weapon: 'sword', heavy: true, hpMul: 2.2, dmgMul: 1.4, speed: 0.95, reach: 1.1, windMul: 1.2, r: 0.5, scale: 1.2, blockFront: 0.3,
     info: ['An elite knight in frozen plate with a raised guard: hits from the front only do 30% damage. Flank it, stun it, or wait for it to swing and strike back.'] },
 };
 for (const t of Object.values(ENEMY_TYPES)) {   // fill the defaults so the rest of the code never checks for undefined
-  Object.assign(t, { model: 'biped', look: null, ranged: null, pack: 0, ambush: 0, blockFront: 1, resistBleed: false, onDeath: null, onHit: null, charge: null, thief: false, callAll: false, heavy: false, shield: false, robe: null, orb: null, hover: 0, info: null, hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
+  Object.assign(t, { model: 'biped', look: null, ranged: null, pack: 0, ambush: 0, blockFront: 1, resistBleed: false, onDeath: null, onHit: null, charge: null, thief: false, callAll: false, heavy: false, shield: false, robe: null, orb: null, hover: 0, info: null, mimic: false, bomb: false, hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
 }
+
+// Mimic chest numbers (the rest are in the table row above and TUNE). springWind: the lid-open warning, in seconds, before the free bite
+// when you search it (later bites use the type's normal wind-up).
+const MIMIC = { springWind: 0.45, springReach: 2.6 };   // springReach: metres the first bite covers (you search from up to 2.4 m)
+// Bomb goblin numbers. fuse: seconds from being alerted to the blast. warn: the last seconds, when it flashes and beeps.
+// trigger: it blows up at this distance from its target. radius and dmg: the blast (damage falls off to (1 - falloff) x dmg at the edge).
+// noise: how far the bang is heard. dropDelay: a dropped bomb (from a killed goblin) goes off after this long. chain: a lit goblin caught in a blast has at most this long left.
+const BOMB = { fuse: 2.5, warn: 0.8, trigger: 1.5, radius: 3.5, dmg: 55, falloff: 0.75, noise: 14, dropDelay: 1.5, chain: 0.3, fx: 0.4 };
 
 // Natives per theme. commons fill most of the population (types with a `pack` size spawn in packs), `signature` is
 // the theme's own oddity (from floor 2, two from floor 4), `elite` shows up on floors 3 and 4, and `bonus` adds
@@ -115,6 +130,7 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
   const special = (type, n) => { for (let i = 0; i < n; i++) { const p = plain(); if (p.length <= keep) return; rng.pick(p).type = type; } };   // keep a couple of plain guards for the natives
   special('brute', floorNum === 4 || floorNum === 5 ? 1 : 0);
   special('shaman', floorNum >= 3 ? 1 : 0);
+  special('bomber', floorNum === 4 ? 1 + (rng() < 0.5 ? 1 : 0) : floorNum >= 2 && floorNum < 5 ? (rng() < 0.5 ? 1 : 0) : 0);   // bomb goblins: 0-1 on floors 2 and 3, 1-2 on floor 4, out of the guards' budget
   special('archer', (floorNum >= 4 ? 2 : floorNum >= 2 ? 1 : 0) + (floorNum >= 2 && floorNum < 5 && roster && roster.bonus ? roster.bonus.archer || 0 : 0));
 
   if (roster) {

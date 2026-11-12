@@ -9,7 +9,7 @@ let fails = 0, n = 0;
 const fail = (w, m) => { if (++fails <= 20) console.log(`FAIL ${w}: ${m}`); };
 const N = parseInt(process.argv[2], 10) || 150;
 const THEMES = Object.keys(L.THEME_NATIVES), TAVERN = 'The Sunken Tavern';
-const GENERIC = ['archer', 'shaman', 'brute', 'wolf'];
+const GENERIC = ['archer', 'shaman', 'brute', 'wolf', 'bomber'];
 const shareBy = [0, 0, 0, 0, 0], guardsBy = [0, 0, 0, 0, 0];
 const densOpen = [0, 0, 0, 0], densEn = [0, 0, 0, 0], densMin = [99, 99, 99, 99];
 

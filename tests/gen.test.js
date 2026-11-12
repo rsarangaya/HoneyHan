@@ -102,6 +102,33 @@ for (let s = 1; s <= N; s++) {
     }
   }
 }
+// Mimic chests (gen.js MIMIC_CHANCE): none on floor 1; from floor 2 about 8% of eligible chests. Eligible means an
+// ordinary chest in an unlocked room, outside the shop and not holding a key. Vault chests, key holders, locked rooms,
+// the shop and the boss arena never get one.
+{
+  let eligible = 0, mimics = 0;
+  const inR = (r, p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  for (let s = 1; s <= N; s++) {
+    const seed = (s * 2654435761 + 977) >>> 0;
+    for (let n = 1; n <= 5; n++) {
+      const shop = n >= 2 && n <= 4 && s % 2 === 0;
+      const f = G.generateFloor(seed, n, { armory: false, boss: n === 5, shop, themeName: THEME_NAMES[(s + n) % THEME_NAMES.length] });
+      const where = `mimic seed ${seed} floor ${n}`, shopRoom = f.shop && f.shop.room;
+      for (const p of f.props) {
+        const r = f.rooms.find(q => inR(q, p));
+        const ok = !!(p.kind === 'chest' && !p.holdsKey && !(shopRoom && inR(shopRoom, p)) && r && !r.locked);
+        if (n >= 2 && n <= 4 && ok) eligible++;
+        if (!p.mimic) continue;
+        if (n >= 2 && n <= 4) mimics++;
+        if (n === 1) fail(where, 'a mimic on floor 1');
+        if (!ok) fail(where, `a ${p.kind} is a mimic but is not an ordinary chest in an unlocked room outside the shop`);
+      }
+    }
+  }
+  const share = mimics / Math.max(1, eligible);
+  console.log(`mimic chests on floors 2 to 4: ${mimics} of ${eligible} eligible chests (${(share * 100).toFixed(1)}%)`);
+  if (share < 0.06 || share > 0.10) fail('mimics', `share ${(share * 100).toFixed(1)}% is outside 6% to 10% (want about 8%)`);
+}
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);
 console.log(`open tiles per floor (floors 1 to 4): ${avgOpen.map(v => Math.round(v)).join(', ')}; corridor share ${corrShare.map(v => Math.round(v * 100) + '%').join(', ')}`);
 if (avgOpen[0] < 230 || avgOpen[0] > 420) fail('floor 1', `floor 1 averages ${Math.round(avgOpen[0])} open tiles, want 230 to 420 (it was 725)`);

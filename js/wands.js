@@ -43,7 +43,7 @@ const rechargedTo = (wand, full) => full ? chargeMax(wand) : Math.min(chargeMax(
 function nearestOther(e, list, maxD, skip) {
   let best = null, bd = maxD;
   for (const o of list) {
-    if (o === e || o.dead || (skip && skip(o))) continue;
+    if (o === e || o.dead || (o.dormant && o.T.mimic) || (skip && skip(o))) continue;
     const d = Math.hypot(o.x - e.x, o.z - e.z);
     if (d < bd) { best = o; bd = d; }
   }

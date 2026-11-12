@@ -32,6 +32,7 @@ const mapSizeFor = floorNum => [32, 36, 40, 44][Math.min(floorNum, 4) - 1];
 const weightedPick = (rng, w) => { let r = rng() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return 0; };   // a seeded weighted choice by index
 // Chest grade by depth: wooden mostly early, Silver and Ornate more often deeper, Golden rare (and never on floor 1 early).
 const chestTierWeights = floorNum => [Math.max(22, 62 - 8 * floorNum), 26 + 2 * floorNum, 8 + 3 * floorNum, 1.5 + 1.4 * floorNum, 0.1 + 0.3 * floorNum];
+const MIMIC_CHANCE = 0.08;   // share of ordinary chests (floor 2 on) that are mimics; never vault chests, key holders, locked rooms, the shop or the arena
 const roomTargetFor = floorNum => [8, 9, 10, 11][Math.min(floorNum, 4) - 1];
 
 // What each theme does to the floor. kind: the decal that marks it. n: how many per floor.
@@ -540,6 +541,13 @@ function layoutFloor(seed, floorNum, opts) {
       if (!inShop(a) && !inShop(b)) break;
     }
     enemies.push({ x: a.x, y: a.y, route: [a, b], seed: seedOf() });
+  }
+
+  // ---- mimics: drawn last so nothing else on the floor shifts. A flagged chest is built as a mimic enemy in main.js ----
+  if (floorNum >= 2) for (const p of props) {
+    if (p.kind !== 'chest' || p.holdsKey || inShop(p)) continue;
+    const r = rooms.find(r => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+    if (r && !r.locked && rng() < MIMIC_CHANCE) p.mimic = true;
   }
 
   return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, steps: dist[stairs.y * w + stairs.x] };

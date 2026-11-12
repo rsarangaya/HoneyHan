@@ -1,11 +1,12 @@
 # Status
 
 Project: HoneyHan (formerly Prototype Test), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-10 (branch `impatience`: steps 2 to 8 of the build order, each tested)
+Last updated: 2026-11-12 (branch `impatience`: steps 2 to 8 of the build order, each tested)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
 ## Done
+- Mimic chest and bomb goblin (2026-11-12, untested by the tester yet): see `js/enemytypes.js` (`mimic`, `bomber`, `MIMIC`, `BOMB`), `js/enemy.js` (buildMimic, updateBomber), `js/main.js` (explodeAt, pooled blast and dropped-bomb effects), `js/gen.js` (`MIMIC_CHANCE`). Tune storage key is now `-14`.
 - Design doc written: `DESIGN.md` (concept, floors and themes, stealth and noise, combat, weapons, statuses, wands, architecture, build order, risks).
 - Reference projects reviewed (read only, not changed), both in `C:\Users\rsarangaya\OneDrive - JSSI\Documents\ClaudeCodeCloudTest`:
   - `Test1`: Muay Thai FPS (Three.js, no build step). Source for movement, viewmodel, Fighter rig, `combat.js` tables, stamina.

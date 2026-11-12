@@ -64,6 +64,7 @@ function discoverEnemiesInView() {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   for (const e of enemies) {
     const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
+    if (e.T.mimic && e.dormant) continue;                                              // a mimic in disguise is not recorded until it shows itself
     if (d > 16 || (dx * fx + dz * fz) / (d || 1) < 0.5 || !hasLOS(floor, player.x, player.z, e.x, e.z)) continue;
     discover(e.boss ? 'enemy:boss' : 'enemy:' + e.type, e.boss ? bossNameFor(theme.name) : e.T.name);
   }

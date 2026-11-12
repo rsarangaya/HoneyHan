@@ -195,9 +195,9 @@ function buildFloor() {
     upLight = new THREE.PointLight(0xa8c8ff, 0.3, 9); upLight.position.set(ux, 1.8, uz); group.add(upLight);                // a cool light from above
   }
 
-  propObjs = floor.props.map(p => makeProp(p));
+  propObjs = floor.props.map(p => { const o = makeProp(p); if (p.mimic) { o.mats.forEach(m => m.dispose()); o.mats = []; o.mesh = new THREE.Group(); } return o; });   // a mimic's chest is drawn by its enemy (below), so its prop is only the thing you search
   propObjs.forEach(o => group.add(o.mesh));
-  floor.solids = [{ x: sx, z: sz, r: 1.5 }, ...propObjs.map(o => ({ x: o.x, z: o.z, r: o.r }))];   // what guards cannot walk through: stairwell, props, furniture
+  floor.solids = [{ x: sx, z: sz, r: 1.5 }, ...propObjs.filter(o => !o.p.mimic).map(o => ({ x: o.x, z: o.z, r: o.r }))];   // what guards cannot walk through (a mimic is a body of its own): stairwell, props, furniture
   if (floor.up) floor.solids.push({ x: (floor.up.x + 0.5) * TILE, z: (floor.up.y + 0.5) * TILE, r: 1.5 });   // and the stairs up
   decorObjs = floor.decor.map(makeDecor);
   for (const o of decorObjs) {
@@ -211,6 +211,11 @@ function buildFloor() {
   buildTorches();
   cullChunks.push(...mergeStatic(torchGroups, group));
   enemies = floor.enemies.map(s => new Enemy(s, floor));
+  for (const o of propObjs) if (o.p.mimic) {                                           // each flagged chest is really a dormant mimic, standing exactly where the chest would
+    const p = o.p, e = new Enemy({ x: p.x, y: p.y, route: [{ x: p.x, y: p.y }, { x: p.x, y: p.y }], seed: p.seed, type: 'mimic', tier: p.tier }, floor);
+    e.x = o.x; e.z = o.z; e.route = [{ x: o.x, z: o.z }, { x: o.x, z: o.z }]; e.yaw = p.yaw + Math.PI; e.propObj = o; o.mimic = e;
+    enemies.push(e);
+  }
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
@@ -585,12 +590,76 @@ function bossDefeated(e) {
 // A dead enemy leaves a lootable body only if its drop roll gave something.
 function makeCorpse(e, sneak) {
   e.corpseDone = true;
+  if (e.T.mimic) return mimicCorpse(e);
   const bonus = sneak ? 0.15 : 0;
   if (!dryRoll(() => rollLoot('corpse', floorNum, makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot) return;
   propObjs.push({
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot ? [{ type: 'gold', n: e.loot }] : undefined },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
+}
+
+// A dead mimic pays out like a chest one grade better, with gear guaranteed (it is a lootable body, like the boss's).
+function mimicCorpse(e) {
+  const rng = makeRng((e.seed ^ 0x31c1c) >>> 0), t = Math.min(4, (e.spec.tier | 0) + 1);
+  const left = rollLoot('chest', floorNum, rng, 0, [], undefined, t);
+  if (!left.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield')) left.push(rollEquipment(floorNum, rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
+  propObjs.push({ p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left }, mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [] });
+}
+
+// ---- bombs (numbers: BOMB in js/enemytypes.js). One pooled fireball per live blast and a few pooled dropped bombs, built once:
+// no point lights and nothing allocated per explosion or per frame. A blast hurts the player and every enemy in range in a single pass. ----
+const blastFx = Array.from({ length: 4 }, () => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  m.visible = false; scene.add(m); return { m, t: 0, r: 0, on: false };
+});
+const bombs = (() => {
+  const body = new THREE.SphereGeometry(0.17, 8, 6), spark = new THREE.SphereGeometry(0.06, 6, 5), black = new THREE.MeshLambertMaterial({ color: 0x151515 });
+  return Array.from({ length: 6 }, () => {
+    const g = new THREE.Group(), sp = new THREE.Mesh(spark, new THREE.MeshBasicMaterial({ color: 0xffa030 }));
+    const b = new THREE.Mesh(body, black); b.position.y = 0.17; sp.position.y = 0.4; g.add(b, sp); g.visible = false; scene.add(g);
+    return { g, sp, t: 0, x: 0, z: 0, on: false };
+  });
+})();
+function clearBombs() { for (const b of bombs) { b.on = false; b.g.visible = false; } for (const f of blastFx) { f.on = false; f.m.visible = false; } }
+const blastDmg = d => BOMB.dmg * (1 - BOMB.falloff * d / BOMB.radius);          // full at the centre, (1 - falloff) of it at the edge
+function explodeAt(x, z, src) {
+  let fx = blastFx[0]; for (const f of blastFx) if (!f.on) { fx = f; break; }
+  fx.on = true; fx.t = 0; fx.r = BOMB.radius; fx.m.position.set(x, 0.7, z); fx.m.visible = true;
+  pending.push({ x, z, r: BOMB.noise, src: null });                              // the bang is heard far and wide
+  const dp = Math.hypot(player.x - x, player.z - z);
+  if (dp < BOMB.radius && hasLOS(floor, x, z, player.x, player.z)) {
+    damage(blastDmg(dp) * (1 - inv.armorRed('body')));
+    pst.apply('daze', 2); discover('status:daze', 'Daze'); mark('BLASTED', '#ff9a3a'); addLog('Caught in the blast!', '#ff9a3a');
+  }
+  for (const e of enemies) {                                                      // everything else too: guards, other bomb goblins, the lot
+    if (e === src || e.dead) continue;
+    const d = Math.hypot(e.x - x, e.z - z);
+    if (d >= BOMB.radius || !hasLOS(floor, x, z, e.x, e.z)) continue;
+    e.cause = 'was blown up';
+    if (e.boss && e.dormant) { e.dormant = false; e.justWoke = true; }               // a blast wakes the boss like any noise
+    if (e.T.bomb && e.fuse > 0) e.chained = true;                                    // a lit bomb goblin killed by a blast still goes off within BOMB.chain
+    e.hurt(blastDmg(d), { x, z });
+    if (e.T.bomb && !e.dead && e.fuse > BOMB.chain) e.fuse = BOMB.chain;          // a lit bomb goblin in the blast goes off right after
+  }
+  if (dp < 20) discover('enemy:bomber', 'Bomb Goblin');
+}
+Enemy.explode = e => { if (e.mesh.parent) e.mesh.parent.remove(e.mesh); explodeAt(e.x, e.z, e); };
+Enemy.dropBomb = e => {
+  for (const b of bombs) if (!b.on) { b.on = true; b.t = e.chained ? BOMB.chain : BOMB.dropDelay; b.x = e.x; b.z = e.z; b.g.position.set(e.x, 0, e.z); b.g.visible = true; return; }
+};
+function updateBombs(dt) {
+  for (const b of bombs) {
+    if (!b.on) continue;
+    b.t -= dt; b.sp.scale.setScalar(b.t < BOMB.warn ? (((b.t * 14) | 0) % 2 ? 1 : 2.4) : 0.8 + 0.5 * Math.sin(b.t * 40));   // it fizzes, then flashes
+    if (b.t <= 0) { b.on = false; b.g.visible = false; explodeAt(b.x, b.z, null); }
+  }
+  for (const f of blastFx) {
+    if (!f.on) continue;
+    f.t += dt; const k = f.t / BOMB.fx;
+    if (k >= 1) { f.on = false; f.m.visible = false; continue; }
+    f.m.scale.setScalar(f.r * (1 - (1 - k) * (1 - k)) + 0.05); f.m.material.opacity = 0.7 * (1 - k);
+  }
 }
 
 function resolveEnemyAttack(e, zone, ranged = false) {
@@ -844,6 +913,11 @@ function updateSearch(dt) {
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
+  if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
+    const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
+    discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
+    return;
+  }
   loud((SEARCH_NOISE[o.p.kind] || 0) + (o.p.kind === 'chest' ? 0.5 * (o.p.tier | 0) : 0));
   if (o.p.kind === 'chest') discover('item:chest', 'Chests');
   if (o.p.kind === 'door') {
@@ -927,6 +1001,7 @@ function disposeGroup(g) {   // free a floor's GPU memory: geometry, materials a
 }
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
+  clearBombs();
   arrows.forEach(a => group.remove(a.mesh)); arrows.length = 0;
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
@@ -965,6 +1040,7 @@ function startFloor(n) {
   else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
 function generateAndEnter(n, arrive) {
+  clearBombs();
   gameRng = makeRng(((runSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
   floor = generateFloor(runSeed, n, { armory: n === armoryFloor, boss: n === MAX_FLOOR, shop: n === shopFloor, themeName: theme.name });
@@ -1011,7 +1087,7 @@ function updateRespawn(dt) {
   respawnT -= dt;
   if (respawnT > 0) return;
   respawnT = 35 + gameRng() * 35;
-  if (enemies.filter(e => !e.dead).length >= Math.ceil(baseGuards * 1.5)) return;
+  if (enemies.filter(e => !e.dead && !e.T.mimic).length >= Math.ceil(baseGuards * 1.5)) return;
   const open = floor.rooms.filter(r => !r.locked && r.theme !== 'shop');
   const homes = open.filter((r, i) => r !== floor.rooms[0]
     && Math.hypot((r.cx + 0.5) * TILE - player.x, (r.cy + 0.5) * TILE - player.z) > 24
@@ -1199,6 +1275,7 @@ function frame(now) {
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     separateBodies(enemies, player, floor);
+    updateBombs(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(`The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

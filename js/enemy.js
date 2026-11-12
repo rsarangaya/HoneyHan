@@ -80,7 +80,7 @@ const ROUND_SEGS = 12;
 function cylPart(rTop, rBot, h, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, ROUND_SEGS), mat); p.position.set(x, y, z); parent.add(p); return p; }
 function ellPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, ROUND_SEGS, 9), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
 function torsoPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.44, 1, 14), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
-let SHADOW_GEO = null, SHADOW_MAT = null;   // a soft dark disc under each creature, so it sits on the floor instead of floating
+let SHADOW_GEO = null, SHADOW_MAT = null, SPARK_GEO = null, TOOTH_GEO = null;   // a soft dark disc under each creature, so it sits on the floor instead of floating
 
 const collider = { radius: 0.4, props: [] };   // borrows Player.blocked for wall collision
 
@@ -124,10 +124,10 @@ class Enemy {
     this.spec = spec;
     this.type = spec.type || 'goblin';
     this.T = ENEMY_TYPES[this.type];
-    this.quad = this.T.model === 'quad' || this.T.model === 'float';   // floating things aim and animate like animals
+    this.quad = this.T.model === 'quad' || this.T.model === 'float' || this.T.model === 'mimic';   // floating things aim and animate like animals
     this.handlerRef = null;             // a wolf's goblin handler (linkHandlers in enemytypes.js)
     this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
-    this.dormant = this.boss || !!this.T.ambush;   // the boss and scarecrows wait, as scenery, until you come close
+    this.dormant = this.boss || !!this.T.ambush || this.T.mimic;   // the boss and scarecrows wait, as scenery, until you come close
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
     this.route = spec.route.map(p => ({ x: (p.x + 0.5) * TILE, z: (p.y + 0.5) * TILE }));
     this.ri = 1;
@@ -142,6 +142,8 @@ class Enemy {
     this.chargeWind = 0; this.chargeT = 0; this.cdx = 0; this.cdz = 0; this.hitMul = 1;   // boars
     this.sleepT = 0;                    // asleep (a sleep wand): sees and hears nothing, any damage wakes it
     this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
+    this.fuse = -1; this.exploded = false; this.spark = null; this.keep = null;   // bomb goblins: seconds left on the fuse (-1 = not lit yet)
+    this.windOvr = 0; this.propObj = null;                          // mimics: a fixed wind-up for the first bite, and the chest prop it stands in for
     this.cause = 'died';
     this.seed = spec.seed;
     const fl = this.boss ? 0 : Math.max(0, (typeof floorNum === 'number' ? floorNum : 1) - 1);   // floor scaling, once at spawn (boss excluded)
@@ -189,6 +191,7 @@ class Enemy {
     m.scale.setScalar(this.boss ? BOSS_SCALE : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
     if (this.T.model === 'float') this.buildFloat(m, lam);
+    else if (this.T.model === 'mimic') this.buildMimic(m);
     else if (this.quad) this.buildQuad(m, lam);
     else {
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
@@ -305,6 +308,11 @@ class Enemy {
     } else if (this.type === 'thief') {
       part(0.42, 0.34, 0.42, lam(0x20302a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x20302a), 0, 0.9, 0.2);        // a dark hood
       part(0.4, 0.2, 0.2, lam(0x6a4a2a), 0, 0.4, 0.25);                                                            // a swag bag
+    } else if (this.type === 'bomber') {
+      ellPart(0.3, 0.3, 0.3, black, 0, -0.8, -0.12, this.arms[0]); cylPart(0.03, 0.03, 0.07, metal, 0, -0.63, -0.12, this.arms[0]); cylPart(0.014, 0.014, 0.12, leather, 0, -0.58, -0.12, this.arms[0]);   // a round black bomb in the off hand with a fuse
+      const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = new THREE.SphereGeometry(0.055, 6, 5)), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
+      part(0.62, 0.07, 0.4, leather, 0, 0.5, 0); for (const x of [-0.18, 0, 0.18]) ellPart(0.1, 0.1, 0.1, black, x, 0.44, -0.2, up);                                                  // a bandolier of spare bombs
+      part(0.4, 0.14, 0.4, lam(0x2a2a2a), 0, 1.06, 0); for (const s of [-1, 1]) part(0.12, 0.08, 0.04, lam(0xa0d8e8), s * 0.085, 0.95, -0.2);                                       // goggles on a leather cap
     } else if (this.type === 'captain') {
       part(0.08, 0.3, 0.1, lam(0xc02020), 0, 1.3, 0); part(0.4, 0.7, 0.06, lam(0xc02020), 0, 0.35, 0.22);         // a plume and a red cape
     } else if (this.type === 'iceknight') {
@@ -335,9 +343,11 @@ class Enemy {
     // Merge the parts inside each animated group (torso and head, each arm, each leg): about 60 meshes become about 25
     // per creature, and the pose code still moves the same groups.
     const flashMats = this.mats;
-    if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), flashMats); for (const w of this.wings || []) bakeMeshes(w, new Set(), flashMats); }
-    else { bakeMeshes(this.upper, new Set(this.arms), flashMats); for (const a of this.arms) bakeMeshes(a, new Set(), flashMats); }
-    for (const l of this.legs) bakeMeshes(l, new Set(), flashMats);
+    if (!this.T.mimic) {   // a mimic is a handful of animated meshes: never baked or merged
+      if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), flashMats); for (const w of this.wings || []) bakeMeshes(w, new Set(), flashMats); }
+      else { bakeMeshes(this.upper, new Set(this.arms), flashMats); for (const a of this.arms) bakeMeshes(a, new Set(this.keep || []), flashMats); }
+      for (const l of this.legs) bakeMeshes(l, new Set(), flashMats);
+    }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
     this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
@@ -384,6 +394,60 @@ class Enemy {
     this.qp = [0, 0];                                                            // eased pose: [body pitch, lunge offset]
   }
 
+  // The mimic: the real chest model (makeProp in js/props.js) so it looks exactly like the chest it replaces, plus the tells and,
+  // once awake, teeth and a tongue. Parts animate (the lid, the lunge), so it is never baked or merged into a static chunk.
+  buildMimic(m) {
+    const o = makeProp({ kind: 'chest', tier: this.spec.tier | 0, seed: this.seed, x: 0, y: 0, yaw: 0 });
+    const inner = o.mesh.children[0]; o.mesh.remove(inner); inner.position.set(0, 0, 0);
+    const body = this.body = new THREE.Group(); body.rotation.y = Math.PI; body.add(inner); m.add(body);   // the chest faces +z, an enemy faces -z
+    this.lid = o.lid; this.mats = o.mats; this.baseEm = o.mats.map(x => x.emissive.getHex());
+    const pink = new THREE.MeshLambertMaterial({ color: 0xc8506a, emissive: 0x3a0a14 }), white = new THREE.MeshLambertMaterial({ color: 0xf0ead0 });
+    this.mats.push(pink); this.baseEm.push(0x3a0a14);
+    const tg = TOOTH_GEO || (TOOTH_GEO = new THREE.BoxGeometry(0.06, 0.12, 0.04));
+    const tongue = this.tongue = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.03, 0.07), pink); tongue.position.set(0, 0.49, 0.31); inner.add(tongue);   // the faint tongue edge at the seam: the tell
+    const teeth = this.teeth = new THREE.Group(); teeth.visible = false; inner.add(teeth);
+    this.upTeeth = [];
+    for (let i = 0; i < 6; i++) {
+      const x = -0.38 + i * 0.152, up = new THREE.Mesh(tg, white), dn = new THREE.Mesh(tg, white);
+      up.position.set(x, -0.05, 0.63); up.visible = false; this.lid.add(up); this.upTeeth.push(up);       // upper teeth hang from the lid's front edge
+      dn.position.set(x + 0.07, 0.55, 0.31); dn.rotation.z = Math.PI; teeth.add(dn);                       // lower teeth point up from the rim
+    }
+    this.legs = []; this.arms = [new THREE.Group(), new THREE.Group()]; this.qp = [-0.07, 0];
+  }
+  poseMimic(dt) {
+    const lidM = this.lid, t = performance.now() / 1000;
+    if (this.dormant) { lidM.rotation.x = -(0.08 + 0.035 * Math.sin(t * 2.1 + this.seed)); return; }   // the tell: a lid ajar that breathes
+    if (!this.teeth.visible) { this.showTeeth(); }
+    let lid = -0.35 + 0.07 * Math.sin(t * 6), lunge = 0, snap = false;                                  // awake: the mouth gapes
+    if (this.stun > 0) lid = -0.15;
+    else if (this.winding) {
+      const w = this.windT_;
+      if (this.windT < w) { const k = easeInOut(Math.min(1, this.windT / (w * 0.85))); lid = -0.35 - 0.85 * k; lunge = 0.12 * k; }   // the lid yawns wide: the cue to back off
+      else { lid = 0; lunge = -0.35; snap = true; }                                                    // and slams shut on you
+    }
+    const k = snap ? 1 : 1 - Math.exp(-14 * dt);
+    this.qp[0] += (lid - this.qp[0]) * k; this.qp[1] += (lunge - this.qp[1]) * k;
+    lidM.rotation.x = this.qp[0]; this.body.position.z = this.qp[1];
+  }
+  showTeeth() { this.teeth.visible = true; for (const u of this.upTeeth) u.visible = true; this.tongue.scale.z = 3; this.tongue.position.set(0, 0.45, 0.4); }
+
+  // A mimic wakes (you searched it: bite = true, or you hit it): the chest prop stops being a chest and it fights.
+  wake(bite, player) {
+    if (!this.dormant) return;
+    this.dormant = false;
+    if (this.propObj) { this.propObj.p.opened = true; this.propObj.r = 0; }
+    if (player) this.last = { x: player.x, z: player.z };
+    this.set('alerted');
+    if (bite) { this.winding = true; this.windT = 0; this.zone = 'body'; this.windOvr = MIMIC.springWind; this.atkCd = 0; }
+  }
+
+  // A bomb goblin goes off (its fuse ran out or it reached its target). The blast itself is main.js (Enemy.explode).
+  blow() {
+    if (this.exploded || this.dead) return;
+    this.exploded = true; this.corpseDone = true; this.die();
+    if (Enemy.explode) Enemy.explode(this);
+  }
+
   // Floating creatures (animated books, frost wisps): a body that hovers and bobs, with no legs.
   buildFloat(m, lam) {
     const T = this.T, c = new THREE.Color(T.fur);
@@ -409,6 +473,7 @@ class Enemy {
   }
 
   poseQuad(dt) {
+    if (this.T.mimic) return this.poseMimic(dt);
     if (this.T.hover) {                                                                                         // hover and flap
       this.body.position.y = this.T.hover + Math.sin(this.walkT * 0.25 + this.seed) * 0.08 + Math.sin(performance.now() / 400 + this.seed) * 0.06;
       if (this.wings) this.wings.forEach((w, i) => { w.rotation.z = (i ? -1 : 1) * Math.sin(performance.now() / 70 + this.seed) * 0.6; });
@@ -467,7 +532,7 @@ class Enemy {
   get r() { return this.boss ? 0.65 : this.T.r; }   // body radius: guards keep this far apart and out of the player
 
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
-  get windT_() { if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
+  get windT_() { if (this.windOvr) return this.windOvr; if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
   get reach() { return TUNE.enemyReach * (this.boss ? TUNE.bossReachMul : this.T.reach); }
   get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
   get dmgMul() { return this.boss ? TUNE.bossDmgMul : this.T.dmgMul * this.dmgScale; }
@@ -475,11 +540,12 @@ class Enemy {
 
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }
 
-  set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; } }
+  set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; if (this.T.bomb && this.fuse < 0) this.fuse = BOMB.fuse; } }   // a bomb goblin lights up when it is alerted
 
   die() {
     this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
     if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
+    if (this.T.bomb) { if (this.spark) this.spark.visible = false; if (!this.exploded && Enemy.dropBomb) Enemy.dropBomb(this); }   // killed first: the bomb falls and goes off on the floor
   }
 
   // Aj's Bust: a thick white coat of goo over the whole body, a puddle underneath and a few drips. Built once, on demand.
@@ -576,6 +642,14 @@ class Enemy {
     noise.emit(this.x, this.z, R.kind === 'arrow' ? 4 : 2, this);
   }
 
+  // A bomb goblin rushes where it last saw you and blows up on reaching about 1.5 m (or when the fuse ends, see update).
+  updateBomber(dt, dist, los) {
+    if (this.seen && los && dist < BOMB.trigger) { this.blow(); return; }
+    if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
+    if (!this.seen) this.lostT += dt * 0.5;
+    if (this.lostT > 3) { this.aware = 0.6; this.set('searching'); }
+  }
+
   updateRage(dt, noise) {
     this.rageT -= dt;
     if (this.rageT <= 0) {                                              // calm again, and curious about the noise
@@ -587,6 +661,10 @@ class Enemy {
     const t = this.rageTarget;
     if (!t) { this.lookAround(dt); this.sync(dt); return null; }
     const dx = t.x - this.x, dz = t.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
+    if (this.T.bomb) {                                                  // under Rage a bomb goblin rushes the other enemies
+      if (dist < BOMB.trigger) { this.blow(); return null; }
+      this.goTo(t.x, t.z, this.chase, dt); this.sync(dt); return null;
+    }
     this.atkCd -= dt;
     if (this.winding) {
       this.windT += dt;
@@ -609,7 +687,7 @@ class Enemy {
 
   // Returns true if the enemy died from this hit.
   hurt(dmg, player) {
-    this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0; if (!this.boss) this.dormant = false;
+    this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0; if (!this.boss) { if (this.T.mimic && this.dormant) this.wake(false, player); this.dormant = false; }
     if (this.hp <= 0) { this.die(); return true; }
     if (!this.boss && !this.T.noStagger) { this.stun = 0.35; this.winding = false; }     // the boss and the bouncer shrug hits off (only a parry staggers them)
     this.last = { x: player.x, z: player.z };
@@ -623,7 +701,9 @@ class Enemy {
     if (this.dead) { this.deadT += dt; this.sync(dt); return null; }
     const bleed = this.st.update(dt);
     if (bleed > 0) { this.hp -= bleed; if (this.hp <= 0) { this.cause = 'bled out'; this.die(); this.sync(dt); return null; } }   // bled out: main.js leaves the body
+    if (this.T.mimic && this.dormant) { this.sync(dt); return null; }                // a chest until it is searched or hit
     if (this.sleepT > 0) { this.sleepT -= dt; this.aware = 0; this.seen = false; this.sync(dt); return null; }
+    if (this.fuse > 0 && (this.fuse -= dt) <= 0) { this.blow(); this.sync(dt); return null; }   // the bomb's fuse burns whatever else it is doing (but not while asleep)
     if (this.rageT > 0) return this.updateRage(dt, noise);
     if (this.fleeT > 0 && this.stun <= 0) {                                    // a thief running off with your gold
       this.fleeT -= dt;
@@ -694,6 +774,7 @@ class Enemy {
       }
       case 'alerted': {
         if (this.T.ranged) { this.updateRanged(dt, player, noise, dist, los, dx, dz); break; }
+        if (this.T.bomb) { this.updateBomber(dt, dist, los); break; }
         this.atkCd -= dt;
         if (this.T.thief && this.stolen) { this.startFlee(player); break; }       // already robbed you: run
         const C = this.st.has('stuck') ? null : this.T.charge;                         // a glued boar cannot charge
@@ -718,9 +799,9 @@ class Enemy {
           this.windT += dt;
           if (this.windT < this.windT_) this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
           if (this.windT >= this.windT_ + STRIKE_T) {
-            this.winding = false; this.atkCd = this.cooldown;
+            this.winding = false; this.atkCd = this.cooldown; const spr = this.windOvr; this.windOvr = 0;
             noise.emit(this.x, this.z, CLASH_R, this);                  // a fight is loud
-            if (dist <= this.reach + 0.5 && los) {                       // no hits through a wall corner
+            if (dist <= (spr ? MIMIC.springReach : this.reach + 0.5) && los) {   // no hits through a wall corner; the spring bite reaches whoever searched it
               if (this.T.thief) { if (noise.steal) noise.steal(this); this.stolen = true; this.startFlee(player); } else attack = this.zone;
             }
           }
@@ -751,7 +832,8 @@ class Enemy {
   sync(dt) {
     const m = this.mesh;
     m.position.set(this.x, 0, this.z); m.rotation.y = this.yaw;
-    this.shadow.visible = !this.dead;
+    this.shadow.visible = !this.dead && !this.T.mimic;                   // a chest casts no disc: that would give a mimic away
+    if (this.dead && this.T.mimic) { this.lid.rotation.x = -1.0; if (!this.teeth.visible) this.showTeeth(); return; }   // the mimic stays put, lid hanging open
     if (this.dead) {   // tip over backward, then stay down
       const k = Math.min(1, this.deadT / 0.4);
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;
@@ -791,7 +873,14 @@ class Enemy {
     if (this.T.sway && !this.stun) m.rotation.z = Math.sin(this.walkT * 0.5 + this.seed) * (this.state === 'alerted' ? 0.04 : 0.1);   // a drunk's roll
     // hit flash
     this.hitT = Math.max(0, this.hitT - dt); this.healFx = Math.max(0, this.healFx - dt);
-    for (const mat of this.mats) mat.emissive.setHex(this.hitT > 0 ? 0xaa2010 : this.healFx > 0 ? 0x1a6a2a : this.rageT > 0 ? 0x701010 : this.st.tint());
+    let warn = false;
+    if (this.spark) {                                                                                        // the fuse fizzes; in the last 0.8 s it flashes red and the spark flares
+      warn = this.fuse > 0 && this.fuse < BOMB.warn && ((this.fuse * 14) | 0) % 2 === 0;
+      this.spark.scale.setScalar(warn ? 2.4 : 0.8 + 0.5 * Math.sin(performance.now() / 40 + this.seed));
+      this.spark.material.color.setHex(warn ? 0xffffff : 0xffa030);
+    }
+    const fl = this.hitT > 0 ? 0xaa2010 : this.healFx > 0 ? 0x1a6a2a : this.rageT > 0 ? 0x701010 : warn ? 0xdd3a10 : this.st.tint();
+    for (let i = 0; i < this.mats.length; i++) this.mats[i].emissive.setHex(fl || (this.baseEm ? this.baseEm[i] : 0));
 
     const show = this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;
