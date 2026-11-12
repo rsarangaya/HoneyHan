@@ -59,6 +59,25 @@ function findPath(floor, sx, sy, tx, ty) {
   return path.reverse();
 }
 
+// Path distance in tiles from (sx, sy) to every open tile into `out` (-1 = unreachable), blocking like findPath. Fills the shared
+// FLEE_Q queue and allocates nothing after the first call on a floor size. Used by the sack thief to pick where to run.
+let FLEE_Q = null;
+function floodDist(floor, sx, sy, out) {
+  const { w, h } = floor, st = floor.stairs, up = floor.up;
+  if (!FLEE_Q || FLEE_Q.length !== w * h) FLEE_Q = new Int32Array(w * h);
+  const q = FLEE_Q;
+  out.fill(-1);
+  let qs = 0, qe = 0; q[qe++] = sy * w + sx; out[q[0]] = 0;
+  while (qs < qe) {
+    const i = q[qs++], x = i % w, y = (i / w) | 0, d = out[i] + 1;
+    for (let k = 0; k < 4; k++) {
+      const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0), ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0), ni = ny * w + nx;
+      if (wallAt(floor, nx, ny) || out[ni] >= 0 || floor.blocked[ni] === 1 || (nx === st.x && ny === st.y) || (up && nx === up.x && ny === up.y)) continue;
+      out[ni] = d; q[qe++] = ni;
+    }
+  }
+}
+
 const turnToward = (a, b, max) => {
   let d = Math.atan2(Math.sin(b - a), Math.cos(b - a));
   return a + Math.max(-max, Math.min(max, d));
@@ -139,6 +158,7 @@ class Enemy {
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.healCd = 3; this.healFx = 0; this.cast = null; this.castTarget = null;   // shaman: heals wounded allies
     this.fleeT = 0; this.fleeTo = null; this.stolen = false; this.loot = 0;   // thieves
+    this.fgoal = -1; this.fre = 0; this.cower = false; this.escaped = false;   // sack thief (fleer): index of its flee spot, seconds to the next think, cornered, gone down the stairs
     this.chargeWind = 0; this.chargeT = 0; this.cdx = 0; this.cdz = 0; this.hitMul = 1;   // boars
     this.sleepT = 0;                    // asleep (a sleep wand): sees and hears nothing, any damage wakes it
     this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
@@ -308,6 +328,13 @@ class Enemy {
     } else if (this.type === 'thief') {
       part(0.42, 0.34, 0.42, lam(0x20302a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x20302a), 0, 0.9, 0.2);        // a dark hood
       part(0.4, 0.2, 0.2, lam(0x6a4a2a), 0, 0.4, 0.25);                                                            // a swag bag
+    } else if (this.type === 'sackthief') {
+      part(0.42, 0.34, 0.42, lam(0x2a2a20), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x2a2a20), 0, 0.9, 0.2);        // a dark hood
+      part(0.66, 0.62, 0.42, lam(0x8a6a34), 0, 0.3, 0.34); part(0.34, 0.16, 0.3, lam(0x8a6a34), 0, 0.72, 0.34);    // a big sack on its back, tied at the neck
+      part(0.4, 0.07, 0.34, lam(0xe0b830), 0, 0.64, 0.34); part(0.12, 0.12, 0.05, new THREE.MeshBasicMaterial({ color: 0xffd84a }), 0.25, 0.3, 0.56);   // a gold cord and a coin peeking out
+    } else if (this.type === 'defector') {
+      part(0.44, 0.34, 0.44, lam(0x3a3a4a), 0, 1.0, 0); part(0.4, 0.34, 0.07, lam(0x3a3a4a), 0, 0.9, 0.2);        // a grey hood
+      part(0.6, 0.78, 0.38, lam(0x4a4a58), 0, 0.35, 0); part(0.64, 0.5, 0.38, lam(0x4a4a58), 0, -0.18, 0);        // a long travelling cloak
     } else if (this.type === 'bomber') {
       ellPart(0.3, 0.3, 0.3, black, 0, -0.8, -0.12, this.arms[0]); cylPart(0.03, 0.03, 0.07, metal, 0, -0.63, -0.12, this.arms[0]); cylPart(0.014, 0.014, 0.12, leather, 0, -0.58, -0.12, this.arms[0]);   // a round black bomb in the off hand with a fuse
       const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = new THREE.SphereGeometry(0.055, 6, 5)), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
@@ -604,6 +631,45 @@ class Enemy {
     this.fleeT = 9; this.winding = false;
   }
 
+  // The sack thief, once it has noticed you (or been hurt): it never fights. Every QUESTS.thief.think seconds it floods the floor's
+  // path distances from you and from itself (two shared BFS, no allocation) and picks the open spot (a room centre, or beside the
+  // stairs) that it can reach before you, farthest from you; goTo then walks there (goTo re-paths only when the goal moves or twice a
+  // second). No such spot means a dead end: it cowers (stops and faces you). Reaching the stairs while running it escapes.
+  updateFleer(dt, player) {
+    const F = this.floor, Q = QUESTS.thief, T = TILE, w = F.w;
+    if (!this.cower && Math.hypot(this.x - (F.stairs.x + 0.5) * T, this.z - (F.stairs.y + 0.5) * T) < Q.escapeDist) { this.escape(); return; }
+    if ((this.fre -= dt) <= 0) {
+      this.fre = Q.think;
+      if (!F.fleeSpots) {                                                                 // once per floor: the open tile at each ordinary room's centre, and one beside the stairs
+        F.fleeSpots = [];
+        for (const r of F.rooms) if (!r.locked && r.theme !== 'shop') { const i = r.cy * w + r.cx, p = F.tiles[i] === T_FLOOR && !F.blocked[i] ? { x: r.cx, y: r.cy } : nearPoint(F, r.cx, r.cy, 0); F.fleeSpots.push({ x: p.x, y: p.y, stairs: false }); }
+        const sp = nearPoint(F, F.stairs.x, F.stairs.y, 0); F.fleeSpots.push({ x: sp.x, y: sp.y, stairs: true });
+        F.fleeA = new Int32Array(w * F.h); F.fleeB = new Int32Array(w * F.h);
+      }
+      const A = F.fleeA, B = F.fleeB, spots = F.fleeSpots;
+      floodDist(F, Math.floor(player.x / T), Math.floor(player.z / T), A);
+      floodDist(F, Math.floor(this.x / T), Math.floor(this.z / T), B);
+      let best = -1, bs = -1e9, cur = -1e9;
+      for (let i = 0; i < spots.length; i++) {
+        const s = spots[i], k = s.y * w + s.x, dp = A[k], dm = B[k];
+        if (dp < 0 || dm < 0 || dm <= 1 || dm > dp) continue;                             // unreachable, already here, or the player gets there first
+        const sc = dp + (s.stairs ? Q.stairsBonus : 0);
+        if (i === this.fgoal) cur = sc;
+        if (sc > bs) { bs = sc; best = i; }
+      }
+      if (best >= 0 && cur > -1e9 && bs < cur + Q.keep) best = this.fgoal;               // keep the old goal unless the new one is clearly better
+      this.fgoal = best; this.cower = best < 0;
+    }
+    if (this.cower) this.yaw = turnToward(this.yaw, Math.atan2(-(player.x - this.x), -(player.z - this.z)), 5 * dt);
+    else { const g = F.fleeSpots[this.fgoal]; this.goTo((g.x + 0.5) * T, (g.y + 0.5) * T, this.chase, dt); }
+    if (this.seen) this.lostT = 0;
+    else if ((this.lostT += dt) > Q.giveUp) { this.aware = 0; this.last = null; this.fgoal = -1; this.cower = false; this.fre = 0; this.set('unaware'); }   // lost you: back to wandering
+  }
+  escape() {
+    this.escaped = true; this.dead = true; this.corpseDone = true; this.winding = false; this.icon.visible = false; this.cone.visible = false;
+    if (Enemy.escaped) Enemy.escaped(this);                                               // js/quests.js: message and quest state
+  }
+
   // Archers and shamans: keep their distance, aim at you while they draw or chant, then loose an arrow or a hex.
   // A shaman heals a badly hurt ally in sight before it attacks.
   updateRanged(dt, player, noise, dist, los, dx, dz) {
@@ -770,10 +836,11 @@ class Enemy {
           if (this.wait <= 0) { this.aware = 0; this.last = null; this.set('unaware'); }
           break;
         }
-        if (this.goTo(this.last.x, this.last.z, SPEED.investigate, dt) < 0.8) this.wait = 3;
+        if (this.T.fleer || this.goTo(this.last.x, this.last.z, SPEED.investigate, dt) < 0.8) this.wait = 3;   // a thief never investigates toward you: it freezes and looks around instead
         break;
       }
       case 'alerted': {
+        if (this.T.fleer) { this.updateFleer(dt, player); break; }
         if (this.T.ranged) { this.updateRanged(dt, player, noise, dist, los, dx, dz); break; }
         if (this.T.bomb) { this.updateBomber(dt, dist, los); break; }
         this.atkCd -= dt;

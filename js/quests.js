@@ -11,9 +11,26 @@ const QUESTS = {
   miniboss: { minTier: 2, goldMin: 30, goldMax: 50, goldPerFloor: 10, potion: 0.5 },
   // shrine: price weights, boon weights, the max HP price, the lowest max HP it will take you to, regen bonus, weapon boon tier range
   shrine: { priceHp: 1, priceGear: 1, pricePotions: 1, boonWeapon: 1, boonStamina: 1, boonTreasure: 1, hpLoss: 15, minMaxHp: 40, stamBonus: 0.25, weaponMinTier: 2, weaponMaxTier: 3 },
+  // wanted guard: the reward is a potion (share potionShare, of kind potionKinds x potionN) or gear gearMinTier+ (a tier more from floor 3 on)
+  wanted: { potionShare: 0.5, potionKinds: ['heal', 'might', 'stoneskin'], potionN: 2, gearMinTier: 2 },
+  // sack thief: the sack is gold goldMin..goldMax + goldPerFloor x floor and one item of minTier+. think: seconds between flee decisions;
+  // escapeDist: metres from the stairs' centre at which a running thief gets away; stairsBonus: extra tiles of appeal the stairs spot has;
+  // keep: how much better a new spot must be to swap; giveUp: seconds out of sight before it calms down. Its speed is the 'sackthief' row of ENEMY_TYPES.
+  thief: { goldMin: 40, goldMax: 80, goldPerFloor: 15, minTier: 1, think: 0.5, escapeDist: 3.3, stairsBonus: 4, keep: 4, giveUp: 4 },
 };
 const MINIBOSS_NAMES = ['Grub the Butcher', 'Old Gnash', 'Mogra Bonecrusher', 'Skarn the Unwashed', 'Big Dreg', 'Hobb Ironjaw', 'Madam Cleaver', 'Rotgut Brannoch', 'Snaggle the Tall', 'Urkul Two-Pots'];
 const SHRINE_GEAR_SLOTS = ['helmet', 'chest', 'boots', 'offhand'];                       // the equipped pieces a bargain may take (never the weapon)
+
+// A floating name over a named enemy: one canvas and one sprite, made once at floor build.
+function nameTag(e, name, color) {
+  const c = document.createElement('canvas'); c.width = 320; c.height = 56;
+  const g = c.getContext('2d'); g.font = 'bold 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 6; g.strokeStyle = '#000c'; g.strokeText(name, 160, 29); g.fillStyle = color; g.fillText(name, 160, 29);
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  tag.scale.set(2.6, 0.455, 1); tag.position.y = 2.55; tag.renderOrder = 9;
+  e.mesh.add(tag); e.tag = tag;
+}
+const WANTED_ROOMS = { generic: 'plain room', messhall: 'mess hall', storeroom: 'storeroom', barracks: 'barracks', library: 'library', shrine: 'shrine', brewery: 'brewery' };
 
 // ---- the table of encounter types. weight: how often it is rolled. spawn(f): extra enemies, after assignEnemyTypes.
 // build(f, ctx): runtime pieces once the floor's meshes exist. line(f): the one short line for the inventory screen ('' when done). ----
@@ -26,13 +43,7 @@ const QUEST_TYPES = {
     },
     build(f, ctx) {
       const e = ctx.enemies.find(en => en.spec.mini); if (!e) return;
-      f.quest.boss = e;
-      const c = document.createElement('canvas'); c.width = 320; c.height = 56;               // one canvas and one sprite, made once
-      const g = c.getContext('2d'); g.font = 'bold 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.lineWidth = 6; g.strokeStyle = '#000c'; g.strokeText(f.quest.name, 160, 29); g.fillStyle = '#ff9a6a'; g.fillText(f.quest.name, 160, 29);
-      const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
-      tag.scale.set(2.6, 0.455, 1); tag.position.y = 2.55; tag.renderOrder = 9;
-      e.mesh.add(tag); e.tag = tag;
+      f.quest.boss = e; nameTag(e, f.quest.name, '#ff9a6a');
     },
     line(f) {
       const q = f.quest; if (q.boss && q.boss.dead) return '';
@@ -49,7 +60,68 @@ const QUEST_TYPES = {
     },
     line(f) { return f.quest.used ? '' : 'A shrine on this floor offers a bargain. Hold E at its altar; you may decline.'; },
   },
+  // Wanted guard: a hooded defector stands in the start room (a body that is not in the enemy list, so it cannot be hit and guards ignore it).
+  // Talk to it (hold E) for the target's name and room; kill the target any way you like and talk to it again for the reward.
+  wanted: {
+    weight: 1,
+    spawn(f) {
+      const q = f.quest; q.name = makeRng(q.seed).pick(MINIBOSS_NAMES);
+      f.enemies.push({ x: q.route[0].x, y: q.route[0].y, route: q.route, seed: q.seed, type: 'wanted', mini: { name: q.name } });
+    },
+    build(f, ctx) {
+      const q = f.quest, e = ctx.enemies.find(en => en.spec.mini); if (!e) return;
+      q.boss = e; nameTag(e, q.name, '#ffd23a');
+      const n = new Enemy({ x: q.npc.x, y: q.npc.y, route: [q.npc, q.npc], seed: (q.seed ^ 0x6a09e) >>> 0, type: 'defector' }, f);   // the quest-giver: built, posed once, never updated
+      n.yaw = Math.atan2(-((f.start.x + 0.5) * TILE - n.x), -((f.start.y + 0.5) * TILE - n.z)); n.sync(0); n.icon.visible = false; n.cone.visible = false;
+      group.add(n.mesh);
+      f.solids.push({ x: n.x, z: n.z, r: 0.45 });                                                // guards walk round it
+      ctx.propObjs.push({ p: { kind: 'questnpc', x: q.npc.x, y: q.npc.y, opened: false }, mesh: n.mesh, x: n.x, z: n.z, r: 0.45, lid: null, mats: [] });
+    },
+    prompt(q) { return q.done ? 'Talk to the defector' : q.boss && q.boss.dead ? 'Claim your reward' : q.talked ? 'Talk to the defector' : 'Talk to the hooded stranger'; },
+    talk(f) {
+      const q = f.quest, room = WANTED_ROOMS[q.room] || 'room';
+      if (q.done) { flash('"Thank you again. The dungeon is a little safer."'); return; }
+      if (q.boss && q.boss.dead) {                                                                 // reward: rolled once from the quest seed, handed over when there is room
+        const rng = makeRng((q.seed ^ 0x3a17) >>> 0), W = QUESTS.wanted;
+        const d = q.reward || (q.reward = rng() < W.potionShare ? { type: 'potion', kind: rng.pick(W.potionKinds), n: W.potionN } : rollEquipment(floorNum, rng, { minTier: W.gearMinTier, boost: floorNum >= 3 ? 1 : 0 }));
+        const got = inv.add(d);
+        if (!got) { flash('"Make room in your pack first."'); return; }
+        q.done = true; flash(`"${q.name} is dead? Take this." You receive: ${got}.`); return;
+      }
+      q.talked = true; discover('quest:wanted', 'Wanted guard');
+      flash(`"Kill ${q.name}. He patrols the ${room}. Come back to me after."`);
+    },
+    line(f) {
+      const q = f.quest, room = WANTED_ROOMS[q.room] || 'room';
+      if (q.done) return '';
+      if (q.boss && q.boss.dead) return `${q.name} is dead. Return to the defector near the start for your reward.`;
+      return q.talked ? `Hunt ${q.name}, who patrols the ${room}. Then return to the defector near the start.` : 'A hooded defector near the start room has a request. Talk to it (hold E).';
+    },
+  },
+  // Sneak thief chase: one thief with a loot sack wanders; see Enemy.updateFleer. The sack is the thief's corpse loot (rollLootBase).
+  thief: {
+    weight: 1,
+    spawn(f) { const q = f.quest; f.enemies.push({ x: q.route[0].x, y: q.route[0].y, route: q.route, seed: q.seed, type: 'sackthief' }); },
+    build(f, ctx) { f.quest.thief = ctx.enemies.find(en => en.type === 'sackthief') || null; },
+    line(f) {
+      const q = f.quest;
+      if (q.gone || !q.thief || q.thief.dead) return '';
+      return 'A thief with a loot sack lurks on this floor. Stab it unaware, or shoot it down before it reaches the stairs.';
+    },
+  },
 };
+// The Hold E label and the talk action of the wanted guard's quest-giver (main.js: targetInfo, finishSearch).
+const questPrompt = f => f.quest && f.quest.type === 'wanted' ? QUEST_TYPES.wanted.prompt(f.quest) : 'Talk';
+function questTalk() {
+  player.keys[KEYS.interact] = false;                                                              // one talk per press, not one every hold
+  if (floor.quest && QUEST_TYPES[floor.quest.type].talk) QUEST_TYPES[floor.quest.type].talk(floor);
+}
+// A sack thief reached the stairs while running (main.js wires this to Enemy.escaped): it is gone, and so is the sack.
+function questThiefEscaped(e) {
+  if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
+  if (floor.quest && floor.quest.thief === e) floor.quest.gone = true;
+  discover('quest:thief', 'Sneak thief chase'); flash('The sack thief escapes down the stairs with its loot!');
+}
 
 // Which floor gets which type for this run: { floorNumber: type }. Seeded; at most one per floor.
 function rollQuests(seed, maxFloor, shopFloor) {

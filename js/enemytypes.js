@@ -10,6 +10,7 @@
 //   elite: Aj's Bust and other "not elites" effects skip it (bosses count as elite too).
 //   height: quad only, how tall it is for aiming.
 //   mimic: a chest that bites (model 'mimic', see MIMIC). bomb: a goblin carrying a lit bomb (see BOMB).
+//   fleer: never fights, runs from the player (see Enemy.updateFleer).
 const ENEMY_TYPES = {
   goblin:  { name: 'Goblin Guard', zones: [0.3, 0.5, 0.2] },
   cook:    { name: 'Goblin Cook',  zones: [0.3, 0.5, 0.2], weapon: 'sword', noGear: true, hpMul: 1.1, dmgMul: 0.9 },
@@ -74,11 +75,20 @@ const ENEMY_TYPES = {
   // The locked-room mini-boss (js/quests.js): a named, recoloured, 1.3x guard. Never from the spawn mix; ~3x a guard's HP and 1.5x its damage.
   miniboss: { name: 'Mini-Boss', elite: true, zones: [0.3, 0.5, 0.2], weapon: 'mace', skin: 0x9a3a32, hpMul: 3, dmgMul: 1.5, speed: 0.95, reach: 1.15, windMul: 1.2, r: 0.5, scale: 1.3, noStagger: true, sneakCap: 2, shout: 1.5,
     info: ['A named brute that waits in a locked room (the key is in a chest on the same floor). Optional: nobody makes you open the door.', 'About three times the health of a guard and one and a half times its damage, with a long reach. It is an elite: ordinary hits do not stagger it, a sneak attack is capped (a dagger cannot instakill it) and it shrugs off glue. A parry still staggers it.', 'Always leaves a Rare or better piece of equipment and a purse of gold, more of both on deeper floors.'] },
+  // The wanted-guard quest's target (js/quests.js): a named elite guard in plate, ~2x a guard's HP and 1.3x its damage.
+  wanted:  { name: 'Wanted Guard', elite: true, zones: [0.3, 0.5, 0.2], weapon: 'sword', heavy: true, skin: 0x8a5a3a, hpMul: 2, dmgMul: 1.3, speed: 1, reach: 1.1, windMul: 1.1, r: 0.46, scale: 1.2, sneakCap: 3, shout: 1.5,
+    info: ['A named elite guard, wanted by a goblin defector (a quest on floors 2 to 4). It patrols one room, wears plate and carries a floating name.', 'About twice the health of a guard and 1.3 times its damage. A sneak attack is capped, so a dagger cannot instakill it, but any way of killing it counts.', 'Report back to the defector near the start room for the reward: a good potion or a Rare or better piece of gear.'] },
+  // The quest-giver's body: never in the enemy list, so it cannot be hit and nothing reacts to it.
+  defector: { name: 'Goblin Defector', skin: 0x7a9a4a, noGear: true, weapon: 'dagger', scale: 0.9 },
+  // The sneak thief chase (js/quests.js): carries a loot sack, never fights, runs from you (fleer, see Enemy.updateFleer) at 1.1 x the alerted guard
+  // speed (about 1.2 x your sprint), cowers when cornered and escapes down the stairs if it gets there. Its shout is silent (shout 0).
+  sackthief: { name: 'Sack Thief', zones: [0, 1, 0], skin: 0x4a6a3a, noGear: true, weapon: 'dagger', hpMul: 0.5, dmgMul: 0, speed: 1.1, vis: 1.1, hear: 1.2, shout: 0, scale: 0.88, r: 0.36, fleer: true,
+    info: ['A thief goblin with a fat loot sack on its back (gold and one Uncommon or better item). It never fights: when it spots you it runs, about 20% faster than you sprint, and it will not steal from you.', 'Sneak up and stab it, or shoot it. Dead ends corner it and it cowers. If it reaches the stairs while running it escapes and the sack is gone.'] },
   iceknight: { name: 'Ice Knight', elite: true, zones: [0.3, 0.5, 0.2], skin: 0x9ac4e0, weapon: 'sword', heavy: true, hpMul: 2.2, dmgMul: 1.4, speed: 0.95, reach: 1.1, windMul: 1.2, r: 0.5, scale: 1.2, blockFront: 0.3,
     info: ['An elite knight in frozen plate with a raised guard: hits from the front only do 30% damage. Flank it, stun it, or wait for it to swing and strike back.'] },
 };
 for (const t of Object.values(ENEMY_TYPES)) {   // fill the defaults so the rest of the code never checks for undefined
-  Object.assign(t, { model: 'biped', look: null, ranged: null, pack: 0, ambush: 0, blockFront: 1, resistBleed: false, onDeath: null, onHit: null, charge: null, thief: false, callAll: false, heavy: false, shield: false, robe: null, orb: null, hover: 0, info: null, mimic: false, bomb: false, hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
+  Object.assign(t, { model: 'biped', look: null, ranged: null, pack: 0, ambush: 0, blockFront: 1, resistBleed: false, onDeath: null, onHit: null, charge: null, thief: false, fleer: false, callAll: false, heavy: false, shield: false, robe: null, orb: null, hover: 0, info: null, mimic: false, bomb: false, hpMul: 1, dmgMul: 1, speed: 1, reach: 1, windMul: 1, cdMul: 1, vis: 1, hear: 1, smell: 0, shout: 1, sneakCap: 99, r: 0.4, scale: 0, ...t });
 }
 
 // Mimic chest numbers (the rest are in the table row above and TUNE). springWind: the lid-open warning, in seconds, before the free bite

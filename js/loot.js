@@ -113,6 +113,7 @@ const PROP_INFO = {
   door:      { label: 'Unlock door',      time: 0.6 },
   merchant:  { label: 'Trade with the merchant', time: 0.35 },
   altar:     { label: 'Kneel at the altar', time: 0.5 },
+  questnpc:  { label: 'Talk', time: 0.4 },                                  // the wanted-guard quest-giver (js/quests.js gives the live label)
 };
 
 // Locked and trapped chests (js/gen.js CHEST_ODDS places them; main.js runs them). A lockpick picks a lock (hold E, quiet, may
@@ -243,7 +244,12 @@ function rollLootBase(kind, floorNum, rng, bonus, gear, type, tier) {
       if (rng() < q.potion) out.push(potion());
       return out;
     }
-    if (type === 'wolf') return out;                                                                              // a wolf leaves no gear
+    if (type === 'sackthief') {                                                                                   // the loot sack: gold plus one Uncommon or better item (QUESTS.thief)
+      const q = QUESTS.thief;
+      out.push({ type: 'gold', n: rng.int(q.goldMin, q.goldMax) + q.goldPerFloor * floorNum }, rollEquipment(floorNum, rng, { minTier: q.minTier }));
+      return out;
+    }
+    if (type === 'wolf') return out;                                                                            // a wolf leaves no gear
     if (type === 'bouncer') { out.push(rollEquipment(floorNum, rng, { minTier: 1 }), { type: 'gold', n: rng.int(6, 15) }); return out; }   // the elite always pays
     if (type === 'bandit' && rng() < 0.85) { out.push({ type: 'gold', n: rng.int(5, 15) }); return out; }          // robbers carry gold
     // a guard drops at most ONE thing; one of the pieces it was visibly carrying is the likeliest

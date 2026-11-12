@@ -221,7 +221,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
-  questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot
+  questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   scene.add(group);
   scene.background = new THREE.Color(theme.fog);
@@ -363,7 +363,7 @@ function hatUpdate(dt) {
   if (hat.cd > 0) hat.cd -= dt;
   if (!wearingDunce(inv)) { hat.still = 0; hat.hidden = false; return false; }
   const moving = Math.hypot(player.vx, player.vz) > 0.3 || cb.atk || cb.draw || cb.eat;
-  const hunted = enemies.some(e => !e.dead && e.state === 'alerted' && !e.boss);
+  const hunted = enemies.some(e => !e.dead && e.state === 'alerted' && !e.boss && !e.T.fleer);   // a fleeing thief is not hunting you
   if (hat.hidden) {
     hat.hiddenT += dt;
     if (moving || !player.crouching || hunted || hat.hiddenT > DUNCE.hideMax) { hat.hidden = false; hat.cd = DUNCE.hideCd; hat.still = 0; flash('Guards can see you again.'); }
@@ -371,7 +371,7 @@ function hatUpdate(dt) {
     if ((hat.still += dt) >= DUNCE.hideStill && hat.cd <= 0) { hat.hidden = true; hat.hiddenT = 0; flash('You crouch motionless. The guards look right past you.'); }
   } else hat.still = 0;
   if (!hat.coned.has(floorNum)) {                                                  // Cone of Shame
-    const g = enemies.find(e => !e.dead && e.state === 'alerted' && e.seen && !e.rageT && !e.boss);
+    const g = enemies.find(e => !e.dead && e.state === 'alerted' && e.seen && !e.rageT && !e.boss && !e.T.fleer);
     if (g) { hat.coned.add(floorNum); if (g.addStatus('stun', DUNCE.laugh)) { discover('status:stun', 'Stun'); flash('A guard spots your hat and bursts out laughing!'); } }
   }
   return hat.hidden;
@@ -480,6 +480,7 @@ function stealGold(e) {
   flash(n ? `Thief! ${n} gold stolen. Kill it to get it back.` : 'A thief rifles your pockets and finds nothing.');
   discover('enemy:thief', 'Thief Goblin');
 }
+Enemy.escaped = questThiefEscaped;   // a sack thief reaching the stairs (js/quests.js)
 // A spore puffer bursting: Slow and Daze for anything within 3 m, you included.
 Enemy.burst = e => {
   if (Math.hypot(e.x - player.x, e.z - player.z) < 3) {
@@ -943,6 +944,7 @@ function targetInfo(o) {
     if (o.p.locked) { const pk = inv.pack.find(i => i.type === 'lockpick'); return pk ? { label: `Pick the lock of the ${CHEST_NAMES[t]} (${pk.n} lockpick${pk.n > 1 ? 's' : ''})`, time: LOCKPICK.time } : { label: `Locked: needs a lockpick, or smash it with a weapon`, time: 0, locked: true }; }
     return player.crouching ? { label: `Search carefully: ${CHEST_NAMES[t]}`, time: base * TRAP.disarmMul } : { label: `Open ${CHEST_NAMES[t]}`, time: base };   // crouched is slower for every chest, so the bar never gives a trap away (a trapped one is then disarmed)
   }
+  if (o.p.kind === 'questnpc') return { label: questPrompt(floor), time: PROP_INFO.questnpc.time };
   const pi = PROP_INFO[o.p.kind];
   return player.crouching && (o.p.kind === 'barrel' || o.p.kind === 'rubble') ? { label: 'Search carefully', time: pi.time * TRAP.disarmMul } : pi;
 }
@@ -968,6 +970,7 @@ const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3,
 function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
   if (o.p.kind === 'altar') { dealUI.open(o); return; }
+  if (o.p.kind === 'questnpc') { questTalk(); return; }
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
     discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
@@ -1222,7 +1225,7 @@ function drawMinimap(step = 1) {
   } else rings.length = 0;
   for (const o of propObjs) {
     if (o.p.opened || !explored[o.p.y * floor.w + o.p.x]) continue;
-    mctx.fillStyle = o.p.kind === 'chest' ? TIERS[o.p.tier | 0].color : o.p.kind === 'merchant' ? '#6cf' : '#b08a5a';   // a chest's dot is its grade colour
+    mctx.fillStyle = o.p.kind === 'chest' ? TIERS[o.p.tier | 0].color : o.p.kind === 'merchant' ? '#6cf' : o.p.kind === 'questnpc' ? '#ff9a6a' : '#b08a5a';   // a chest's dot is its grade colour
     mctx.fillRect(o.p.x * S + S / 4, o.p.y * S + S / 4, S / 2 + 1, S / 2 + 1);
   }
   const px = player.x / TILE * S, py = player.z / TILE * S;

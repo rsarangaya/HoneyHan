@@ -86,7 +86,7 @@ function roomPoint(f, r, k) {
 }
 
 // opts.armory: this floor must contain the armory (retries with new layouts until it fits). opts.quest: an encounter
-// type from js/quests.js ('miniboss' or 'shrine'); the layout is retried until it fits, and floor.quest describes it.
+// type from js/quests.js ('miniboss', 'shrine', 'wanted' or 'thief'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
@@ -607,6 +607,29 @@ function layoutFloor(seed, floorNum, opts) {
       }
     }
     if (altar) quest = { type: 'shrine', altar: { x: altar.x, y: altar.y }, seed: seedOf() };
+  } else if (opts.quest === 'wanted') {
+    // the quest-giver stands on an inner tile of the start room (a blocked tile, so the floor must stay connected); the target patrols another ordinary room
+    const homes = rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop' && r.theme !== 'lair'), home = homes.length ? rng.pick(homes) : null;
+    const r0 = rooms[0], inner = [], edge = [];
+    for (let y = r0.y; y < r0.y + r0.h; y++) for (let x = r0.x; x < r0.x + r0.w; x++) {
+      if (at(x, y) !== T_FLOOR || blocked[y * w + x] || used.has(y * w + x) || nearCentre(x, y) || Math.hypot(x - start.x, y - start.y) < 2) continue;
+      (x > r0.x && y > r0.y && x < r0.x + r0.w - 1 && y < r0.y + r0.h - 1 ? inner : edge).push({ x, y });
+    }
+    let npc = null;
+    for (const c of [...rng.shuffle(inner), ...rng.shuffle(edge)]) {
+      blocked[c.y * w + c.x] = 1;
+      if (reachCount() !== reach - 1) { blocked[c.y * w + c.x] = 0; continue; }
+      reach--; used.add(c.y * w + c.x); npc = c; break;
+    }
+    if (home && npc) quest = { type: 'wanted', npc, route: [roomPoint(f, home, 1), roomPoint(f, home, 5)], room: home.theme, seed: seedOf() };
+    else if (npc) { blocked[npc.y * w + npc.x] = 0; used.delete(npc.y * w + npc.x); }   // no room for the target: leave the floor as it was
+  } else if (opts.quest === 'thief') {
+    // a sack thief that wanders between two ordinary rooms
+    const homes = rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop' && r.theme !== 'lair');
+    if (homes.length >= 2) {
+      const a = rng.pick(homes), b = rng.pick(homes.filter(r => r !== a));
+      quest = { type: 'thief', route: [roomPoint(f, a, 2), roomPoint(f, b, 6)], seed: seedOf() };
+    }
   }
 
   return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, quest, steps: dist[stairs.y * w + stairs.x] };

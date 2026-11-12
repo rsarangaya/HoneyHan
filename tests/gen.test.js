@@ -5,6 +5,9 @@
 // every locked door has exactly one key in a chest outside the locked rooms, locked rooms
 // are reachable only through their door, and the boss arena has one boss and one healing potion.
 // Also: mimic, locked and trapped chest placement (shares, exclusions, same seed, rest of floor unchanged) and lockpick drop rates.
+// Encounters: the four types roll about equally; the wanted guard (defector in the start room, target on a patrol route) and the
+// sack thief (two rooms of its own) lay out over many seeds, the floor stays as it was apart from the encounter; the sack, the
+// wanted reward and the encounter lines are checked with stub globals.
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const ctx = vm.createContext({ console, Math, TILE: 3 });   // TILE lives in js/player.js, which needs the page
@@ -229,6 +232,11 @@ for (let s = 1; s <= N; s++) {
   for (const k of [0, 1, 2]) if (Math.abs(pct(k) - want[k]) > 1.5) fail('roll', `${k} encounters ${pct(k).toFixed(1)}%, want about ${want[k]}%`);
   for (const m of qbad.slice(0, 3)) fail('roll', m);
   if (!types.miniboss || !types.shrine) fail('roll', 'both encounter types should be rolled');
+  // Four types, weight 1 each: each should be about a quarter of the encounters rolled.
+  const totalTypes = Object.values(types).reduce((a, b) => a + b, 0);
+  for (const t of ['miniboss', 'shrine', 'wanted', 'thief']) { const sh = (types[t] || 0) / totalTypes; if (Math.abs(sh - 0.25) > 0.02) fail('roll', `${t} is ${(sh * 100).toFixed(1)}% of encounters, want about 25%`); }
+  if (Object.keys(types).length !== 4) fail('roll', `unexpected encounter types: ${Object.keys(types).join(', ')}`);
+  console.log(`encounter types: ${Object.entries(types).map(([t, c]) => t + ' ' + (100 * c / totalTypes).toFixed(1) + '%').join(', ')}`);
 
   // Lair layout: 300 seeds, floors 2 to 4, mini-boss forced. The door is reachable from the start with no key; the lair interior is
   // reachable only through the door; the key sits on a reachable chest; the mini-boss waits inside on its route.
@@ -281,6 +289,154 @@ for (let s = 1; s <= N; s++) {
     const share = pots / N;
     if (Math.abs(share - q.potion) > 0.03) fail(`miniboss drop floor ${n}`, `potion share ${(share * 100).toFixed(1)}%, want about ${q.potion * 100}%`);
   }
+}
+
+// Wanted guard and sack thief (js/quests.js; gen.js opts.quest 'wanted' and 'thief'). The layouts are checked over many seeds;
+// the reward, the lines and the sack are checked by calling the quest code in the same vm context with stub globals.
+{
+  const QX = vm.runInContext('({ QUEST_TYPES, QUESTS, MINIBOSS_NAMES, makeRng, rollLoot })', ctx);
+  const QT = QX.QUEST_TYPES, ordinary = (f, r) => r !== f.rooms[0] && !r.locked && r.theme !== 'shop' && r.theme !== 'lair';   // rooms overlap on most floors
+  const roomsAt = (f, p) => f.rooms.filter(r => inRoom(r, p.x, p.y));
+  const atI = (f, p) => p.y * f.w + p.x;
+  // The layout generateFloor settles on for a quest (the same retry loop), so the plain floor can be rebuilt from the same attempt.
+  const LF = vm.runInContext('layoutFloor', ctx);
+  const settle = (seed, n, quest) => {
+    for (let a = 0; a < 24; a++) {
+      const sd = (seed + a * 7777) >>> 0, f = LF(sd, n, { armory: false, boss: false, shop: false, quest });
+      if (f.quest) return { f, sd };
+    }
+    return { f: null };
+  };
+  // The floor with the quest must equal the plain floor from the same attempt, except for the quest and the extra blocked tiles.
+  const sameExceptQuest = (f, sd, n, extraBlocked) => {
+    const base = vm.runInContext('layoutFloor', ctx)(sd, n, { armory: false, boss: false, shop: false });
+    const strip = g => JSON.stringify({ ...g, quest: undefined, blocked: undefined });
+    if (strip(f) !== strip(base)) return 'the floor changed apart from the encounter';
+    let diff = 0; for (let i = 0; i < f.blocked.length; i++) if (!!f.blocked[i] !== !!base.blocked[i]) diff++;
+    return diff !== extraBlocked ? `${diff} blocked tiles differ (want ${extraBlocked})` : '';
+  };
+
+  // ---- wanted guard layout (300 seeds, floors 2 to 4) ----
+  let wFit = 0, wNo = 0; const wBad = [];
+  for (let s = 1; s <= 300; s++) for (let n = 2; n <= 4; n++) {
+    const seed = (s * 2654435761 + 555) >>> 0, where = `wanted seed ${seed} floor ${n}`;
+    const { f, sd } = settle(seed, n, 'wanted');
+    if (!f) { wNo++; continue; }
+    wFit++;
+    const q = f.quest, r0 = f.rooms[0], npc = q.npc, home = f.rooms.find(r => ordinary(f, r) && r.theme === q.room && q.route.every(p => inRoom(r, p.x, p.y)));
+    if (q.type !== 'wanted') { wBad.push(`${where}: type ${q.type}`); continue; }
+    if (!inRoom(r0, npc.x, npc.y)) wBad.push(`${where}: defector outside the start room`);
+    if (!f.blocked[atI(f, npc)] || f.tiles[atI(f, npc)] === G.T_WALL) wBad.push(`${where}: defector tile is not a blocked open tile`);
+    if (Math.hypot(npc.x - f.start.x, npc.y - f.start.y) < 2) wBad.push(`${where}: defector next to the start`);
+    if (!home) wBad.push(`${where}: target's route is not inside an ordinary ${q.room} room other than the start`);
+    if (q.route[0].x === q.route[1].x && q.route[0].y === q.route[1].y) wBad.push(`${where}: route has one point`);
+    const guardOpen = flood(f, true, true), closed = flood(f, false);
+    if (!touchable(f, closed, f.stairs.x, f.stairs.y)) wBad.push(`${where}: stairs unreachable`);
+    if (!q.route.every(p => guardOpen[atI(f, p)])) wBad.push(`${where}: route not reachable`);
+    const cutOff = g => { const s = flood(g, true, true); let c = 0; for (let i = 0; i < g.w * g.h; i++) if (g.tiles[i] !== G.T_WALL && !g.blocked[i] && !s[i]) c++; return c; };
+    if (cutOff(f) > cutOff(LF(sd, n, { armory: false, boss: false, shop: false }))) wBad.push(`${where}: the defector cuts off ${cutOff(f)} tiles`);
+    const dm = sameExceptQuest(f, sd, n, 1); if (dm) wBad.push(`${where}: ${dm}`);
+    const snap = JSON.stringify(q);
+    vm.runInContext('questSpawn', ctx)(f);
+    const tg = f.enemies.filter(e => e.type === 'wanted');
+    if (tg.length !== 1 || !tg[0].mini || !QX.MINIBOSS_NAMES.includes(tg[0].mini.name) || tg[0].x !== q.route[0].x || tg[0].y !== q.route[0].y) wBad.push(`${where}: want one named target on its route`);
+    if (f.enemies.some(e => e.x === npc.x && e.y === npc.y)) wBad.push(`${where}: an enemy stands on the defector's tile`);
+    if (s <= 40 && JSON.stringify(settle(seed, n, 'wanted').f.quest) !== snap) wBad.push(`${where}: placement changed between two runs`);
+  }
+  console.log(`wanted layouts: ${wFit} floors with the defector, ${wNo} where it did not fit (no encounter)`);
+  for (const m of wBad.slice(0, 5)) fail('wanted layout', m);
+  if (wBad.length) fail('wanted layout', `${wBad.length} wanted layout checks failed in total`);
+  if (wFit < 300) fail('wanted layout', `only ${wFit} of 900 floors fit the defector`);
+
+  // ---- sack thief layout (300 seeds, floors 2 to 4) ----
+  let tFit = 0, tNo = 0; const tBad = [];
+  for (let s = 1; s <= 300; s++) for (let n = 2; n <= 4; n++) {
+    const seed = (s * 2654435761 + 777) >>> 0, where = `thief seed ${seed} floor ${n}`;
+    const { f, sd } = settle(seed, n, 'thief');
+    if (!f) { tNo++; continue; }
+    tFit++;
+    const q = f.quest, guardOpen = flood(f, true, true);
+    if (q.type !== 'thief') { tBad.push(`${where}: type ${q.type}`); continue; }
+    const A = roomsAt(f, q.route[0]).filter(r => ordinary(f, r)), B = roomsAt(f, q.route[1]).filter(r => ordinary(f, r));
+    if (!A.length || !B.length) tBad.push(`${where}: a route point is in no ordinary room`);
+    else if (A.length === 1 && B.length === 1 && A[0] === B[0]) tBad.push(`${where}: both route points are in one room`);
+    if (!q.route.every(p => guardOpen[atI(f, p)])) tBad.push(`${where}: route not reachable`);
+    const dm = sameExceptQuest(f, sd, n, 0); if (dm) tBad.push(`${where}: ${dm}`);
+    vm.runInContext('questSpawn', ctx)(f);
+    const th = f.enemies.filter(e => e.type === 'sackthief');
+    if (th.length !== 1 || th[0].x !== q.route[0].x || th[0].y !== q.route[0].y || th[0].route.length !== 2) tBad.push(`${where}: want one thief on its route`);
+  }
+  // Plain floors never get a thief or a defector.
+  for (let s = 1; s <= 100; s++) {
+    const f = G.generateFloor((s * 2654435761 + 9) >>> 0, 3, { armory: false, boss: false, shop: false });
+    vm.runInContext('questSpawn', ctx)(f);
+    if (f.enemies.some(e => e.type === 'sackthief' || e.type === 'wanted')) tBad.push(`seed ${s}: encounter enemy on a plain floor`);
+  }
+  console.log(`thief layouts: ${tFit} floors with the thief, ${tNo} where it did not fit (no encounter)`);
+  for (const m of tBad.slice(0, 5)) fail('thief layout', m);
+  if (tBad.length) fail('thief layout', `${tBad.length} thief layout checks failed in total`);
+  if (tFit < 300) fail('thief layout', `only ${tFit} of 900 floors fit the thief`);
+
+  // ---- the sack: gold 40 to 80 plus 15 a floor, and one Uncommon or better item, on floors 1 to 4 ----
+  const TQ = QX.QUESTS.thief;
+  for (let n = 1; n <= 4; n++) {
+    let gOk = 0, itemOk = 0, extra = 0; const N = 2000;
+    for (let i = 0; i < N; i++) {
+      const d = QX.rollLoot('corpse', n, QX.makeRng((i * 6151 + n * 17) >>> 0), 0, [], 'sackthief', 0);
+      const gold = d.filter(x => x.type === 'gold').reduce((a, x) => a + x.n, 0), gear = d.filter(x => ['weapon', 'armor', 'shield'].includes(x.type));
+      if (gold >= TQ.goldMin + TQ.goldPerFloor * n && gold <= TQ.goldMax + TQ.goldPerFloor * n) gOk++;
+      if (gear.length === 1 && gear[0].tier >= TQ.minTier) itemOk++;
+      if (d.length !== gear.length + (gold ? 1 : 0)) extra++;
+    }
+    if (gOk !== N || itemOk !== N || extra) fail(`thief sack floor ${n}`, `gold ok ${gOk}/${N}, Uncommon+ item ok ${itemOk}/${N}, other drops ${extra}`);
+  }
+
+  // ---- the wanted reward (QUEST_TYPES.wanted.talk) with stub inventory and messages ----
+  const stub = { got: [], msgs: [], full: false };
+  ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; } };
+  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {};
+  const W = QT.wanted, WS = QX.QUESTS.wanted, dead = { dead: true };
+  const talk = (quest, fl) => { ctx.floorNum = fl; stub.got = []; W.talk({ quest }); return stub.got; };
+  const tierMean = {};
+  for (const fl of [2, 3, 4]) {
+    let pots = 0, bad = 0, tierSum = 0, gearN = 0; const kinds = new Set(), N = 3000;
+    for (let i = 0; i < N; i++) {
+      const got = talk({ seed: (i * 2246822519 + fl) >>> 0, name: 'Old Gnash', room: 'generic', boss: dead }, fl);
+      if (got.length !== 1) { bad++; continue; }
+      const d = got[0];
+      if (d.type === 'potion') { pots++; kinds.add(d.kind); if (d.n !== WS.potionN || !WS.potionKinds.includes(d.kind)) bad++; }
+      else { gearN++; tierSum += d.tier; if (!['weapon', 'armor', 'shield'].includes(d.type) || d.tier < WS.gearMinTier) bad++; }
+    }
+    const share = pots / N;
+    if (bad) fail(`wanted reward floor ${fl}`, `${bad} rewards not a potion of the list or gear of Rare or better`);
+    if (Math.abs(share - WS.potionShare) > 0.03) fail(`wanted reward floor ${fl}`, `potion share ${(share * 100).toFixed(1)}%, want about ${WS.potionShare * 100}%`);
+    if (kinds.size !== WS.potionKinds.length) fail(`wanted reward floor ${fl}`, `potion kinds seen: ${[...kinds].join(', ')}`);
+    tierMean[fl] = tierSum / gearN;
+  }
+  console.log(`wanted reward: mean gear tier floor 2 ${tierMean[2].toFixed(2)}, floor 3 ${tierMean[3].toFixed(2)}, floor 4 ${tierMean[4].toFixed(2)}`);
+  if (!(tierMean[3] > tierMean[2] + 0.1)) fail('wanted reward', 'gear should be a tier better from floor 3 on');
+
+  // Claimed once; claimable without a talk first; a full pack keeps the reward for the next talk.
+  stub.msgs = [];
+  const q1 = { seed: 99, name: 'Big Dreg', room: 'barracks', boss: dead };
+  const first = talk(q1, 2).length;
+  const second = talk(q1, 2).length;
+  const thanks = stub.msgs[stub.msgs.length - 1] || '';
+  if (first !== 1 || second !== 0 || !/Thank you/.test(thanks) || q1.done !== true) fail('wanted reward once', `${first} then ${second} rewards, last message "${thanks}"`);
+  const q2 = { seed: 5, name: 'Old Gnash', room: 'generic', boss: dead };
+  stub.full = true; const fullGot = talk(q2, 2).length, fullDone = !!q2.done, fullMsg = stub.msgs[stub.msgs.length - 1] || '';
+  stub.full = false; const reward1 = JSON.stringify(q2.reward); const later = talk(q2, 2).length;
+  if (fullGot !== 0 || fullDone || !/Make room/.test(fullMsg) || later !== 1 || JSON.stringify(stub.got[0]) !== reward1) fail('wanted reward full pack', `full pack gave ${fullGot}, done ${fullDone}, then ${later}; "${fullMsg}"`);
+
+  // The line and the prompt at each stage of the wanted guard
+  const wf = quest => ({ quest: { type: 'wanted', name: 'Old Gnash', room: 'library', boss: { dead: false }, talked: false, seed: 1, ...quest } });
+  const stages = [wf({}), wf({ talked: true }), wf({ boss: { dead: true } }), wf({ done: true })];
+  const lines = stages.map(f => QT.wanted.line(f)), prompts = stages.map(f => QT.wanted.prompt(f.quest));
+  if (!/Talk to it \(hold E\)/.test(lines[0]) || !/Hunt Old Gnash, who patrols the library/.test(lines[1]) || !/Old Gnash is dead\. Return to the defector/.test(lines[2]) || lines[3] !== '') fail('wanted line', JSON.stringify(lines));
+  if (prompts.join(' | ') !== 'Talk to the hooded stranger | Talk to the defector | Claim your reward | Talk to the defector') fail('wanted prompt', prompts.join(' | '));
+  // The thief line: shown only while the thief lives on the floor
+  const tl = quest => QT.thief.line({ quest });
+  if (!/loot sack/.test(tl({ thief: { dead: false } })) || tl({ thief: { dead: true } }) !== '' || tl({ thief: { dead: false }, gone: true }) !== '' || tl({ thief: null }) !== '') fail('thief line', 'the line should show only while the thief is alive and on the floor');
 }
 
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);
