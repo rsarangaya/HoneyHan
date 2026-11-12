@@ -366,6 +366,7 @@ class Inventory {
       if (this.hp >= this.maxHp) return 'Already at full health';
       this.hp = Math.min(this.maxHp, this.hp + POTION_HEAL);
       pst.clear('bleed');                                   // a healing potion closes wounds
+      if (typeof allyHeal === 'function') allyHeal();       // and heals a recruited ally standing close (js/quests.js)
     } else {
       if (k === 'stamina') this.refillStamina = true;
       this.buffs[POTION_BUFF[k]] = BUFF_TIME[POTION_BUFF[k]];

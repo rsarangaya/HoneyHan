@@ -169,6 +169,7 @@ class Enemy {
     this.fuse = -1; this.exploded = false; this.spark = null; this.keep = null;   // bomb goblins: seconds left on the fuse (-1 = not lit yet)
     this.windOvr = 0; this.propObj = null;                          // mimics: a fixed wind-up for the first bite, and the chest prop it stands in for
     this.cause = 'died';
+    this.foe = null; this.isAlly = this.type === 'ally';             // foe: the ally this enemy is fighting instead of the player (js/quests.js sets it)
     this.seed = spec.seed;
     const fl = this.boss ? 0 : Math.max(0, (typeof floorNum === 'number' ? floorNum : 1) - 1);   // floor scaling, once at spawn (boss excluded)
     this.dmgScale = 1 + TUNE.floorDmgScale * fl;
@@ -343,6 +344,8 @@ class Enemy {
     } else if (this.type === 'prisoner') {
       for (const a of this.arms) box(0.21, 0.08, 0.21, metal, 0, -0.55, 0, a);                                                    // iron shackles on both wrists
       part(0.6, 0.18, 0.37, lam(0x5a4a34), 0, 0.5, 0); part(0.34, 0.08, 0.34, lam(0x5a4a34), 0, 1.08, 0);                         // a ragged shirt and a tattered rag on the head
+    } else if (this.type === 'ally') {
+      part(0.6, 0.09, 0.38, lam(0x3a6aa8), 0, 0.42, 0); part(0.44, 0.07, 0.44, lam(0xe8e4d8), 0, 1.02, 0);                           // a blue sash across the chest and a white head bandage (so it never passes for a guard)
     } else if (this.type === 'bomber') {
       ellPart(0.3, 0.3, 0.3, black, 0, -0.8, -0.12, this.arms[0]); cylPart(0.03, 0.03, 0.07, metal, 0, -0.63, -0.12, this.arms[0]); cylPart(0.014, 0.014, 0.12, leather, 0, -0.58, -0.12, this.arms[0]);   // a round black bomb in the off hand with a fuse
       const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = new THREE.SphereGeometry(0.055, 6, 5)), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
@@ -732,9 +735,19 @@ class Enemy {
       this.last = this.rageFrom; this.aware = 0.6; this.set('suspicious');
       this.sync(dt); return null;
     }
-    if (!this.rageTarget || this.rageTarget.dead) this.rageTarget = nearestOther(this, Enemy.all, 30);
+    if (!this.rageTarget || this.rageTarget.dead) {
+      this.rageTarget = nearestOther(this, Enemy.all, 30);
+      const al = Enemy.ally;                                            // the player's ally (js/quests.js) is a fair target too
+      if (al && !al.dead && al.floor === this.floor && Math.hypot(al.x - this.x, al.z - this.z) < (this.rageTarget ? Math.hypot(this.rageTarget.x - this.x, this.rageTarget.z - this.z) : 30)) this.rageTarget = al;
+    }
     const t = this.rageTarget;
     if (!t) { this.lookAround(dt); this.sync(dt); return null; }
+    return this.fightOther(t, dt, noise);
+  }
+
+  // Melee against another creature t (an enemy under Rage, an enemy fighting the player's ally, or the ally itself fighting an enemy), with the guard's own
+  // numbers: walk up, wind-up, strike with the zone armour of t. Always returns null (it never hits the player).
+  fightOther(t, dt, noise) {
     const dx = t.x - this.x, dz = t.z - this.z, dist = Math.hypot(dx, dz) || 0.001;
     if (this.T.bomb) {                                                  // under Rage a bomb goblin rushes the other enemies
       if (dist < BOMB.trigger) { this.blow(); return null; }
@@ -749,8 +762,9 @@ class Enemy {
         noise.emit(this.x, this.z, CLASH_R, this);
         if (dist <= this.reach + 0.5) {                                 // the blow lands on the other enemy
           const zone = this.zone, dmg = TUNE.enemyDmg * this.dmgMul * ZONE_MUL[zone] * (t.resist[zone] || 1);
-          if (t.hurt(dmg, this)) t.cause = 'was beaten down by its own side';
-          else if (t.rageT <= 0 && t.enrage(this.rageT, this.rageFrom.x, this.rageFrom.z)) t.rageTarget = this;   // and it hits back
+          if (t.hurt(dmg, this)) t.cause = this.isAlly ? 'was cut down by the ally' : t.isAlly ? 'killed the ally' : 'was beaten down by its own side';
+          else if (this.isAlly) { if (!t.boss) t.foe = this; }                                                       // the ally's target fights back
+          else if (this.rageT > 0 && !t.isAlly && t.rageT <= 0 && t.enrage(this.rageT, this.rageFrom.x, this.rageFrom.z)) t.rageTarget = this;   // and it hits back
         }
       }
     } else {
@@ -762,6 +776,7 @@ class Enemy {
 
   // Returns true if the enemy died from this hit.
   hurt(dmg, player) {
+    if (this.foe && player && !player.T) this.foe = null;                      // hit by the player (or a blast): back to fighting the player
     this.hp -= dmg; this.hitT = 0.14; this.sleepT = 0; if (!this.boss) { if (this.T.mimic && this.dormant) this.wake(false, player); this.dormant = false; }
     if (this.hp <= 0) { this.die(); return true; }
     if (!this.boss && !this.T.noStagger) { this.stun = 0.35; this.winding = false; }     // the boss and the bouncer shrug hits off (only a parry staggers them)
@@ -825,6 +840,11 @@ class Enemy {
     if (this.state !== 'alerted') this.shouted = false;
     if (this.stun > 0) { this.stun -= dt; this.winding = false; this.sync(dt); return null; }
 
+    if (this.foe) {                                                              // fighting the player's ally (set from js/quests.js on its think tick)
+      const fo = this.foe;
+      if (fo.dead || this.state !== 'alerted' || fo.floor !== this.floor || (this.seen && dist < 2.5 && dist < Math.hypot(fo.x - this.x, fo.z - this.z))) this.foe = null;   // the player stepping up closer than the ally takes its attention back
+      if (this.foe) return this.fightOther(this.foe, dt, noise);
+    }
     switch (this.state) {
       case 'unaware': {
         if (this.aware >= 0.35 && this.last) { this.set('suspicious'); break; }
@@ -971,3 +991,4 @@ class Enemy {
 }
 
 Enemy.all = [];   // the current floor's enemies (set by main.js), for rage targeting
+Enemy.ally = null;   // the player's live ally, if any (js/quests.js): Rage may pick it as a target

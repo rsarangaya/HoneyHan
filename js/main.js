@@ -519,6 +519,7 @@ Enemy.burst = e => {
     hitReaction(3); flash('The puffer bursts! Spores!');
   }
   for (const o of enemies) if (o !== e && !o.dead && Math.hypot(o.x - e.x, o.z - e.z) < 3) o.addStatus('slow', 4);
+  const al = Enemy.ally; if (al && !al.dead && al.floor === floor && Math.hypot(al.x - e.x, al.z - e.z) < 3) al.addStatus('slow', 4);
 };
 
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
@@ -528,6 +529,12 @@ function spawnEnemyShot(s) {
   const jitter = () => (gameRng() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
   const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff' }[s.kind]) };
   a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
+}
+// An enemy shot (arrow, hex, thorn, curse) that reached the player's ally first: arrows hurt by zone, the others apply their status.
+function allyShotHit(a, ev) {
+  const al = ev.e, k = a.kind;
+  if (k === 'thorn') al.addStatus('bleed', 4); else if (k === 'curse') al.addStatus('slow', 5); else if (k === 'hex') al.addStatus(gameRng() < 0.5 ? 'slow' : 'daze', 4);
+  else { al.cause = 'was shot'; al.hurt(TUNE.enemyDmg * a.from.dmgMul * ZONE_MUL[ev.zone] * (al.resist[ev.zone] || 1), a.from); }
 }
 function enemyShotHit(a) {
   if (a.kind === 'thorn' || a.kind === 'curse') {                                    // thorns make you bleed, a curse slows you; no block stops them
@@ -583,10 +590,11 @@ function updateArrows(dt) {
       continue;
     }
     if (a.owner === 'enemy') {
-      const ev = stepArrow(a, dt, floor, enemies, player);
+      const ev = stepArrow(a, dt, floor, enemies, player, Enemy.ally && Enemy.ally.floor === floor ? Enemy.ally : null);
       a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
       if (a.kind === 'arrow') a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
       if (ev && ev.type === 'player') enemyShotHit(a);
+      else if (ev && ev.type === 'ally') allyShotHit(a, ev);
       if (ev || a.life <= 0) { group.remove(a.mesh); arrows.splice(i, 1); }
       continue;
     }
@@ -680,6 +688,11 @@ function explodeAt(x, z, src) {
     e.hurt(blastDmg(d), { x, z });
     if (e.T.bomb && !e.dead && e.fuse > BOMB.chain) e.fuse = BOMB.chain;          // a lit bomb goblin in the blast goes off right after
   }
+  const al = Enemy.ally;                                                          // and the player's ally
+  if (al && !al.dead && al.floor === floor) {
+    const d = Math.hypot(al.x - x, al.z - z);
+    if (d < BOMB.radius && hasLOS(floor, x, z, al.x, al.z)) { al.cause = 'was blown up'; al.hurt(blastDmg(d), { x, z }); }
+  }
   if (dp < 20) discover('enemy:bomber', 'Bomb Goblin');
 }
 Enemy.explode = e => { if (e.mesh.parent) e.mesh.parent.remove(e.mesh); explodeAt(e.x, e.z, e); };
@@ -717,6 +730,8 @@ function springTrap(kind, o) {
       if (e.dead || Math.hypot(e.x - o.x, e.z - o.z) >= TRAP.gasRadius || !hasLOS(floor, o.x, o.z, e.x, e.z)) continue;
       e.addStatus('daze', TRAP.gasDaze); e.addStatus('slow', TRAP.gasSlow);
     }
+    const al = Enemy.ally;
+    if (al && !al.dead && al.floor === floor && Math.hypot(al.x - o.x, al.z - o.z) < TRAP.gasRadius && hasLOS(floor, o.x, o.z, al.x, al.z)) { al.addStatus('daze', TRAP.gasDaze); al.addStatus('slow', TRAP.gasSlow); }
     flash('A cloud of gas bursts from the chest!'); addLog('Trap gas: daze and slow.', '#9bd86a');
   } else {
     loud(TRAP.alarmNoise); flash('An alarm bell clangs!'); addLog(`An alarm bell rings (${TRAP.alarmNoise} m).`, '#d8a030');
@@ -1154,6 +1169,7 @@ function floorBanner(n) {
 
 // A brand new floor n (also what the dev keys and the tests use): any old copy of it is thrown away.
 function startFloor(n) {
+  allyReset();                                          // a fresh floor 1 (or a dev jump) starts without an ally
   if (floorCache[n]) { disposeGroup(floorCache[n].group); delete floorCache[n]; }
   generateAndEnter(n, n > 1 ? 'down' : null);
   const locked = floor.doors.map(d => d.room).join(', ');
@@ -1187,6 +1203,7 @@ function generateAndEnter(n, arrive) {
 // Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
 // dir: 'down' (you go to floor n and arrive by its stairs up) or 'up' (you arrive by its stairs down).
 function changeFloor(n, dir) {
+  allyDepart();                                       // a following ally within a few metres comes too (js/quests.js)
   saveFloor();
   search = null; cb.draw = null; cb.eat = null;
   const c = floorCache[n];
@@ -1200,6 +1217,7 @@ function changeFloor(n, dir) {
     if (floor.boss) flash('The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.');
     else flash(`Floor ${n}. Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
   }
+  allyArrive();
   hunger.fight = 0;
 }
 
@@ -1400,6 +1418,7 @@ function frame(now) {
     pulse = 0;
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
+    if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
     updateBombs(dt); updateGas(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }

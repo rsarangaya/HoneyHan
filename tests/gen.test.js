@@ -234,8 +234,8 @@ for (let s = 1; s <= N; s++) {
   if (!types.miniboss || !types.shrine) fail('roll', 'both encounter types should be rolled');
   // Five types, weight 1 each: each should be about a fifth of the encounters rolled.
   const totalTypes = Object.values(types).reduce((a, b) => a + b, 0);
-  for (const t of ['miniboss', 'shrine', 'wanted', 'thief', 'prisoner']) { const sh = (types[t] || 0) / totalTypes; if (Math.abs(sh - 0.2) > 0.02) fail('roll', `${t} is ${(sh * 100).toFixed(1)}% of encounters, want about 20%`); }
-  if (Object.keys(types).length !== 5) fail('roll', `unexpected encounter types: ${Object.keys(types).join(', ')}`);
+  for (const t of ['miniboss', 'shrine', 'wanted', 'thief', 'prisoner', 'ally']) { const sh = (types[t] || 0) / totalTypes; if (sh < 0.13 || sh > 0.2) fail('roll', `${t} is ${(sh * 100).toFixed(1)}% of encounters, want about 1 in 6 (a little less for the once-a-run prisoner and ally)`); }
+  if (Object.keys(types).length !== 6) fail('roll', `unexpected encounter types: ${Object.keys(types).join(', ')}`);
   console.log(`encounter types: ${Object.entries(types).map(([t, c]) => t + ' ' + (100 * c / totalTypes).toFixed(1) + '%').join(', ')}`);
 
   // Lair layout: 300 seeds, floors 2 to 4, mini-boss forced. The door is reachable from the start with no key; the lair interior is
@@ -628,6 +628,125 @@ for (let s = 1; s <= N; s++) {
   const l2 = L({ quest: { ...q0, freed: true } }), lc = L({ quest: { ...q0, keyOn: 'chest' } });
   vm.runInContext('prisonerRun.paid = true', ctx); const l3 = L({ quest: { ...q0, freed: true } });
   if (!/a guard carries it/.test(l0) || !/You have the cell key/.test(l1) || !/Meet them in the safe room/.test(l2) || !/it is in a chest/.test(lc) || l3 !== '') fail('prisoner line', JSON.stringify([l0, l1, l2, lc, l3]));
+}
+
+// Ally recruit (js/quests.js 'ally', gen.js opts.quest 'ally'): one ally a run, the layout over many seeds (floors 2 to 4: an inner tile of an
+// ordinary room, free, reachable), the ask (potion or gold, from the seed) and its price, the thank-you reward and the lines (stub inventory).
+// Plain Node: the body is a stub Enemy (the real one needs the page).
+{
+  const AX = vm.runInContext('({ rollQuests, makeRng, generateFloor, QUESTS, QUEST_TYPES, allyTalk, allyReward, allyLine, allyPrompt, allyPotion })', ctx);
+  const ally = vm.runInContext('QUEST_TYPES.ally', ctx), P = AX.QUESTS.ally, abad = [];
+  // One ally a run and never on a floor with a prisoner (one type a floor): over 20000 seeds, and some runs do have an ally (so not vacuous).
+  let twoAllies = 0, allyPlans = 0, withPrisoner = 0;
+  for (let s = 1; s <= 20000; s++) {
+    const seed = (s * 2654435761 + 555) >>> 0, shop = AX.makeRng((seed ^ 0x51ed270b) >>> 0).int(1, 4), plan = AX.rollQuests(seed, 5, shop);
+    const types = Object.values(plan), n = types.filter(t => t === 'ally').length;
+    if (n) allyPlans++;
+    if (n > 1) twoAllies++;
+    if (types.length !== new Set(types).size) withPrisoner++;   // a floor holds one encounter type, so no two floors repeat... (counted only as a sanity check)
+    if (s <= 2000 && JSON.stringify(AX.rollQuests(seed, 5, shop)) !== JSON.stringify(plan)) abad.push('roll changed between two calls');
+  }
+  if (twoAllies) fail('ally per run', `${twoAllies} of 20000 runs have two ally floors`);
+  if (allyPlans < 500) fail('ally per run', `only ${allyPlans} runs have an ally (check is vacuous)`);
+  console.log(`ally plans: ${allyPlans} of 20000 runs, ${twoAllies} with two allies`);
+
+  // Layout: over 300 seeds, floors 2 to 4. The recruit stands on an inner tile of an ordinary room (not the start room, not locked,
+  // not the shop or the lair), on free floor (no wall, door, furniture, stairs or start tile), and that tile is reachable.
+  const at = (f, x, y) => y * f.w + x;
+  let lays = 0, reach = 0;
+  for (let s = 1; s <= 300; s++) for (const n of [2, 3, 4]) {
+    const seed = (s * 2654435761 + 101) >>> 0;
+    const f = AX.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'ally', themeName: THEME_NAMES[(s + n) % THEME_NAMES.length] });
+    const q = f.quest, where = `ally seed ${seed} floor ${n}`;
+    if (!q || q.type !== 'ally') { abad.push(`${where}: no ally quest`); continue; }
+    lays++;
+    const { x, y } = q.npc, i = at(f, x, y);
+    // an inner tile of an ordinary room (rooms may overlap, so one of the rooms that hold the tile must qualify)
+    const homeOK = f.rooms.some((r, k) => k > 0 && !r.locked && r.theme !== 'shop' && r.theme !== 'lair' && x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1);
+    if (!homeOK) abad.push(`${where}: recruit is not on an inner tile of an ordinary room`);
+    if (f.tiles[i] !== vm.runInContext('T_FLOOR', ctx) || f.blocked[i]) abad.push(`${where}: recruit on a wall, door or furniture`);
+    if ((x === f.stairs.x && y === f.stairs.y) || (x === f.start.x && y === f.start.y)) abad.push(`${where}: recruit on the stairs or the start`);
+    if (f.props.some(p => p.x === x && p.y === y)) abad.push(`${where}: recruit on a prop`);
+    if (f.rooms.some(r2 => r2.locked && x >= r2.x && x < r2.x + r2.w && y >= r2.y && y < r2.y + r2.h)) abad.push(`${where}: recruit in a locked room`);
+    const open = flood(f, true);
+    if (open[i]) reach++; else abad.push(`${where}: recruit unreachable`);
+  }
+  console.log(`ally layouts: ${lays} floors, ${reach} with the recruit reachable`);
+  if (lays < 800) fail('ally layout', `only ${lays} of 900 floors have an ally`);
+
+  // Seeded repeat: the same seed gives the same recruit spot, room and ask, twice.
+  { const a = AX.generateFloor(2049389901, 2, { armory: false, boss: false, shop: false, quest: 'ally', themeName: THEME_NAMES[0] }), b = AX.generateFloor(2049389901, 2, { armory: false, boss: false, shop: false, quest: 'ally', themeName: THEME_NAMES[0] });
+    if (JSON.stringify([a.quest.npc, a.quest.room, a.quest.seed]) !== JSON.stringify([b.quest.npc, b.quest.room, b.quest.seed])) abad.push('seeded repeat: two runs of one seed differ'); }
+
+  // The ask (QUEST_TYPES.ally.build with a stub body): potion about half the time, gold otherwise, price goldBase + goldPerFloor x floor.
+  const bodyStub = function (spec) { this.x = (spec.x + 0.5) * 3; this.z = (spec.y + 0.5) * 3; this.yaw = 0; this.icon = { visible: true }; this.cone = { visible: true }; this.mesh = { parent: null }; this.gear = []; this.hp = 10; this.maxHp = 15; this.dead = false; this.deadT = 0; this.seed = spec.seed; this.sync = () => {}; };
+  ctx.Enemy = bodyStub; ctx.group = { add() {} }; ctx.propObjs = [];
+  let potions = 0, asks = 0;
+  for (let s = 1; s <= 600; s++) for (const n of [2, 4]) {
+    const seed = (s * 2246822519 + 77) >>> 0, f = AX.generateFloor(seed, n, { armory: false, boss: false, shop: false, quest: 'ally', themeName: THEME_NAMES[s % THEME_NAMES.length] });
+    f.solids = []; ctx.floorNum = n; ctx.floor = f; ctx.propObjs.length = 0;
+    ally.build(f, { enemies: [], propObjs: ctx.propObjs, decorObjs: [] });
+    const A = vm.runInContext('allyRun', ctx); asks++;
+    if (A.ask === 'potion') potions++; else if (A.ask !== 'gold') abad.push(`ask ${A.ask}`);
+    if (A.price !== P.goldBase + P.goldPerFloor * n) abad.push(`price ${A.price} on floor ${n}`);
+    if (A.recruited || A.mode !== 'idle') abad.push('a fresh ally starts recruited');
+    if (f.solids.length !== 1 || f.solids[0].x !== A.e.x) abad.push('the recruit body is not the one solid it should be');
+  }
+  const potShare = potions / asks;
+  console.log(`ally asks: potion ${(100 * potShare).toFixed(1)}% of ${asks} recruits, gold the rest`);
+  if (Math.abs(potShare - 0.5) > 0.06) fail('ally ask', `potion share ${(100 * potShare).toFixed(1)}%, want about 50%`);
+
+  // The thank-you (allyReward) with a stub inventory: gear Rare+ about 60% of the time, else gold 50 to 100 + 20 a floor; a full pack keeps the
+  // reward for the next talk; paid once (the ally is gone after).
+  const stub = { got: [], msgs: [], full: false, gold: 0 };
+  ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; }, has: () => false, pack: [], gold: 0 };
+  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {}; ctx.addLog = () => {};
+  const mk = (fl, mode = 'safe') => ({ n: fl, f: null, reward: null, o: { p: {} }, e: { mesh: { parent: null }, dead: false }, mode, name: 'wounded adventurer', recruited: true, ask: 'gold', price: 70 });
+  const rbad = [], R = { gear: 0, gold: 0 }, tierSum = { 2: 0, 5: 0 }, tierN = { 2: 0, 5: 0 }, NR = 2000;
+  for (const fl of [2, 5]) for (let i = 0; i < NR; i++) {
+    ctx.runSeed = (i * 2654435761 + fl * 97) >>> 0; stub.got = []; ctx.propObjs = [];
+    const A = mk(fl); AX.allyReward(A);
+    const d = stub.got[0];
+    if (!d) { rbad.push('no reward'); continue; }
+    if (d.type === 'gold') { R.gold++; if (d.n < P.goldMin + P.rewardGoldPerFloor * fl || d.n > P.goldMax + P.rewardGoldPerFloor * fl) rbad.push(`gold ${d.n} on floor ${fl}`); }
+    else { R.gear++; if (!['weapon', 'armor', 'shield'].includes(d.type)) rbad.push(`gear kind ${d.type}`); if (d.tier < P.gearMinTier) rbad.push(`gear tier ${d.tier} below Rare`); tierSum[fl] += d.tier; tierN[fl]++; }
+    if (A.mode !== 'gone') rbad.push('the ally does not leave after the reward');
+  }
+  const gearShare = R.gear / (2 * NR);
+  console.log(`ally reward: gear ${(100 * gearShare).toFixed(1)}% (Rare+), gold the rest; mean gear tier floor 2 ${(tierSum[2] / tierN[2]).toFixed(2)}, floor 5 ${(tierSum[5] / tierN[5]).toFixed(2)}`);
+  if (Math.abs(gearShare - P.rewardGearShare) > 0.04) fail('ally reward', `gear ${(100 * gearShare).toFixed(1)}%, want about ${100 * P.rewardGearShare}%`);
+  if (rbad.length) fail('ally reward', `${rbad.length} bad rewards, e.g. ${rbad[0]}`);
+  // Full pack: the reward waits (no gift taken, the ally stays); the next talk gives the same reward once, then the ally is gone.
+  ctx.runSeed = 4242;
+  const full = mk(3); stub.full = true; stub.got = []; stub.msgs = []; AX.allyReward(full);
+  const heldMsg = stub.msgs[stub.msgs.length - 1] || '', stayed = full.mode === 'safe' && full.reward !== null;
+  stub.full = false; const r1 = full.reward;
+  AX.allyTalk(full); AX.allyTalk(full);
+  if (!/Make room/.test(heldMsg) || !stayed || stub.got.length !== 1 || full.mode !== 'gone' || JSON.stringify(stub.got[0]) !== JSON.stringify(r1)) fail('ally full pack', `message "${heldMsg}", stayed ${stayed}, rewards ${stub.got.length}, mode ${full.mode}`);
+  stub.got = []; AX.allyTalk(full); if (stub.got.length) fail('ally paid once', 'a talk after the ally left gave a reward');
+
+  // Lines and prompts (the run-level line on its floor, the Hold E prompt). Stub inventory: no potion, gold 0.
+  const FF = {}, GG = {};                                                                   // two floors: the line shows only on the ally's own
+  const setA = A => { ctx.__A = A; vm.runInContext('allyRun = __A', ctx); return A; };
+  const pa = { name: 'wounded adventurer', recruited: false, mode: 'idle', ask: 'potion', price: 70, f: FF, n: 2, e: { hp: 10, maxHp: 15, dead: false } };
+  ctx.floorNum = 2;
+  setA({ ...pa }); const onF = AX.allyLine(FF), offF = AX.allyLine(GG);
+  if (!/Hold E on it: heal it with a Healing Potion/.test(onF) || offF !== '') fail('ally line', `on floor "${onF}", elsewhere "${offF}"`);
+  const gA = { ...pa, ask: 'gold' };
+  ctx.inv.pack = []; ctx.inv.gold = 10;
+  const pr1 = AX.allyPrompt(gA), pr2 = AX.allyPrompt({ ...pa }); ctx.inv.gold = 100; const pr3 = AX.allyPrompt(gA);
+  if (pr1 !== 'Hire the wounded adventurer for 70 gold (you cannot afford it)' || pr3 !== 'Hire the wounded adventurer for 70 gold' || !/you have none/.test(pr2)) fail('ally prompt', JSON.stringify([pr1, pr2, pr3]));
+  const rec = { ...pa, recruited: true };
+  setA({ ...rec, mode: 'gone' }); const gone = AX.allyLine(FF);
+  setA({ ...rec, mode: 'follow', e: { hp: 3, maxHp: 15, dead: true } }); const dead = AX.allyLine(FF);
+  setA({ ...rec, mode: 'safe' }); const safeL = AX.allyLine(FF);
+  setA({ ...rec, mode: 'follow' }); const followL = AX.allyLine(FF);
+  setA({ ...rec, mode: 'wait' }); const waitL = AX.allyLine(FF);
+  if (gone !== '' || dead !== '' || !/rests in the safe room/.test(safeL) || !/follows you/.test(followL) || !/waits here/.test(waitL)) fail('ally line', JSON.stringify([gone, dead, safeL, followL, waitL]));
+  setA(null);
+  for (const m of abad.slice(0, 6)) fail('ally', m);
+  if (abad.length) fail('ally', `${abad.length} ally checks failed in total`);
+  console.log(`ally checks: ${lays} layouts, ${abad.length} issues`);
 }
 
 const avgOpen = mapStats.map(m => m.open / m.n), corrShare = mapStats.map(m => m.corr / m.open);

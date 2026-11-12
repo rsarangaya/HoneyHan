@@ -1,11 +1,11 @@
 // Encounters (js/quests.js): the locked mini-boss room and the shrine bargain, in the running game. Run on its own:
 // node tests/game.quests.test.js. The layouts and the roll are checked in plain Node by tests/gen.test.js.
 // Seeds (found with generateFloor and rollQuests, themes included): seed 38 has the mini-boss on floor 2 (the lair key is on a
-// reachable chest); seed 23 has the shrine on floor 4 and no encounter on floor 1. The wanted guard (defector, target, reward) is
-// checked on seed 10 floor 2, and the sack thief (wander, flee, cornered, escape, kills, sack) on seed 401 floor 2 (see the end of the run).
+// reachable chest); seed 48 has the shrine on floor 4 and no encounter on floor 1. The wanted guard (defector, target, reward) is
+// checked on seed 3 floor 2, and the sack thief (wander, flee, cornered, escape, kills, sack) on seed 10 floor 2 (see the end of the run).
 // The flee checks use free tiles and the thief's own collider; one check there is a known defect and fails on purpose (see its comment).
 const { run } = require('./lib');
-const MINI_SEED = 38, MINI_FLOOR = 2, SHRINE_SEED = 23;   // seed 38: mini-boss on floor 2; seed 23: shrine on floor 4
+const MINI_SEED = 38, MINI_FLOOR = 2, SHRINE_SEED = 48;   // seed 38: mini-boss on floor 2; seed 48: shrine on floor 4
 
 // Page-side helpers: hold or release E, face a prop (1.1 m off), open and close the inventory with Tab / Escape.
 const QH = () => {
@@ -82,7 +82,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   await plain.evaluate(() => Qs.press('Tab'));
   check('a floor with no encounter shows no "Optional:" line', none.line === '' && none.txt !== null && !/Optional:/.test(none.txt), none.line);
 
-  // ---- The shrine bargain (seed 23, floor 4) ----
+  // ---- The shrine bargain (seed 48, floor 4) ----
   const shrineOn = () => plain.evaluate(() => { game.startFloor(4); return !!(floor.quest && floor.quest.type === 'shrine' && Qs.altar()); });
   check('the shrine floor has an altar where the quest says', await shrineOn());
   const cant = await plain.evaluate(async () => {
@@ -159,10 +159,10 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   const potRes = await plain.evaluate(id => ({ stackGone: !game.inv.pack.some(i => i.id === id), packNow: game.inv.pack.length, gold: game.inv.gold, arrows: game.inv.arrows, used: !!floor.quest.used }), potOut.stackId);
   check('potion price: the whole potion stack goes and the treasure is received', potRes.stackGone && (potRes.packNow > 0 || potRes.gold > potOut.gold || potRes.arrows > potOut.arrows) && potRes.used, JSON.stringify({ potRes, potOut }));
   await plain.close();
-  // ---- The wanted guard (seed 10: defector on floor 2; floor 4 is its shop floor) and the sack thief (seed 4: thief on floor 2) ----
+  // ---- The wanted guard (seed 3: defector on floor 2; floor 4 is its shop floor) and the sack thief (seed 10: thief on floor 2) ----
   // Each case starts a fresh floor from the same run seed. A fight runs inside one evaluate call (no frames in between), so the
   // swings, shots and stabs land exactly where the test put the enemy. Frames still run between calls (Hold E, escapes, corpses).
-  const WANT_SEED = 10, THIEF_SEED = 401;
+  const WANT_SEED = 3, THIEF_SEED = 10;
   const WH = () => {
     const inR = (r, p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
     const dist = (e, P) => Math.hypot(e.x - P.x, e.z - P.z);
@@ -241,7 +241,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
     await page.evaluate(() => Qs.key(false));
   };
 
-  // ---- the wanted guard, seed 10 ----
+  // ---- the wanted guard, seed 3 ----
   const WG = await open(WANT_SEED);
   await WG.evaluate(QH); await WG.evaluate(WH);
   const wa = await WG.evaluate(() => {
@@ -357,7 +357,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   check('a seeded wanted guard repeats: the same defector, target and route on a second run', sigA === sigB, sigA.slice(0, 120));
   await WG2.close(); await WG.close();
 
-  // ---- the sack thief, seed 4 (floor 2) ----
+  // ---- the sack thief, seed 10 (floor 2) ----
   const TH = await open(THIEF_SEED);
   await TH.evaluate(QH); await TH.evaluate(WH);
   // Wandering: a thief that has not noticed you walks between its two rooms and never sees you from out of sight.
@@ -479,7 +479,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   const tA = await tsig(TH), tB = await tsig(TH2);
   check('a seeded sack thief repeats: the same route and start on a second run', tA === tB, tA.slice(0, 100));
   await TH2.close(); await TH.close();
-  // ---- The prisoner rescue (seeds 113 and 4 on floor 2, 13 on floor 3: the cell fits and the key sits on a guard; found with generateFloor) ----
+  // ---- The prisoner rescue (seeds 56 and 110 on floor 2, 52 on floor 3: the cell fits and the key sits on a guard; found with generateFloor) ----
   // The cell door and body, the untargetable captive, the key from a melee kill and a sneak kill, the door, the walk to the stairs (fixed
   // steps, every step checked against solid props), the frame hook (no work when nothing walks), the safe-room reward: paid once, kept across floors.
   {
@@ -515,12 +515,12 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
         },
       };
     };
-    const SEEDS = [[113, 2], [4, 2], [13, 3]];
+    const SEEDS = [[56, 2], [110, 2], [52, 3]];
     const walks = [];
     for (const [seed, n] of SEEDS) {
       const pg = await open(seed);
       await pg.evaluate(QH); await pg.evaluate(PH);
-      if (seed === 113) await pg.evaluate(() => { window.psCalls = 0; const real = prisonerStep; window.prisonerStep = dt => { psCalls++; return real(dt); }; });
+      if (seed === 56) await pg.evaluate(() => { window.psCalls = 0; const real = prisonerStep; window.prisonerStep = dt => { psCalls++; return real(dt); }; });
       const info = await pg.evaluate(async n => {
         game.startFloor(n);
         const q = floor.quest, out = { type: q && q.type };
@@ -639,5 +639,280 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
       await pg.close();
     }
     for (const w of walks) console.log(`prisoner walk seed ${w.seed}: ${(w.steps / 60).toFixed(1)} s game time, ${w.ms.toFixed(4)} ms per step (budget: well under 0.1 ms a step)`);
+  }
+  // ---- The ally recruit (run seed 2563011894 floor 2: a Healing Potion ask; run seed 4015597624 floor 2: a gold ask of 70; found with rollQuests, the run theme and generateFloor) ----
+  // Page helpers: a stub noise sink, real enemies placed by hand, and a fixed-step runner (player walk, enemy updates, allyStep) that runs no frames.
+  {
+    const AH = () => {
+      const pl = () => game.player;
+      window.AL = {
+        noise: { n: 0, r: [], events: [], shoot() {}, steal() {}, emit(x, z, r) { this.n++; this.r.push(r); } },
+        clearEnemies() { for (const e of enemies) if (e.mesh.parent) e.mesh.parent.remove(e.mesh); enemies.length = 0; },
+        mk(x0, z0, yaw, type = 'goblin') {
+          const sp = AL.spot(x0, z0), x = sp.x, z = sp.z;                             // a free spot near the one asked for
+          const e = new Enemy({ x: Math.floor(x / TILE), y: Math.floor(z / TILE), route: [{ x: 0, y: 0 }, { x: 0, y: 0 }], seed: 777, type }, floor);
+          e.x = x; e.z = z; e.yaw = yaw; e.wait = 1e9; e.mesh.visible = true; scene.add(e.mesh); enemies.push(e); e.sync(0); return e;
+        },
+        spot(x, z) { for (const d of [0, 0.5, 1, 1.5, 2, 2.5]) for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, xx = x + Math.sin(a) * d, zz = z + Math.cos(a) * d; if (!pl().blocked(floor, xx, zz)) return { x: xx, z: zz }; } return { x, z }; },
+        ring(x, z, d) { for (let k = 0; k < 32; k++) { const a = k * Math.PI / 16, xx = x + Math.sin(a) * d, zz = z + Math.cos(a) * d; if (!pl().blocked(floor, xx, zz)) return { x: xx, z: zz }; } return { x, z }; },
+        place(x, z) { const s = AL.spot(x, z), p = pl(); p.x = s.x; p.z = s.z; p.vx = p.vz = 0; return s; },
+        putAlly(x0, z0) { const e = allyRun.e, sp = AL.spot(x0, z0), x = sp.x, z = sp.z; e.x = x; e.z = z; e.yaw = 0; allyRun.ptile = -1; allyRun.walk = false; allyRun.foeE = null; allyRun.fightT = 0; allyRun.think = 0; e.sync(0); return e; },
+        dist() { const e = allyRun.e; return Math.hypot(e.x - pl().x, e.z - pl().z); },
+        // sec seconds of fixed 1/60 s steps: the player walks on its keys (walk), the enemies update (enemies), then the ally. Returns the largest ally-player gap.
+        steps(sec, o = {}) {
+          const n = Math.round(sec * 60), dt = 1 / 60; let maxD = 0;
+          for (let i = 0; i < n; i++) {
+            if (o.walk) pl().update(dt, floor);
+            if (o.enemies) for (const c of enemies.slice()) c.update(dt, pl(), AL.noise);
+            allyStep(dt, AL.noise);
+            maxD = Math.max(maxD, AL.dist());
+          }
+          return maxD;
+        },
+        longest() { let best = 0, yaw = 0; for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8; let d = 0; while (d < 10 && !pl().blocked(floor, pl().x + Math.sin(a) * (d + 0.5), pl().z + Math.cos(a) * (d + 0.5))) d += 0.5; if (d > best) { best = d; yaw = a; } } return yaw; },
+        walk(on, yaw = 0, crouch = false) { pl().yaw = yaw; pl().keys = { ...(on ? { [KEYS.forward]: true } : {}), ...(crouch ? { [KEYS.crouch]: true } : {}) }; },
+        async holdE(o, cond, ms = 15000) { Qs.face(o); Qs.key(true); const ok = await T.until(cond, ms); Qs.key(false); return ok; },
+        potions: () => inv.pack.filter(i => i.type === 'potion' && i.kind === 'heal').reduce((a, i) => a + i.n, 0),
+        // a fresh ally for each check: full HP, follow, on the recruit's own tile (or the nearest free one), think timer reset; the player 9 m east, 12 m south
+        stage() { AL.clearEnemies(); const A = allyRun, q = floor.quest.npc; A.mode = 'follow'; A.e.hp = A.e.maxHp; AL.putAlly((q.x + 0.5) * TILE, (q.y + 0.5) * TILE); AL.place(A.e.x + 9, A.e.z - 12); return A; },
+        // a free spot 3 to 7 m from the ally with a clear line to it, and a yaw that faces the ally (the cone test in allyThink)
+        watch(A) { for (const r of [4, 5, 6, 3, 7]) for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, x = A.e.x + Math.sin(a) * r, z = A.e.z + Math.cos(a) * r; if (pl().blocked(floor, x, z) || !hasLOS(floor, A.e.x, A.e.z, x, z)) continue; return { x, z, yaw: Math.atan2(x - A.e.x, z - A.e.z) }; } return { x: A.e.x, z: A.e.z - 4, yaw: Math.PI }; },
+        msg: () => document.getElementById('msg').textContent,
+      };
+    };
+    const pg = await open(2563011894);
+    await pg.evaluate(QH); await pg.evaluate(AH);
+    const first = await pg.evaluate(() => { game.startFloor(2); const A = allyRun; return [A.ask, A.price, A.name, A.e.x, A.e.z]; });
+
+    // 1. Before the recruit: a neutral body, not an enemy, not a target of a swing, not Rage's pick; the prompt names the ask.
+    const pre = await pg.evaluate(() => {
+      const A = allyRun, out = { has: !!A };
+      if (!A) return out;
+      out.ask = A.ask; out.inEnemies = enemies.includes(A.e); out.enemyAlly = Enemy.ally === A.e;
+      out.label = targetInfo(A.o).label; out.recruited = A.recruited;
+      const g = AL.mk(A.e.x - 3, A.e.z, Math.PI / 2);                             // a raging goblin 3 m off
+      g.enrage(5, A.e.x, A.e.z); g.update(1 / 60, game.player, AL.noise);
+      out.rageAtAlly = g.rageTarget === A.e;
+      game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 }); Qs.face(A.o); const hp0 = A.e.hp;
+      for (let i = 0; i < 40; i++) playerHit();
+      out.hpSame = A.e.hp === hp0;
+      AL.clearEnemies();
+      return out;
+    });
+    check('before the recruit the ally is a neutral body: not an enemy, prompts the ask, and Rage and swings never pick it',
+      pre.has && !pre.inEnemies && !pre.enemyAlly && !pre.recruited && pre.hpSame && !pre.rageAtAlly && /Recruit the .*Healing Potion/.test(pre.label) && pre.ask === 'potion', JSON.stringify(pre));
+
+    // 2. The Healing Potion ask: refused with none (nothing taken), then accepted with one (the potion is used up, the ally follows).
+    const refused = await pg.evaluate(async () => {
+      inv.pack = []; const ok = await AL.holdE(allyRun.o, () => /you have none/.test(AL.msg()) || allyRun.recruited, 8000);
+      return { ok, recruited: allyRun.recruited, msg: AL.msg() };
+    });
+    check('a Healing Potion ask with no potion is refused and the ally stays unrecruited', refused.ok && !refused.recruited && /you have none/.test(refused.msg), JSON.stringify(refused));
+    const took = await pg.evaluate(async () => {
+      inv.pack.push(makeItem({ type: 'potion', kind: 'heal', n: 1 })); const before = AL.potions();
+      const ok = await AL.holdE(allyRun.o, () => allyRun.recruited, 15000);
+      return { ok, before, after: AL.potions(), mode: allyRun.mode, enemyAlly: Enemy.ally === allyRun.e, line: questLine(floor) };
+    });
+    check('a Healing Potion recruits the ally: the potion is used up, it follows, and the line says so', took.ok && took.before === 1 && took.after === 0 && took.mode === 'follow' && took.enemyAlly && /follows you/.test(took.line), JSON.stringify(took));
+
+    // 3. Following: 2.5 to 3.8 m behind once it settles, closes in from 6 m, walks alongside (under 8 m), makes a 4 m walk noise only while walking.
+    const follow = await pg.evaluate(() => {
+      const out = {}; const P = game.player, A = allyRun;
+      const far = AL.ring(P.x, P.z, 6); AL.putAlly(far.x, far.z); out.farStart = AL.dist();
+      AL.steps(6); out.settled = AL.dist();
+      AL.noise.n = 0; AL.noise.r = [];
+      const dir = AL.longest(); AL.walk(true, dir); out.walkMax = AL.steps(6, { walk: true }); AL.walk(false);
+      out.walkNoise = AL.noise.n; out.noiseR = [...new Set(AL.noise.r)]; out.walkedFar = out.walkMax > 3.8;
+      AL.noise.n = 0; AL.steps(5); out.stillNoise = AL.noise.n; out.stillDist = AL.dist();
+      A.mode = 'wait'; const x0 = A.e.x, z0 = A.e.z; AL.walk(true, dir); AL.steps(4, { walk: true }); AL.walk(false); A.mode = 'follow';
+      out.waitMove = Math.hypot(A.e.x - x0, A.e.z - z0);
+      AL.noise.n = 0; AL.walk(true, dir, true); AL.steps(4, { walk: true }); AL.walk(false); out.crouchNoise = AL.noise.n;
+      return out;
+    });
+    check('it follows 2.5 to 3.8 m behind: closes in from 6 m, settles in that band, and keeps within 8 m while you walk',
+      follow.farStart > 5.9 && follow.settled >= 2.4 && follow.settled <= 3.8 && follow.stillDist >= 2.4 && follow.stillDist <= 3.8 && follow.walkMax < 8, JSON.stringify(follow));
+    check('it makes a walking noise of 4 m while it walks; none standing still, waiting or sneaking',
+      follow.walkNoise >= 1 && follow.noiseR.length === 1 && follow.noiseR[0] === 4 && follow.stillNoise === 0 && follow.waitMove === 0 && follow.crouchNoise === 0, JSON.stringify(follow));
+
+    // 4. Wait / Follow: Hold E on it toggles, and the message says which.
+    const toggle = await pg.evaluate(async () => {
+      const a = await AL.holdE(allyRun.o, () => allyRun.mode === 'wait', 15000); const m1 = allyRun.mode, msg1 = AL.msg();
+      const b = await AL.holdE(allyRun.o, () => allyRun.mode === 'follow', 15000);
+      return { a, m1, msg1, b, m2: allyRun.mode };
+    });
+    check('Hold E toggles the ally between wait and follow', toggle.a && toggle.m1 === 'wait' && /waits here/.test(toggle.msg1) && toggle.b && toggle.m2 === 'follow', JSON.stringify(toggle));
+
+    // 5. Fights. Guards are cleared for each check; the player stands 9 m east and 12 m south of the ally (inside the leash, outside every goblin's sight).
+    const unaware = await pg.evaluate(() => {
+      const A = AL.stage(), g = AL.mk(A.e.x, A.e.z - 3, Math.PI / 2);                // faces west, away from the ally
+      g.set('unaware'); g.wait = 1e9; g.aware = 0; const hp0 = g.hp;
+      AL.steps(5, { enemies: true });
+      return { state: g.state, hurt: g.hp < hp0, foeNull: A.foeE === null, dead: g.dead };
+    });
+    check('it ignores unaware guards that have not spotted it: no fight, no alert, no hit', unaware.state === 'unaware' && !unaware.hurt && unaware.foeNull && !unaware.dead, JSON.stringify(unaware));
+
+    const notice = await pg.evaluate(() => {
+      const A = AL.stage(), w = AL.watch(A), g = AL.mk(w.x, w.z, w.yaw);               // faces the ally with a clear line, the player out of sight
+      g.set('unaware'); g.wait = 1e9; g.aware = 0;
+      AL.steps(5, { enemies: true });
+      return { state: g.state, aware: g.aware, sawPlayer: g.seen };
+    });
+    check('a guard that sees the ally walk, with no fight, does not turn on it (it may only go suspicious)', notice.state !== 'alerted' && notice.aware < 1 && !notice.sawPlayer, JSON.stringify(notice));
+
+    const fight = await pg.evaluate(() => {
+      const A = AL.stage(), w = AL.watch(A), g = AL.mk(w.x, w.z, w.yaw);               // faces the ally with a clear line: it sees the fight, not the ally standing
+      g.set('unaware'); g.wait = 1e9; g.aware = 0;
+      const z = AL.mk(A.e.x, A.e.z + 3, Math.PI); z.set('alerted'); z.last = { x: A.e.x, z: A.e.z };
+      const hp0 = z.hp; let everAlerted = false;
+      for (let i = 0; i < 180; i++) { for (const c of enemies.slice()) c.update(1 / 60, game.player, AL.noise); allyStep(1 / 60, AL.noise); if (g.state === 'alerted') everAlerted = true; }
+      return { everAlerted, watcher: g.state, zHurt: z.hp < hp0 || z.dead, zHp: z.hp, hp0, allyHp: A.e.hp, foeE: A.foeE === z, zFoe: z.foe === A.e, d: Math.hypot(z.x - A.e.x, z.z - A.e.z), fightT: A.fightT, sawPlayer: g.seen };
+    });
+    check('a guard that sees the ally fight alerts on it, and the goblin the ally fights is hurt', fight.everAlerted && fight.zHurt && !fight.sawPlayer, JSON.stringify(fight));
+
+    const crouch = await pg.evaluate(() => {
+      const A = AL.stage(), out = {};
+      const x = AL.mk(A.e.x + 4, A.e.z, Math.PI / 2); x.set('alerted'); x.seen = true; x.last = { x: game.player.x, z: game.player.z };
+      AL.place(A.e.x + 8, A.e.z);                                                // you are as near the goblin as the ally is
+      game.player.crouching = true; A.think = 0; AL.steps(1 / 60); out.crouchFoe = A.foeE === x;
+      game.player.crouching = false; A.think = 0; AL.steps(1 / 60); out.standFoe = A.foeE === x; out.dist = Math.hypot(x.x - A.e.x, x.z - A.e.z); out.los = hasLOS(floor, A.e.x, A.e.z, x.x, x.z);
+      return out;
+    });
+    check('crouching makes it hold back from a guard that has seen you; standing up, it goes for that guard', !crouch.crouchFoe && crouch.standFoe, JSON.stringify(crouch));
+
+    const rageAlly = await pg.evaluate(() => {
+      const A = AL.stage(), g = AL.mk(A.e.x - 1.5, A.e.z, Math.PI / 2);          // a goblin in Rage, the ally the nearest other creature
+      g.enrage(5, A.e.x, A.e.z); g.update(1 / 60, game.player, AL.noise);
+      return { target: g.rageTarget === A.e };
+    });
+    check('a Rage-crazed goblin picks the recruited ally as its target', rageAlly.target, JSON.stringify(rageAlly));
+
+    const hitFoe = await pg.evaluate(() => {
+      const A = AL.stage();
+      const z = AL.mk(A.e.x, A.e.z + 3, Math.PI); z.set('alerted'); z.last = { x: A.e.x, z: A.e.z };
+      AL.steps(1.5, { enemies: true });
+      const hadFoe = z.foe === A.e;
+      game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+      Qs.face(z); const hp0 = z.hp;
+      for (let i = 0; i < 40 && !z.dead && z.hp === hp0; i++) playerHit();
+      return { hadFoe, foeAfterHit: z.foe, hit: z.hp < hp0 || z.dead };
+    });
+    check('a guard fighting the ally that you hit turns on you (it drops the ally as its foe)', hitFoe.hit && hitFoe.foeAfterHit === null, JSON.stringify(hitFoe));
+
+    const shots = await pg.evaluate(() => {
+      const A = AL.stage(), out = {}, hp0 = A.e.hp;
+      game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 }); Qs.face(A.o);
+      for (let i = 0; i < 40; i++) playerHit();
+      out.melee = A.e.hp === hp0;
+      game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'bow', tier: 0 }); game.inv.arrows = 20;
+      game.player.pitch = 0; fireArrow(1);
+      for (let k = 0; k < 900 && arrows.some(a => a.owner === 'player' && !a.stuck); k++) updateArrows(1 / 120);
+      out.bow = A.e.hp === hp0 && !A.e.dead;
+      game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+      return out;
+    });
+    check('your own melee and arrows never hit the ally', shots.melee && shots.bow, JSON.stringify(shots));
+
+    const blast = await pg.evaluate(() => {
+      const A = AL.stage(), out = {}; A.e.hp = A.e.maxHp;
+      explodeAt(A.e.x + 20, A.e.z, null); out.far = A.e.hp === A.e.maxHp;             // beyond the blast radius
+      explodeAt(A.e.x, A.e.z, null); out.near = A.e.hp < A.e.maxHp; out.nearHp = A.e.hp;
+      return out;
+    });
+    check('a bomb blast hurts the ally within its radius and line of sight, and not beyond', blast.far && blast.near, JSON.stringify(blast));
+
+    const gas = await pg.evaluate(() => {
+      const A = AL.stage(), out = {};
+      springTrap('gas', { x: A.e.x + 20, z: A.e.z }); out.far = !A.e.st.has('daze') && !A.e.st.has('slow');
+      springTrap('gas', { x: A.e.x, z: A.e.z }); out.near = A.e.st.has('daze') && A.e.st.has('slow');
+      return out;
+    });
+    check('trap gas dazes and slows the ally inside the cloud only', gas.far && gas.near, JSON.stringify(gas));
+
+    const arrow = await pg.evaluate(() => {
+      const A = AL.stage(), out = {}; A.e.hp = A.e.maxHp;
+      const shooter = AL.mk(A.e.x - 20, A.e.z, 0);                              // the enemy that loosed it
+      const nobody = { x: -999, z: -999, radius: 0.35 };
+      let a = null, ev = null; const pl = () => game.player;
+      for (let k = 0; k < 8 && !(ev && ev.type === 'ally'); k++) {          // the first direction with a clear line from 3 m out to the ally
+        const ang = k * Math.PI / 4, cx = Math.cos(ang), cz = Math.sin(ang), sx = A.e.x + cx * 3, sz = A.e.z + cz * 3;
+        let clear = true; for (let q = 1; q <= 6; q++) if (pl().blocked(floor, A.e.x + cx * q * 0.5, A.e.z + cz * q * 0.5)) clear = false;
+        if (!clear) continue;
+        a = { x: sx, y: 1, z: sz, vx: -cx * 12, vy: 0, vz: -cz * 12, gravity: 0, owner: 'enemy', kind: 'arrow', life: 4, stuck: false, px: sx, pz: sz, from: shooter };
+        ev = null; for (let i = 0; i < 80 && !ev; i++) ev = stepArrow(a, 0.02, floor, [], nobody, Enemy.ally);
+      }
+      if (ev && ev.type === 'ally') allyShotHit(a, ev);
+      out.type = ev && ev.type; out.hp = A.e.hp; out.maxHp = A.e.maxHp; out.tried = !!a;
+      return out;
+    });
+    check('an enemy arrow in the line of fire hits the ally', arrow.type === 'ally' && arrow.hp < arrow.maxHp, JSON.stringify(arrow));
+
+    // 6. Death by bleeding: the gear is left on a corpse, the line is gone, the ally is gone once the fall is over.
+    const death = await pg.evaluate(() => {
+      const A = AL.stage(), out = { gear: A.e.gear.length };
+      A.e.hp = 1; A.e.addStatus('bleed', 10);
+      AL.steps(4);
+      out.dead = A.e.dead; out.kind = A.o.p.kind; out.left = (A.o.p.left || []).length; out.line = questLine(floor);
+      out.enemyAlly = Enemy.ally; AL.steps(1.5); out.mode = A.mode;
+      return out;
+    });
+    check('bleeding to death leaves the gear on a corpse, ends the quest line and the ally is gone', death.dead && death.kind === 'corpse' && death.left === death.gear && death.line === '' && death.enemyAlly === null && death.mode === 'gone', JSON.stringify(death));
+    await pg.close();
+
+    // 7. Seeded repeat: a second load of the same seed gives the same ask, price, name and recruit spot.
+    const again = await open(2563011894);
+    await again.evaluate(QH); await again.evaluate(AH);
+    const second = await again.evaluate(() => { game.startFloor(2); const A = allyRun; return [A.ask, A.price, A.name, A.e.x, A.e.z]; });
+    check('a seeded run repeats: the same ask, price, name and recruit spot on a second load', JSON.stringify(first) === JSON.stringify(second), `${JSON.stringify(first)} vs ${JSON.stringify(second)}`);
+    await again.close();
+
+    // 8. Gold ask on seed 156: refused at 69 gold, taken at 70 (the price is 40 + 15 x floor).
+    const g = await open(4015597624);
+    await g.evaluate(QH); await g.evaluate(AH);
+    await g.evaluate(() => { game.startFloor(2); });
+    const gold = await g.evaluate(async () => {
+      const A = allyRun, out = { ask: A.ask, price: A.price };
+      inv.gold = 69; await AL.holdE(A.o, () => /You only have/.test(AL.msg()) || A.recruited, 8000);
+      out.refusedMsg = AL.msg(); out.refusedGold = inv.gold; out.refused = !A.recruited;
+      inv.gold = 70; const ok = await AL.holdE(A.o, () => A.recruited, 15000);
+      out.accepted = ok && A.recruited; out.goldLeft = inv.gold;
+      return out;
+    });
+    check('a gold ask is refused with too little gold and taken at its price', gold.ask === 'gold' && gold.price === 70 && gold.refused && gold.refusedGold === 69 && gold.accepted && gold.goldLeft === 0, JSON.stringify(gold));
+
+    // Stairs: a following ally within 6 m comes down with you; one 9 m back waits on its floor and is still there on the way back.
+    const stairs = await g.evaluate(() => {
+      const A = allyRun, P = game.player, out = {}, home = floorNum;
+      AL.putAlly(P.x + 2, P.z);
+      changeFloor(home + 1, 'down');
+      out.carried = A.f === floor && A.n === floorNum && A.mode === 'follow';
+      out.dist = AL.dist();
+      changeFloor(home, 'up');
+      out.backWithYou = A.f === floor && A.mode === 'follow';
+      const far = AL.ring(game.player.x, game.player.z, 9); A.e.x = far.x; A.e.z = far.z;
+      const fx = A.e.x, fz = A.e.z; changeFloor(home + 1, 'down');
+      out.leftBehind = A.mode === 'wait' && A.f !== floor;
+      out.lineAway = allyLine(floor);
+      changeFloor(home, 'up');
+      out.back = A.f === floor && A.mode === 'wait' && propObjs.includes(A.o) && Math.abs(A.e.x - fx) < 0.01 && Math.abs(A.e.z - fz) < 0.01;
+      return out;
+    });
+    check('a following ally within 6 m comes down the stairs; one 9 m back waits on its floor and is still there on the way back',
+      stairs.carried && stairs.dist < 6 && stairs.backWithYou && stairs.leftBehind && stairs.back, JSON.stringify(stairs));
+    await g.close();
+  }
+
+  // ---- No ally, no work: with no recruit on the floor, the frame loop never calls the ally step and the step itself returns at once ----
+  {
+    const f1 = await open(7);
+    await f1.evaluate(QH);
+    const idle = await f1.evaluate(async () => {
+      game.startFloor(1); let calls = 0; const real = window.allyStep; window.allyStep = (...a) => { calls++; return real(...a); };
+      await T.until(() => false, 300);                                           // about 20 frames of the live loop
+      const framesCalls = calls, emits = []; allyStep(1 / 60, { emit: (...a) => emits.push(a) });
+      window.allyStep = real;
+      return { calls: framesCalls, emits: emits.length, none: allyRun === null };
+    });
+    check('with no ally on the floor the frame loop never calls the ally step, and a direct call does nothing', idle.calls === 0 && idle.emits === 0 && idle.none, JSON.stringify(idle));
+    await f1.close();
   }
 });

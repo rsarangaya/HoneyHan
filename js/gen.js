@@ -88,7 +88,7 @@ function roomPoint(f, r, k) {
 }
 
 // opts.armory: this floor must contain the armory (retries with new layouts until it fits). opts.quest: an encounter
-// type from js/quests.js ('miniboss', 'shrine', 'wanted', 'thief' or 'prisoner'); the layout is retried until it fits, and floor.quest describes it.
+// type from js/quests.js ('miniboss', 'shrine', 'wanted', 'thief', 'prisoner' or 'ally'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
   if (opts.boss) return layoutBoss(seed, floorNum);
   let f;
@@ -655,6 +655,15 @@ function layoutFloor(seed, floorNum, opts) {
     if (homes.length >= 2) {
       const a = rng.pick(homes), b = rng.pick(homes.filter(r => r !== a));
       quest = { type: 'thief', route: [roomPoint(f, a, 2), roomPoint(f, b, 6)], seed: seedOf() };
+    }
+  } else if (opts.quest === 'ally') {
+    // the wounded recruit stands on an inner tile of an ordinary room (not the start room). It is a solid body made in quests.js, not a blocked tile, so the tile is free again once it joins you.
+    const homes = rng.shuffle(rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop' && r.theme !== 'lair' && r.w >= 4 && r.h >= 4));
+    for (const r of homes) {
+      const spots = [];
+      for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++)
+        if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y) && !props.some(p => p.x === x && p.y === y)) spots.push({ x, y });
+      if (spots.length) { quest = { type: 'ally', npc: rng.pick(spots), room: r.theme, seed: seedOf() }; break; }
     }
   } else if (opts.quest === 'prisoner') {
     // a small locked cell (placed last, like the lair) holding the captive, on the tile farthest from its door. One extra guard patrols

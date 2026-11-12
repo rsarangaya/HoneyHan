@@ -27,7 +27,7 @@ function zoneAtHeight(y, e) {
 // Advance an arrow { x, y, z, vx, vy, vz, owner } by dt seconds. Returns the first thing it hits:
 // { type: 'hit', e, zone } (an enemy), { type: 'player' } (an enemy's arrow), { type: 'wall' } or { type: 'ground' }, else null.
 // It also records the last free spot in a.px / a.pz so a stuck arrow can lie in front of the wall.
-function stepArrow(a, dt, floor, enemies, player) {
+function stepArrow(a, dt, floor, enemies, player, ally) {
   const steps = Math.max(1, Math.ceil(Math.hypot(a.vx, a.vy, a.vz) * dt / 0.2)), h = dt / steps;
   for (let i = 0; i < steps; i++) {
     a.px = a.x; a.pz = a.z;
@@ -47,6 +47,10 @@ function stepArrow(a, dt, floor, enemies, player) {
         if (s.r > 0.3 && a.y < 1.3 && (a.x - s.x) ** 2 + (a.z - s.z) ** 2 < s.r * s.r) return { type: 'wall' };
       }
     } else if (player) {
+      if (ally && !ally.dead && a.y > 0) {                                                    // the player's ally standing in the line of fire
+        const ax = a.x - ally.x, az = a.z - ally.z;
+        if (ax * ax + az * az <= (ally.r + 0.05) ** 2 && zoneAtHeight(a.y, ally)) return { type: 'ally', e: ally, zone: zoneAtHeight(a.y, ally) };
+      }
       const dx = a.x - player.x, dz = a.z - player.z;
       if (dx * dx + dz * dz < (player.radius + 0.05) ** 2 && a.y < player.eye + 0.2 && a.y > 0) return { type: 'player' };
     }

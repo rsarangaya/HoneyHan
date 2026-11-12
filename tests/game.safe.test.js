@@ -220,4 +220,110 @@ run('The safe room behind the boss', async ({ open, check }) => {
   });
   check('the safe-room mask is the room and its passage, and an arena tile north of the door row is not safe', row.found && row.maskOk && row.inSafe === false && row.hp === 50 && row.hunger < 60, JSON.stringify(row));
   await p2.close();
+  // ---- The ally on the boss floor and in the safe room (run seed 2563011894: a Healing Potion recruit on floor 2, carried down to floor 5) ----
+  // The boss attacks you while the ally fights it, and the boss never takes the ally as its foe. After the boss falls the ally rests in the
+  // safe room and Hold E (allyTalk) gives its thank-you once; it leaves. Fixed steps for the fight (no frames run inside the call).
+  {
+    let page = await open(2563011894);
+    await page.evaluate(SAFE_HELPERS);
+    await page.evaluate(() => {
+      window.AB = {
+        noise: { n: 0, events: [], shoot() {}, steal() {}, emit() { this.n++; } },
+        free(x, z, r = 2.5) { for (let d = 0; d <= r; d += 0.5) for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, xx = x + Math.sin(a) * d, zz = z + Math.cos(a) * d; if (!game.player.blocked(floor, xx, zz)) return { x: xx, z: zz }; } return { x, z }; },
+        // fixed 1/60 s steps: the enemies update (returns their attack zones), then the ally; counts the zones the boss strikes with
+        fight(sec, boss) {
+          const dt = 1 / 60, n = Math.round(sec * 60), out = { zones: 0, fociOnAlly: 0 };
+          for (let i = 0; i < n; i++) {
+            for (const c of enemies.slice()) { const z = c.update(dt, game.player, AB.noise); if (c === boss && z) out.zones++; }
+            allyStep(dt, AB.noise);
+            if (boss.foe) out.fociOnAlly++;
+          }
+          return out;
+        },
+      };
+    });
+    const down = await page.evaluate(() => {
+      game.startFloor(2); const A = allyRun, out = {};
+      inv.pack.push(makeItem({ type: 'potion', kind: 'heal', n: 1 }));
+      allyTalk(A); out.recruited = A.recruited;
+      for (const n of [3, 4, 5]) {                                             // down the stairs, the ally within 6 m each time
+        const s = AB.free(game.player.x, game.player.z, 1.5); A.e.x = s.x; A.e.z = s.z;
+        changeFloor(n, 'down');
+        out['floor' + n] = A.f === floor && A.mode === 'follow';
+      }
+      out.floorNum = floorNum;
+      return out;
+    });
+    check('the recruit comes down the stairs with you to the boss floor', down.recruited && down.floor3 && down.floor4 && down.floor5 && down.floorNum === 5, JSON.stringify(down));
+
+    const fight = await page.evaluate(() => {
+      S.clearGuards(); const A = allyRun, b = enemies.find(e => e.boss), P = game.player, out = {};
+      b.dormant = false; b.justWoke = true; b.set('alerted'); b.last = { x: P.x, z: P.z };
+      const s = AB.free(b.x - 2.5, b.z, 1); A.e.x = s.x; A.e.z = s.z; A.foeE = null; A.think = 0; A.fightT = 0;
+      const p = AB.free(b.x + 4.5, b.z, 1); P.x = p.x; P.z = p.z;
+      out.hp0 = A.e.hp; out.bossHp0 = b.hp;
+      const r = AB.fight(8, b);
+      out.zones = r.zones; out.foeOnAlly = r.fociOnAlly; out.allyHp = A.e.hp; out.bossHp = b.hp; out.bossTargetsPlayer = !b.foe;
+      out.ally = !!A.e && A.mode;
+      return out;
+    });
+    check('the boss strikes at the player while the ally fights it, and never takes the ally as its foe', fight.zones > 0 && fight.foeOnAlly === 0, JSON.stringify(fight));
+
+    await page.close();
+    // The same chain on a second load, with no boss fight: the ally rests in the safe room and gives its thank-you.
+    page = await open(2563011894);
+    await page.evaluate(SAFE_HELPERS);
+    await page.evaluate(() => {
+      window.AB = {
+        noise: { n: 0, events: [], shoot() {}, steal() {}, emit() { this.n++; } },
+        free(x, z, r = 2.5) { for (let d = 0; d <= r; d += 0.5) for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, xx = x + Math.sin(a) * d, zz = z + Math.cos(a) * d; if (!game.player.blocked(floor, xx, zz)) return { x: xx, z: zz }; } return { x, z }; },
+        // fixed 1/60 s steps: the enemies update (returns their attack zones), then the ally; counts the zones the boss strikes with
+        fight(sec, boss) {
+          const dt = 1 / 60, n = Math.round(sec * 60), out = { zones: 0, fociOnAlly: 0 };
+          for (let i = 0; i < n; i++) {
+            for (const c of enemies.slice()) { const z = c.update(dt, game.player, AB.noise); if (c === boss && z) out.zones++; }
+            allyStep(dt, AB.noise);
+            if (boss.foe) out.fociOnAlly++;
+          }
+          return out;
+        },
+      };
+    });
+    const down2 = await page.evaluate(() => {
+      game.startFloor(2); const A = allyRun, out = {};
+      inv.pack.push(makeItem({ type: 'potion', kind: 'heal', n: 1 }));
+      allyTalk(A); out.recruited = A.recruited;
+      for (const n of [3, 4, 5]) {                                             // down the stairs, the ally within 6 m each time
+        const s = AB.free(game.player.x, game.player.z, 1.5); A.e.x = s.x; A.e.z = s.z;
+        changeFloor(n, 'down');
+        out['floor' + n] = A.f === floor && A.mode === 'follow';
+      }
+      out.floorNum = floorNum;
+      return out;
+    });
+
+    const kill = await page.evaluate(async () => {
+      const A = allyRun, b = enemies.find(e => e.boss); const out = {};
+      b.foe = null; b.dormant = true; b.set('unaware'); b.hp = 1; dealHit(b, 'body', 20, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0);
+      out.open = await T.until(() => floor.safe && floor.safe.open, 4000);
+      const r = floor.safe.rect, P = game.player, f = floor, s = f.safe;
+      P.x = (s.gate.x + 0.5) * TILE; P.z = (s.gate.y + 0.5) * TILE;
+      S.walk(0, () => P.tileY <= r.y1, 3000);                                  // into the safe room
+      out.inRoomWait = await T.until(() => A.mode === 'safe', 5000);
+      out.mode = A.mode; out.label = targetInfo(A.o).label;
+      return out;
+    });
+    check('after the boss falls the ally rests in the safe room and its Hold E prompt offers the thank-you', kill.open && kill.inRoomWait && kill.mode === 'safe' && /thank-you/.test(kill.label), JSON.stringify(kill));
+
+    const reward = await page.evaluate(() => {
+      const A = allyRun, I = inv, before = { gold: I.gold, pack: I.pack.map(i => i.id) };
+      allyTalk(A); const got = { gold: I.gold - before.gold, newItems: I.pack.filter(i => !before.pack.includes(i.id)) };
+      const left = A.mode === 'gone' && !propObjs.includes(A.o) && !A.e.mesh.parent;
+      const g2 = I.gold, p2 = I.pack.length; allyTalk(A);
+      return { gold: got.gold, items: got.newItems.map(i => ({ type: i.type, tier: i.tier })), left, once: I.gold === g2 && I.pack.length === p2, line: allyLine(floor) };
+    });
+    const gearOk = reward.items.length === 1 && reward.items[0].tier >= 2, goldOk = reward.gold >= 150 && reward.gold <= 200;
+    check('Hold E on the ally in the safe room gives one thank-you (Rare+ gear, or 150 to 200 gold on floor 5) and the ally leaves', (gearOk || goldOk) && reward.left && reward.once && reward.line === '', JSON.stringify(reward));
+    await page.close();
+  }
 });
