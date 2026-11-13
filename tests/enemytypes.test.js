@@ -37,7 +37,7 @@ for (let s = 1; s <= N; s++) {
       if (!E.some(e => type(e) === 'goblin')) fail(w, 'no plain goblins left');
       if (E.filter(e => e.boss).length !== (fl === 5 ? 1 : 0)) fail(w, 'boss count');
       if (count(R.elite) !== (fl === 3 || fl === 4 ? 1 : 0)) fail(w, `${R.elite}: ${count(R.elite)}`);
-      if (R.signature) { const c = count(R.signature), want = fl === 1 ? 0 : fl >= 4 ? 2 : 1; if (c > want || c < want - (fl === 5 ? 2 : 1)) fail(w, `${R.signature} x${c}, want ${want}`); }
+      if (R.signature) { const c = count(R.signature), want = fl === 1 ? 0 : (fl >= 4 ? 2 : 1) + (fl < 5 && R.bonus ? R.bonus.thief || 0 : 0); if (c > want || c < want - (fl === 5 ? 2 : 1)) fail(w, `${R.signature} x${c}, want ${want}`); }
       else if (fl === 1 && false) fail(w, '');
       for (const pt of R.commons.filter(t => L.ENEMY_TYPES[t].pack)) { const c = count(pt); if (c % L.ENEMY_TYPES[pt].pack) fail(w, `${pt} count ${c} is not whole packs`); }
       for (const e of E.filter(e => e.type === 'wolf')) {

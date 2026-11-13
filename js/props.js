@@ -3,10 +3,10 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, bench: 0.55, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, moon: 0, shade: 0, fruit: 0, fireflies: 0, lantern: 0, keg: 0.7, longtable: 1.1, appletree: 0.55, hedge: 0.8, well: 0.85, glowcap: 0, bell: 0, ice: 0, brush: 0, fern: 0, glowmoss: 0, vines: 0, hammock: 0, log: 0.9, idol: 0.5, pew: 0.8, brokenaltar: 0.8, candlestand: 0.2, icicles: 0, snowdrift: 0, shaft: 0, winerack: 0.8, mushroom: 0.6, stalactites: 0, dark: 0, orrery: 0.7, clock: 0.45, scrolltable: 0.9, globe: 0.5, ladder: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, moon: 0, shade: 0, fruit: 0, fireflies: 0, lantern: 0, keg: 0.7, longtable: 1.1, appletree: 0.55, hedge: 0.8, well: 0.85, glowcap: 0, bell: 0, ice: 0, brush: 0, fern: 0, glowmoss: 0, vines: 0, hammock: 0, log: 0.9, idol: 0.5, pew: 0.8, brokenaltar: 0.8, candlestand: 0.2, icicles: 0, snowdrift: 0, shaft: 0, winerack: 0.8, mushroom: 0.6, stalactites: 0, dark: 0, orrery: 0.7, clock: 0.45, scrolltable: 0.9, globe: 0.5, ladder: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0, stall: 0.9, awning: 0, festoon: 0, crowd: 0, rpillar: 0.7, dais: 0, runes: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
-  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0, hammock: 1.2, shaft: 1.45, candlestand: 1.1, winerack: 1.2, clock: 1.2, ladder: 1.35 };
+  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0, hammock: 1.2, shaft: 1.45, candlestand: 1.1, winerack: 1.2, clock: 1.2, ladder: 1.35, awning: 1.4, stall: 0.55 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
   candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 },
@@ -15,6 +15,10 @@ const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: 
 const lam = (c, emissive) => new THREE.MeshLambertMaterial(emissive === undefined ? { color: c } : { color: c, emissive });
 const glow = c => new THREE.MeshBasicMaterial({ color: c });
 const FLAME_MAT = new THREE.MeshBasicMaterial({ color: 0xffb040 });
+// The Final Chamber's rune circle and its mist rings: additive vertex-coloured meshes (no textures, so the texture count stays flat), one shared material each whose opacity js/main.js pulses.
+const RUNE_MAT = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+const MIST_MAT = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+RUNE_MAT.userData.shared = true; MIST_MAT.userData.shared = true;
 function B(parent, w, h, d, mat, x, y, z, ry = 0, rz = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz; parent.add(m); return m;
@@ -244,6 +248,18 @@ const DOOR_BUILDERS = {
     for (let i = 0; i < 5; i++) SP(leaf, 0.11, 0.11, 0.08, glow(0xdce8ff), 0.4 + rg() * 2.3, 0.6 + rg() * 2.2, 0.1, 0);    // moon blooms
     B(leaf, 0.3, 0.4, 0.1, iron, 2.5, 1.3, 0.08); B(leaf, 0.06, 0.12, 0.08, lam(0x6a6a50), 2.5, 1.3, 0.14);                  // lock plate and keyhole
   },
+  // Shuttered stall (Goblin Market): a slatted rolling shutter between timber posts under a striped awning, a hasp and padlock (the Stall Key), a price tag and a lantern. Rolls up in steps (DOOR_ANIM.shutter).
+  shutter(inner, dr) {
+    const dh = WALL_H - 0.1, post = lam(0x4a3220), tin = [lam(0x9a9488), lam(0x8a8478)], cl = [lam(0xa83a2a), lam(0xe8dcc0)], n = 12, sh = (dh - 0.5) / n;
+    for (const x of [-1.45, 1.45]) B(inner, 0.2, dh, 0.4, post, x, dh / 2, 0);                                              // posts
+    B(inner, 3.0, 0.25, 0.4, post, 0, dh - 0.12, 0); B(inner, 3.0, 0.14, 0.4, post, 0, 0.07, 0);                            // head beam and sill
+    for (let i = 0; i < n; i++) B(inner, 2.7, sh * 0.86, 0.1, tin[i % 2], 0, 0.2 + sh * (i + 0.5), 0);                       // the slats
+    B(inner, 0.35, 0.5, 0.12, lam(0x2a2a30), 0.9, 1.1, 0.1); C(inner, 0.1, 0.1, 0.14, lam(0xc9a23a, 0x2a2008), 0.9, 0.78, 0.14, 10);   // hasp and padlock
+    B(inner, 0.5, 0.34, 0.04, lam(0x6a4a2a), -0.9, 1.5, 0.08); SP(inner, 0.16, 0.16, 0.05, glow(0xe8c860), -0.9, 1.5, 0.12);   // a price tag with a coin
+    for (let i = 0; i < 6; i++) { const m = B(inner, 0.5, 0.04, 1.0, cl[i % 2], -1.25 + i * 0.5, dh - 0.55, 0.45); m.rotation.x = 0.5; }   // the awning
+    for (let i = 0; i < 6; i++) B(inner, 0.5, 0.2, 0.03, cl[i % 2], -1.25 + i * 0.5, dh - 0.95, 0.88);                       // its scalloped edge
+    C(inner, 0.01, 0.01, 0.4, lam(0x2a2a30), -1.2, dh - 0.9, 0.5, 4); B(inner, 0.16, 0.22, 0.16, glow(0xffb050), -1.2, dh - 1.2, 0.5);   // a little lantern
+  },
   plank(inner, dr) {
   const rg = makeRng(dr.x * 131 + dr.y);
   const dh = WALL_H - 0.1;                                                                           // planks fill the doorway up to the ceiling
@@ -263,7 +279,7 @@ function makeDoor(dr) {
   (DOOR_BUILDERS[dr.style] || DOOR_BUILDERS.plank)(inner, dr);
   let leaf = null;
   if (dr.style === 'garden') { leaf = inner.userData.leaf; bakeMeshes(inner, new Set([leaf]), { flash: null }); bakeMeshes(leaf, NO_SKIP, { flash: null }); }   // the gate's leaf is its own group, so it can fold
-  else if (dr.style === 'cave' || dr.style === 'ice' || dr.style === 'spore' || dr.style === 'gate' || dr.style === 'hatch') bakeMeshes(inner, NO_SKIP, { flash: null });   // the many small parts merge into 2 or 3 meshes (js/perf.js)
+  else if (dr.style === 'cave' || dr.style === 'ice' || dr.style === 'spore' || dr.style === 'gate' || dr.style === 'hatch' || dr.style === 'shutter') bakeMeshes(inner, NO_SKIP, { flash: null });   // the many small parts merge into 2 or 3 meshes (js/perf.js)
   const mesh = new THREE.Group();
   const x = (dr.x + 0.5) * TILE, z = (dr.y + 0.5) * TILE;
   mesh.add(inner); mesh.position.set(x, 0, z); mesh.rotation.y = dr.axis === 'x' ? Math.PI / 2 : 0;
@@ -439,6 +455,67 @@ function makeDecor(d) {
       for (let i = 0; i < 4; i++) { const a = rg() * 6.28, b = (rg() - 0.5) * 1.6; SP(inner, 0.22, 0.14, 0.22, lam(0x4a8a4a), Math.cos(a) * Math.cos(b) * 0.33, 1.15 + Math.sin(b) * 0.33, Math.sin(a) * Math.cos(b) * 0.33, 0); }
       const ring = new THREE.Mesh(cached('globering', () => new THREE.TorusGeometry(0.42, 0.02, 5, 24)), br); ring.position.y = 1.15; ring.rotation.z = 0.4; inner.add(ring);
       C(inner, 0.015, 0.015, 0.95, br, -0.08, 1.15, 0, 5).rotation.z = 0.4;
+      break;
+    }
+    // ---- Goblin Market ----
+    case 'stall': {                                                // a market stall (blocks the way): four posts, a striped canopy, a counter heaped with fruit, a sack and a lantern
+      const wd = lam(0x6a4a2a), cl = [lam(0xa83a2a), lam(0xe8dcc0)], fr = [lam(0xc84a2a), lam(0xd8a030), lam(0x6a9a3a)];
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) C(inner, 0.04, 0.05, 2.3, wd, sx * 0.9, 1.15, sz * 0.45, 6);
+      RB(inner, 1.9, 0.08, 0.95, wd, 0, 0.85, 0.05); RB(inner, 1.9, 0.5, 0.06, lam(0x8a6a3a), 0, 0.58, 0.5);
+      for (let i = 0; i < 6; i++) { const m = B(inner, 0.34, 0.04, 1.3, cl[i % 2], -0.85 + i * 0.34, 2.4, 0); m.rotation.x = 0.2; B(inner, 0.34, 0.2, 0.03, cl[i % 2], -0.85 + i * 0.34, 2.2, 0.64); }   // canopy and valance
+      for (let i = 0; i < 9; i++) SP(inner, 0.2, 0.18, 0.2, fr[i % 3], -0.7 + (i % 5) * 0.2 + (i > 4 ? 0.1 : 0), i > 4 ? 1.1 : 0.97, 0.05 + (i % 2) * 0.12, 0);   // fruit in two rows
+      SP(inner, 0.5, 0.5, 0.4, lam(0xa08a5a), -0.55, 0.28, 0.75); B(inner, 0.14, 0.2, 0.14, glow(0xffb050), 0.8, 2.05, 0.1);   // a sack on the ground, a lantern under the canopy
+      break;
+    }
+    case 'awning': {                                               // a striped cloth awning hung from a wall, sloping down into the room (a wall decal)
+      const cl = [lam(0xa83a2a), lam(0xe8dcc0)];
+      for (let i = 0; i < 5; i++) { const m = B(inner, 0.5, 0.04, 1.15, cl[i % 2], -1 + i * 0.5, 2.5, 0.5); m.rotation.x = 0.5; B(inner, 0.5, 0.2, 0.03, cl[i % 2], -1 + i * 0.5, 2.12, 1.0); }
+      break;
+    }
+    case 'festoon': {                                              // a string of pennants and lantern bulbs across the ceiling (emissive, not lights)
+      const top = WALL_H / (d.scale || 1), cl = [lam(0xa83a2a), lam(0xe8dcc0), lam(0x2a6a4a), lam(0xc8a030)];
+      C(inner, 0.01, 0.01, 3.0, iron, 0, top - 0.6, 0, 4).rotation.z = Math.PI / 2;
+      for (let i = 0; i < 8; i++) { const x = -1.3 + i * 0.37, sag = 0.12 * Math.sin((x + 1.5) / 3 * Math.PI); B(inner, 0.2, 0.26, 0.02, cl[i % 4], x, top - 0.8 - sag, 0, 0, 0.1); if (i % 3 === 1) B(inner, 0.1, 0.12, 0.1, glow(0xffc060), x + 0.18, top - 0.72 - sag, 0); }
+      break;
+    }
+    case 'crowd': {                                                // a busy patch: trampled straw, scuffed footprints and dropped coins (the Market's mechanic: the din masks your steps)
+      const sm = lam(0xb89a58), fp = lam(0x3a2c1c), co = glow(0xe8c860);
+      const st = new THREE.Mesh(cached('disc1', () => new THREE.CircleGeometry(1, 16)), sm); st.rotation.x = -Math.PI / 2; st.scale.set(1.35, 1.35, 1); st.position.y = 0.014; inner.add(st);
+      for (let i = 0; i < 14; i++) SP(inner, 0.12, 0.02, 0.2, fp, (rg() - 0.5) * 2.2, 0.03, (rg() - 0.5) * 2.2, rg() * 3);
+      for (let i = 0; i < 3; i++) SP(inner, 0.07, 0.02, 0.07, co, (rg() - 0.5) * 1.6, 0.035, (rg() - 0.5) * 1.6, 0);
+      break;
+    }
+    // ---- Final Chamber ----
+    case 'rpillar': {                                              // a rune pillar from the floor to the ceiling void: dark stone, glowing bands and rune strips (blocks the way)
+      const H = WALL_H, stn = lam(0x3a2e4c), dk = lam(0x2a2038), gl = glow(0xa060ff);
+      RB(inner, 1.5, 0.45, 1.5, stn, 0, 0.225, 0); RB(inner, 1.25, 0.2, 1.25, dk, 0, 0.55, 0);
+      C(inner, 0.5, 0.58, H - 1.5, dk, 0, 0.65 + (H - 1.5) / 2, 0, 14);
+      for (const y of [1.5, 3.4, H * 0.55]) C(inner, 0.62, 0.62, 0.12, gl, 0, y, 0, 14);
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + 0.4; B(inner, 0.07, 2.4, 0.05, gl, Math.sin(a) * 0.56, 2.5, Math.cos(a) * 0.56, a); }
+      RB(inner, 1.5, 0.4, 1.5, stn, 0, H - 0.2, 0);
+      break;
+    }
+    case 'dais': {                                                 // a stepped dais under the boss: three low tiers of dark stone with glowing trim
+      C(inner, 6.9, 7.0, 0.06, lam(0x2a2036), 0, 0.03, 0, 48); C(inner, 6.0, 6.1, 0.12, lam(0x352844), 0, 0.06, 0, 48); C(inner, 5.0, 5.1, 0.18, lam(0x1e1630), 0, 0.09, 0, 48);
+      for (const [r0, r1, y] of [[5.9, 6.2, 0.125], [4.9, 5.1, 0.185]]) { const rm = new THREE.Mesh(cached(`dring${r0}`, () => new THREE.RingGeometry(r0, r1, 64)), glow(0xb070ff)); rm.rotation.x = -Math.PI / 2; rm.position.y = y; inner.add(rm); }
+      break;
+    }
+    case 'runes': {                                                // the rune circle: rings, 12 spokes, a ring of glyph ticks and a six-pointed star, merged into ONE additive mesh (RUNE_MAT, pulsed by main.js), and two mist rings
+      const tmp = new THREE.Group(), mats = {}, mat = c => mats[c] || (mats[c] = new THREE.MeshBasicMaterial({ color: c })), flat = (g, c, y = 0.02) => { const m = new THREE.Mesh(g, mat(c)); m.rotation.x = -Math.PI / 2; m.position.y = y; tmp.add(m); return m; };
+      for (const [r0, r1, c] of [[20.4, 21.0, 0x9a5aff], [18.6, 18.9, 0x6a3ab8], [12.0, 12.3, 0x9a5aff], [9.0, 9.15, 0x6a3ab8]]) flat(cached(`rr${r0}`, () => new THREE.RingGeometry(r0, r1, 96)), c);
+      const bar = (len, wid, c, a, rad, rot) => { const m = new THREE.Mesh(cached(`rune${len}|${wid}`, () => new THREE.PlaneGeometry(len, wid)), mat(c)); m.rotation.x = -Math.PI / 2; m.rotation.z = rot; m.position.set(Math.cos(a) * rad, 0.021, Math.sin(a) * rad); tmp.add(m); };
+      for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6; bar(9.2, 0.2, 0x6a3ab8, a, 13.8, -a); }                    // spokes between the 9 m and 18.4 m rings
+      for (let i = 0; i < 48; i++) { const a = i * Math.PI / 24 + 0.03; bar(i % 2 ? 0.9 : 0.4, 0.12, 0xd8b0ff, a, 19.7, -a); }   // glyph ticks between the outer rings
+      for (let k = 0; k < 2; k++) for (let i = 0; i < 3; i++) { const a = (i * 120 + k * 60) * Math.PI / 180; bar(27.7, 0.22, 0xb070ff, a, 8, -(a + Math.PI / 2)); }   // two triangles inscribed in a 16 m circle
+      tmp.updateMatrixWorld(true);
+      const b = { items: [], n: 0 }; tmp.traverse(o => { if (o.isMesh) { addItem(b, o, o.matrixWorld); } });
+      inner.add(new THREE.Mesh(mergeItems(b.items, b.n), RUNE_MAT));
+      for (const [r0, r1, y] of [[12, 22, 0.35], [5, 14, 0.9]]) {  // mist: a soft ring (black at the edges, violet in the middle, so additive blending fades it out)
+        const g = new THREE.RingGeometry(r0, r1, 72, 2), col = new Float32Array(g.attributes.position.count * 3), per = 73;
+        for (let v = 0; v < g.attributes.position.count; v++) if (Math.floor(v / per) === 1) { col[v * 3] = 0.3; col[v * 3 + 1] = 0.12; col[v * 3 + 2] = 0.5; }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.rotateX(-Math.PI / 2);
+        const m = new THREE.Mesh(g, MIST_MAT); m.position.y = y; inner.add(m);
+      }
       break;
     }
     case 'bed': {

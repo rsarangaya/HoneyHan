@@ -116,7 +116,7 @@ const BOMB = { fuse: 2.5, warn: 0.8, trigger: 1.5, radius: 3.5, dmg: 55, falloff
 
 // Natives per theme. commons fill most of the population (types with a `pack` size spawn in packs), `signature` is
 // the theme's own oddity (from floor 2, two from floor 4), `elite` shows up on floors 3 and 4, and `bonus` adds
-// extra wolves or archers. `prefer` maps a type to the room theme it likes. Every theme keeps plain goblins.
+// extra wolves, archers or (the Market) signature thieves. `prefer` maps a type to the room theme it likes. Every theme keeps plain goblins.
 // (THEME_NATIVES is a view of the theme schema in js/gen.js, THEME_DEFS.)
 // Share of a floor's guards that are natives: low on floor 1 so the basics are learned on plain goblins.
 const NATIVE_SHARE = [0.3, 0.45, 0.6, 0.7, 0.7];
@@ -155,7 +155,7 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
   special('archer', (floorNum >= 4 ? 2 : floorNum >= 2 ? 1 : 0) + (floorNum >= 2 && floorNum < 5 && roster && roster.bonus ? roster.bonus.archer || 0 : 0));
 
   if (roster) {
-    const eliteOn = roster.elite && floorNum >= 3 && floorNum <= 4, sigN = roster.signature && floorNum >= 2 ? (floorNum >= 4 ? 2 : 1) : 0;
+    const eliteOn = roster.elite && floorNum >= 3 && floorNum <= 4, sigN = roster.signature && floorNum >= 2 ? (floorNum >= 4 ? 2 : 1) + (roster.bonus && floorNum < 5 ? roster.bonus.thief || 0 : 0) : 0;   // (the Market: bonus.thief makes its signature thieves more common)
     const commons = rng.shuffle(roster.commons.slice()).slice(0, Math.max(1, MAX_NATIVE_TYPES - (eliteOn ? 1 : 0) - (roster.signature ? 1 : 0)));
     const solo = commons.filter(t => !ENEMY_TYPES[t].pack), packTypes = commons.filter(t => ENEMY_TYPES[t].pack);
     // the signature native first, from the free guards

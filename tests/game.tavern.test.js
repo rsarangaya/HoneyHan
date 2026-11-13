@@ -10,7 +10,7 @@ run('Sunken Tavern and Moonlit Orchard', async ({ open, check }) => {
   // ---------- Sunken Tavern ----------
   page = await open(seeds[TAV]);
   const tw = await page.evaluate(async () => {
-    const out = { themeName: theme.name, layout: theme.layout.style, tex: theme.tex, mt: { ...theme.mechanic.TUNE }, tune: (await (await fetch('js/tune.js')).text()).includes('prototype-test-tune-23') };
+    const out = { themeName: theme.name, layout: theme.layout.style, tex: theme.tex, mt: { ...theme.mechanic.TUNE }, tune: (await (await fetch('js/tune.js')).text()).includes('prototype-test-tune-24') };
     let f = null;
     for (let n = 1; n <= 4 && !f; n++) { game.startFloor(n); await T.sleep(80); if (game.floor.doors.length) f = game.floor; }
     out.hasDoor = !!f; out.door = f && f.doors.map(d => d.style + '|' + d.keyLabel);

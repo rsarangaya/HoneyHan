@@ -62,7 +62,7 @@ for (let s = 1; s <= N; s++) {
       mapStats[n - 1].open += open; mapStats[n - 1].corr += open - inR; mapStats[n - 1].n++;
       for (const pr of f.props) if (pr.kind === 'chest') { if (!Number.isInteger(pr.tier) || pr.tier < 0 || pr.tier > 4) fail(where, `chest tier ${pr.tier}`); else tierCounts[n - 1][pr.tier]++; }
     }
-    const patches = f.decor.filter(d => ['puddle', 'moon', 'shade', 'glowcap', 'bell', 'ice', 'brush', 'dark'].includes(d.kind)), also = (G.THEMES.find(t => t.name === themeName) || { mechanic: {} }).mechanic.also || [];   // (the Cellar's second kind: dark pockets)
+    const patches = f.decor.filter(d => ['puddle', 'moon', 'shade', 'glowcap', 'bell', 'ice', 'brush', 'dark', 'crowd'].includes(d.kind)), also = (G.THEMES.find(t => t.name === themeName) || { mechanic: {} }).mechanic.also || [];   // (the Cellar's second kind: dark pockets)
     const gmin = gim && gim.n[0] + also.reduce((a, g) => a + g.n[0], 0), gmax = gim && gim.n[1] + also.reduce((a, g) => a + g.n[1], 0);
     if (gim && !boss && (patches.length < gmin - 2 || patches.length > gmax || patches.some(d => d.kind !== gim.kind && !also.some(g => g.kind === d.kind)))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
     if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
@@ -793,6 +793,15 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
           if (quest && !f.quest) fail(where, 'encounter floor without its encounter');
         }
         const fb = G.generateFloor(seed, 5, { boss: true, depth: 6 });
+        if (s <= 40) {                                                                    // the Final Chamber: the same arena (no rng draws; only the rim guards may stand a tile aside from a pillar) with rune pillars, a dais and the rune circle
+          const ff = G.generateFloor(seed, 5, { boss: true, depth: 6, themeName: FINAL_THEME.name }), fw = `final chamber seed ${seed}`, pil = ff.decor.filter(d => d.kind === 'rpillar');
+          if (JSON.stringify([ff.tiles, ff.props, ff.torches, ff.stairs, ff.start, ff.safe, ff.enemies.find(e => e.boss)]) !== JSON.stringify([fb.tiles, fb.props, fb.torches, fb.stairs, fb.start, fb.safe, fb.enemies.find(e => e.boss)])) fail(fw, 'the arena differs from the usual boss arena');
+          if (pil.length < 14) fail(fw, `${pil.length} rune pillars`);
+          if (ff.decor.filter(d => d.kind === 'dais').length !== 1 || ff.decor.filter(d => d.kind === 'runes').length !== 1) fail(fw, 'want one dais and one rune circle');
+          if (pil.some(d => ff.tiles[d.y * ff.w + d.x] !== 1 || !ff.blocked[d.y * ff.w + d.x])) fail(fw, 'a pillar on a wall or not blocking');
+          if (!touchable(ff, flood(ff, true), ff.stairs.x, ff.stairs.y) || ff.props.some(p => !touchable(ff, flood(ff, true), p.x, p.y))) fail(fw, 'pillars cut something off');
+          if (fb.decor.some(d => d.kind === 'rpillar' || d.kind === 'dais' || d.kind === 'runes')) fail(fw, 'the ordinary arena got final chamber furniture');
+        }
         const where = `final arena seed ${seed}`;
         if (fb.enemies.filter(e => e.boss).length !== 1) fail(where, 'want exactly one boss');
         if (fb.props.filter(p => p.fixed === 'heal').length !== 1) fail(where, 'want exactly one healing potion');
@@ -837,9 +846,9 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
 // only through its door and with its key, one key per door in a chest outside the locked rooms, the join tile open, reachable floor, the door's style and key name from the theme,
 // props and guard waypoints reachable, and the style's own look (clearings: big rooms, trees; halls: long naves, colonnades, side chapels).
 {
-  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal'], ['The Mushroom Cellar', 'caves', 'spore', 'Spore Key'], ['The Clockwork Library', 'aisles', 'gate', 'Gear Key'], ['The Sunken Tavern', 'warren', 'hatch', 'Cask Key'], ['The Moonlit Orchard', 'orchard', 'garden', 'Garden Key']];
+  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal'], ['The Mushroom Cellar', 'caves', 'spore', 'Spore Key'], ['The Clockwork Library', 'aisles', 'gate', 'Gear Key'], ['The Sunken Tavern', 'warren', 'hatch', 'Cask Key'], ['The Moonlit Orchard', 'orchard', 'garden', 'Garden Key'], ['The Goblin Market', 'bazaar', 'shutter', 'Stall Key']];
   const QUESTS = [undefined, 'miniboss', 'prisoner', 'shrine', 'wanted', 'thief', 'ally'];
-  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99, caveFloors = 0, caveRooms = 0, darks = 0, rowFloors = 0, shelves = 0, shelfRooms = 0, warrenFloors = 0, warrenRooms = 0, puddles = 0, kegs = 0, orchFloors = 0, trees = 0, moons = 0, shades = 0;
+  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99, caveFloors = 0, caveRooms = 0, darks = 0, rowFloors = 0, shelves = 0, shelfRooms = 0, warrenFloors = 0, warrenRooms = 0, puddles = 0, kegs = 0, orchFloors = 0, trees = 0, moons = 0, shades = 0, bazFloors = 0, stallTiles = 0, crowds = 0, awnings = 0, bells = 0;
   for (const [themeName, style, doorStyle, keyName] of STYLES) for (let s = 1; s <= Math.max(80, N); s++) for (let fl = 1; fl <= 4; fl++) {
     const seed = (s * 2246822519 + 31) >>> 0, flags = { armory: fl === 1 + (s % 4), shop: s % 3 === 0 && fl === 2, quest: QUESTS[(s + fl) % QUESTS.length] };
     const where = `${style} seed ${seed} floor ${fl}`;
@@ -903,6 +912,22 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
       if (mo < 5 || mo > 10 || sh < 5 || sh > 10) fail(where, `${mo} moon and ${sh} shade patches`);
       if (f.decor.some(d => d.kind === 'chandelier' || d.kind === 'beam')) fail(where, 'chandeliers or beams under the open sky');
       if (f.decor.some(d => d.kind === 'puddle' || d.kind === 'dark')) fail(where, 'another theme\'s patches in the Orchard');
+    } else if (style === 'bazaar') {                                               // market squares: stall blocks (walls inside rooms, never on a room's outer ring or its open centre cross), awnings, crowd patches and bells, no beams or shrines
+      bazFloors++;
+      let st = 0;
+      for (const r of ordinary) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (f.tiles[at(x, y)] === G.T_WALL) {
+        if ((x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1) && !f.rooms.some(o => o !== r && inRoom(o, x, y))) fail(where, 'a stall on the outer ring of its room');
+        if (Math.abs(x - r.cx) <= 1 && Math.abs(y - r.cy) <= 1) fail(where, 'a stall on the open centre of its room');
+        if (!f.rooms.some(o => o !== r && inRoom(o, x, y)) && !(x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1)) st++;
+      }
+      stallTiles += st;
+      const cr = f.decor.filter(d => d.kind === 'crowd'), bl = f.decor.filter(d => d.kind === 'bell'), aw = f.decor.filter(d => d.kind === 'awning'); crowds += cr.length; bells += bl.length; awnings += aw.length;
+      if (cr.length < 12 || cr.length > 20 || bl.length < 2 || bl.length > 5) fail(where, `${cr.length} crowd patches and ${bl.length} bells`);
+      if (f.decor.some(d => (d.kind === 'crowd' || d.kind === 'bell' || d.kind === 'awning') && (f.tiles[at(d.x, d.y)] === G.T_WALL || f.tiles[at(d.x, d.y)] === G.T_DOOR))) fail(where, 'a crowd patch, bell or awning on a wall or a door');   // (an awning is a wall decal and shares its tile with furniture like a banner; like every gimmick decal, a crowd patch or bell may sit on the stairs, and a later encounter (the wanted guard, the shrine altar) may stand on one)
+      if (flags.quest !== 'miniboss' && flags.quest !== 'prisoner')              // (the lair and the cell are carved last and their corridor may take a wall an awning hangs on)
+        for (const d of aw) if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => f.tiles[at(d.x + dx, d.y + dy)] === G.T_WALL || f.tiles[at(d.x + dx, d.y + dy)] === G.T_DOOR)) fail(where, 'an awning that hangs from nothing');
+      if (f.decor.some(d => d.kind === 'beam')) fail(where, 'ceiling beams under the patchwork cloth');
+      if (f.decor.some(d => d.kind === 'puddle' || d.kind === 'dark' || d.kind === 'moon')) fail(where, 'another theme\'s patches in the Market');
     } else if (style === 'aisles') {                                               // shelf rows (walls inside rooms) and sliding shelves: 4 open tiles in a row inside a large room, nothing on them, nothing cut off in any state
       const inside = f.rooms.filter(r => !r.locked && r.w >= 5 && r.h >= 5 && (() => { let n = 0; for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) if (f.tiles[at(x, y)] === G.T_WALL) n++; return n >= 3; })());
       if (inside.length) rowFloors++;
@@ -934,6 +959,8 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
   console.log(`caves: ${caveFloors} floors, ${meanCave.toFixed(1)} ordinary rooms a floor, ${darks} dark pockets; aisles: ${rowFloors} floors with shelf rows, ${shelves} sliding shelves in ${shelfRooms} rooms`);
   if (!big || !tall || !chapels || !pillars || !locked || !shops || !quests) fail('layout styles', 'a style never produced its look, a shop, a locked room or an encounter');
   console.log(`warren: ${warrenFloors} floors, ${(warrenRooms / (warrenFloors || 1)).toFixed(1)} rooms a floor, ${puddles} flooded patches; orchard: ${orchFloors} floors, ${trees} trunks, ${moons} moon and ${shades} shade patches`);
+  console.log(`bazaar: ${bazFloors} floors, ${stallTiles} stall tiles, ${awnings} awnings, ${crowds} crowd patches, ${bells} bells`);
+  if (!bazFloors || stallTiles < bazFloors * 8 || awnings < bazFloors * 2 || !crowds || !bells) fail('bazaar', 'a style never produced its look');
   if (!warrenFloors || !puddles || !kegs || !orchFloors || trees < orchFloors * 3 || !moons || !shades) fail('warren/orchard', 'a style never produced its look');
   if (!darks || meanCave < 7) fail('caves', `dark pockets ${darks}, ${meanCave.toFixed(1)} rooms a floor (want 7 or more: 2 more than the usual 8 to 11 would give on a small map)`);
   if (rowFloors < 60 || !shelves || !shelfRooms) fail('aisles', 'no shelf rows or no sliding shelves came out');

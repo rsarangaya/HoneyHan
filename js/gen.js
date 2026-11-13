@@ -37,6 +37,9 @@ const LAYOUTS = {
                typeW: { big: [1, 1, 3, 1, 0.3, 2, 0.3], small: [2, 1, 0.5, 1.5, 0.3, 3, 0.3] } },   // taprooms and cellars: mess halls and storerooms
   orchard:   { style: 'orchard',   roomMin: 7, roomMax: 10, span: 10, roomCountMul: 0.6, extChance: 0.15, wideChance: 0.8, loops: 2, loopMax: 24, pillarChance: 0.9, grid: [3, 2], maxShop: 140,
                typeW: { big: [2, 3, 1, 0.5, 0.5, 1.5, 1], small: [3, 1, 0.3, 1, 1, 2, 1.5] } },
+  // bazaar (Goblin Market): big market squares crossed by an open three tile lane through the middle; stallChance of the four quadrants of each square (7 or more tiles a side) hold a stall cluster (a block of 2 to 4 by 2 to 3 wall tiles, one tile in from the walls). Wide, busy corridors, many loops.
+  bazaar:    { style: 'bazaar',    roomMin: 8, roomMax: 11, span: 11, roomCountMul: 0.55, extChance: 0.2, wideChance: 0.6, loops: 3, loopMax: 22, pillarChance: 0, maxShop: 120, stallChance: 0.8,
+               typeW: { big: [3, 2, 2, 1, 0.5, 4, 0.2], small: [3, 1, 1, 1.5, 0.5, 4, 0.2] } },   // stores, barracks and mess halls: a market, no shrines
   clearings: { style: 'clearings', roomMin: 6, roomMax: 11, span: 11, roomCountMul: 0.6,  extChance: 0.3, wideChance: 0.7,  loops: 3, loopMax: 24, pillarChance: 0.3,  maxShop: 140 },
   halls:     { style: 'halls',     roomMin: 7, roomMax: 9, span: 12, roomCountMul: 0.75, extChance: 0.7, wideChance: 0.15, loops: 1, loopMax: 20, pillarChance: 0.9,  maxShop: 140,
                typeW: { big: [2, 2, 0.5, 0.5, 1.5, 1, 5], small: [2, 0.5, 0.2, 1, 1, 1, 4] } },   // room type weights: shrines (the pews and altar) dominate
@@ -90,11 +93,17 @@ const THEME_DEFS = [
     boss: { name: 'Fungal Warden', dress: 'fungus', skin: 0x6a5a8a },
     mechanic: { kind: 'glowcap', n: [5, 8], also: [{ kind: 'dark', n: [4, 6] }], hint: 'Glowing spores light you up, but dark pockets hide you and muffle your steps. Spore puffers leave a lingering cloud when they burst.',
       TUNE: { glow: 1.4, dark: 0.7, darkFoot: 0.8, cloudDur: 6, cloudR: 3, cloudDaze: 1, puffDur: 2, puffR: 3, puffDaze: 1 } } }),   // glow: guards see you x this on a glowcap, dark: x on a dark pocket, darkFoot: footstep noise x there, cloudDur/cloudR/cloudDaze: the puffer cloud (s, m, s of Daze), puff*: the same for the seal's spore puff
+  // Goblin Market: a crowded bazaar. Canvas-and-timber walls, a cobbled floor strewn with straw, a patchwork cloth ceiling, warm lantern light. Layout 'bazaar': market squares full of stall blocks and alleys.
+  // Locked rooms are SHUTTERED STALLS (a rolling slatted shutter under a striped awning; the Stall Key; it clatters up, 5 m). Mechanic CROWD: busy patches where the din masks your footsteps (x din) and you blend
+  // in (guards see you x blend); tripwire bells as ever; thieves are twice as common; and a guard watching (within watchR, in sight) when you rifle a chest or barrel is put on notice (awareness watchAware).
   mkTheme('The Goblin Market', 'market', { wall: '#7a5a3a', floor: '#54402a', ceil: '#3a2418', fog: 0x140c06, light: 0xffa040 }, {
-    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
-    natives: { commons: ['mguard', 'boar'], signature: 'thief', elite: 'captain', prefer: { mguard: 'barracks', boar: 'storeroom' } },
+    fog: { density: 0.08 }, tex: { wall: 'canvas', floor: 'cobble', ceil: 'patchwork' }, layout: { ...LAYOUTS.bazaar },
+    doors: { style: 'shutter', keyNames: keysOf('Stall Key'), openAnim: 'shutter', noise: 5 },
+    props: { noBeam: true, edge: [['crates', 1, 3], ['barrels', 1, 2], ['awning', 1, 2], ['stall', 0, 1]], inner: [['stall', 1, 2]], floor: [['lantern', 1, 2], ['festoon', 1, 2]], locked: [['lantern', 1, 1], ['festoon', 1, 1]] },
+    natives: { commons: ['mguard', 'boar'], signature: 'thief', elite: 'captain', bonus: { thief: 1 }, prefer: { mguard: 'barracks', boar: 'storeroom' } },
     boss: { name: 'Goblin Warlord', dress: 'warlord', skin: 0x7a9a3a },
-    mechanic: { kind: 'bell', n: [3, 5], hint: 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.' } }),
+    mechanic: { kind: 'crowd', n: [14, 20], also: [{ kind: 'bell', n: [3, 5] }], hint: 'The market din covers your footsteps and hides you in the crowd, but a stallkeeper who sees you rifle a chest raises the alarm. Tripwire bells, and thieves in the crowd.',
+      TUNE: { blend: 0.8, din: 0.6, watchR: 10, watchAware: 0.5 } } }),   // blend: guards see you x this on a crowd patch, din: footstep noise x this there, watchR: metres a watching guard sees you rifle a container, watchAware: the awareness it gains (0.35 = suspicious)
   // Frozen Chapel: ice-blue blocks, a frosted nave, long halls with colonnades and side chapels. Locked rooms are ICE SEALS (a glassy slab that shatters down, 8 m noise, the Frost Seal).
   // Mechanic: ice patches (slide, and the slide carries on a moment after you leave them), footprints in the snow that guards follow, and wind that muffles a crouching player.
   mkTheme('The Frozen Chapel', 'chapel', { wall: '#8aa6c0', floor: '#6a7e94', ceil: '#2a3a4e', fog: 0x0a1018, light: 0xc8e4ff }, {
@@ -120,7 +129,12 @@ const THEMES = THEME_DEFS;                                  // the stage theme p
 const THEME_BY_NAME = {}; for (const t of THEME_DEFS) THEME_BY_NAME[t.name] = t;
 
 // The placeholder final stage's look: a darker, colder chamber (not part of the theme pool; the run never picks it as a stage 1 to 4 theme).
-const FINAL_THEME = mkTheme('The Final Chamber', 'final', { wall: '#3a3040', floor: '#241c2c', ceil: '#0c0a12', fog: 0x050309, light: 0xc080ff }, {});
+// Dark purple stone, a ceiling void, rune pillars ringing the arena, a dais under the boss and a glowing rune circle on the floor (layoutBoss builds them when it is told it is the final arena).
+// Mechanic RUNES: the circle swells (a warning of flareWarn s) and flares for flareLen s every flareEvery s; while it flares, anyone standing within flareR m of its centre is seen flareSeen x as far.
+const FINAL_THEME = mkTheme('The Final Chamber', 'final', { wall: '#2e2440', floor: '#1c1626', ceil: '#08060e', fog: 0x040208, light: 0xb070ff }, {
+  fog: { density: 0.07 }, tex: { wall: 'voidstone', floor: 'obsidian', ceil: 'void' },
+  mechanic: { kind: 'runes', hint: 'The rune circle swells and flares now and then: stay out of it when it does, or everything sees you.',
+    TUNE: { flareEvery: 9, flareLen: 1.6, flareWarn: 1.4, flareR: 21, flareSeen: 1.4 } } });   // flareEvery/flareLen/flareWarn: seconds per cycle, the flare, the build-up before it; flareR: metres from the circle's centre; flareSeen: guards see you x this inside it
 THEME_BY_NAME[FINAL_THEME.name] = FINAL_THEME;
 
 const MAP_W = 45, MAP_H = 45;               // the boss arena's size
@@ -163,9 +177,9 @@ const ROOM_THEMES = {
 // The key's name and the door's style come from the floor's theme (plank themes keep the classic names).
 const keyNameFor = (type, themeName) => { const t = THEME_BY_NAME[themeName]; return (t && t.doors.keyNames[type]) || LOCKED_ROOMS[type].key; };
 const doorStyleFor = themeName => { const t = THEME_BY_NAME[themeName]; return t ? t.doors.style : 'plank'; };
-const BLOCKING_DECOR = new Set(['keg', 'longtable', 'appletree', 'hedge', 'well', 'bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue', 'log', 'idol', 'pew', 'brokenaltar', 'winerack', 'mushroom', 'orrery', 'clock', 'scrolltable', 'globe']);   // guards path around these: anything with a collision circle bigger than candles
-const DECALS = new Set(['rug', 'bones', 'candles', 'banner', 'fern', 'glowmoss', 'vines', 'icicles', 'snowdrift', 'shaft', 'stalactites', 'ladder', 'dark', 'lantern', 'fruit', 'fireflies']);   // flat or hanging, no collision
-const WALLDEC = new Set(['banner', 'shaft', 'ladder']);                                                                       // hung on a wall: they share an edge tile and face the room                                                     // never fill a tile alone
+const BLOCKING_DECOR = new Set(['stall', 'rpillar', 'keg', 'longtable', 'appletree', 'hedge', 'well', 'bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue', 'log', 'idol', 'pew', 'brokenaltar', 'winerack', 'mushroom', 'orrery', 'clock', 'scrolltable', 'globe']);   // guards path around these: anything with a collision circle bigger than candles
+const DECALS = new Set(['rug', 'bones', 'candles', 'banner', 'fern', 'glowmoss', 'vines', 'icicles', 'snowdrift', 'shaft', 'stalactites', 'ladder', 'dark', 'lantern', 'fruit', 'fireflies', 'awning', 'festoon']);   // flat or hanging, no collision
+const WALLDEC = new Set(['banner', 'shaft', 'ladder', 'awning']);                                                                       // hung on a wall: they share an edge tile and face the room                                                     // never fill a tile alone
 const LOCKED_ROOMS = {
   armory:     { w: 7, h: 6, theme: 'armory',     name: 'armory',  key: 'Armory Key' },
   vault:      { w: 5, h: 5, theme: 'vault',      name: 'vault',   key: 'Vault Key' },
@@ -188,7 +202,7 @@ function roomPoint(f, r, k) {
 // type from js/quests.js ('miniboss', 'shrine', 'wanted', 'thief', 'prisoner' or 'ally'); the layout is retried until it fits, and floor.quest describes it.
 function generateFloor(seed, floorNum, opts = {}) {
   genDepth = opts.depth || 0;
-  if (opts.boss) return layoutBoss(seed, floorNum);
+  if (opts.boss) return layoutBoss(seed, floorNum, opts.themeName === FINAL_THEME.name);
   let f;
   for (let attempt = 0; attempt < 24; attempt++) {
     f = layoutFloor(seed + attempt * 7777, floorNum, opts);
@@ -202,7 +216,7 @@ function generateFloor(seed, floorNum, opts = {}) {
 // leads through the rock to the safe room, which holds the stairs down (floor.safe).
 // Every blocking object is placed so the open floor stays connected (pillars never touch each other
 // or the walls, props are checked with a flood fill).
-function layoutBoss(seed, floorNum) {
+function layoutBoss(seed, floorNum, final = false) {
   const rng = makeRng(seed * 7919 + floorNum * 104729);
   const w = MAP_W + SAFE_PAD, h = MAP_H + SAFE_PAD, cx = w >> 1, cy = (MAP_H >> 1) + SAFE_PAD;
   const tiles = new Uint8Array(w * h), blocked = new Uint8Array(w * h);
@@ -287,6 +301,16 @@ function layoutBoss(seed, floorNum) {
   for (let i = 0; i < 14; i++) {
     const x = rng.int(cx - 14, cx + 14), y = rng.int(cy - 14, cy + 14);
     if (at(x, y) === T_FLOOR && dist(x, y, start.x, start.y) > 4) decor.push({ kind: 'bones', x, y, seed: seedOf(), edge: false, yaw: rng() * 6.28 });
+  }
+
+  // The Final Chamber: rune pillars in two rings (14 round the arena, 8 near the boss), a stepped dais under the boss and the rune circle with its mist rings. No rng draws, so the arena is exactly the usual one.
+  if (final) {
+    for (const [n, R, a0] of [[14, 8.5, 0.2], [8, 4.5, 0.5]]) for (let i = 0; i < n; i++) {
+      const a = a0 + i * 2 * Math.PI / n, x = Math.round(cx + Math.cos(a) * R), y = Math.round(cy + Math.sin(a) * R);
+      if (at(x, y) !== T_FLOOR || dist(x, y, start.x, start.y) < 5 || dist(x, y, gate.x, gate.y) < 5 || !claim({ x, y })) continue;
+      decor.push({ kind: 'rpillar', x, y, seed: 3, edge: false, yaw: 0 });
+    }
+    decor.push({ kind: 'dais', x: cx, y: cy, seed: 3, edge: false, yaw: 0 }, { kind: 'runes', x: cx, y: cy, seed: 3, edge: false, yaw: 0 });
   }
 
   // wall torches around the rim and on the pillars (none on the hidden door)
@@ -460,7 +484,8 @@ function layoutFloor(seed, floorNum, opts) {
   }
 
   // ---- shelf rows (aisles): some rooms get parallel rows of shelf walls, one open aisle tile between them and the outer ring of the room left open. A room's rows are undone if they would cut any floor off. ----
-  if (L.aisleChance) {
+  const stalls = [];                                      // bazaar: the stall blocks that came out (awnings go on their open sides)
+  if (L.aisleChance || L.stallChance) {
     const rq = new Int32Array(w * h), reachAll = () => {
       const seen = new Uint8Array(w * h); let n = 0, qe = 0;
       rq[qe++] = start.y * w + start.x; seen[rq[0]] = 1;
@@ -468,7 +493,22 @@ function layoutFloor(seed, floorNum, opts) {
       return qe;
     };
     let base = reachAll();
-    for (const r of rooms) {
+    if (L.stallChance) for (const r of rooms) {           // bazaar: a stall cluster in each of the four quadrants round the room's open centre cross, one tile in from the walls; a room's stalls are undone if they would cut any floor off
+      if (r === shopRoom || r.w < 7 || r.h < 7) continue;
+      const placed = [], mine = [];
+      for (const sx of [1, -1]) for (const sy of [1, -1]) {
+        if (rng() >= L.stallChance) continue;
+        const xl = sx > 0 ? r.cx + 2 : r.x + 1, xh = sx > 0 ? r.x + r.w - 2 : r.cx - 2, yl = sy > 0 ? r.cy + 2 : r.y + 1, yh = sy > 0 ? r.y + r.h - 2 : r.cy - 2;   // the quadrant's free span (tiles, inclusive)
+        const aw = xh - xl + 1, ah = yh - yl + 1; if (aw < 2 || ah < 2) continue;
+        const bw = Math.min(aw, rng.int(2, 4)), bh = Math.min(ah, rng.int(2, 3)), x0 = xl + rng.int(0, aw - bw), y0 = yl + rng.int(0, ah - bh);
+        let ok = true; for (let y = y0; y < y0 + bh && ok; y++) for (let x = x0; x < x0 + bw; x++) if (at(x, y) !== T_FLOOR || nearCentre(x, y)) { ok = false; break; }
+        if (!ok) continue;
+        for (let y = y0; y < y0 + bh; y++) for (let x = x0; x < x0 + bw; x++) { set(x, y, T_WALL); placed.push(y * w + x); }
+        mine.push({ x: x0, y: y0, w: bw, h: bh });
+      }
+      const n = reachAll();
+      if (n === base - placed.length) { base = n; stalls.push(...mine); } else for (const i of placed) tiles[i] = T_FLOOR;
+    } else for (const r of rooms) {
       if (r === shopRoom || r.w < 5 || r.h < 5 || rng() >= L.aisleChance) continue;
       const horiz = rng() < 0.5, placed = [];
       for (let a = (horiz ? r.y : r.x) + 1; a <= (horiz ? r.y + r.h : r.x + r.w) - 2; a += 2)
@@ -689,7 +729,7 @@ function layoutFloor(seed, floorNum, opts) {
     if (r.w * r.h >= 64) for (const [ox, oy] of [[-3, 0], [3, 0], [0, -3], [0, 3]])
       if (rng() < 0.4 && at(r.cx + ox, r.cy + oy) === T_FLOOR && r.cx + ox >= r.x && r.cx + ox < r.x + r.w && r.cy + oy >= r.y && r.cy + oy < r.y + r.h)
         decor.push({ kind: 'chandelier', x: r.cx + ox, y: r.cy + oy, seed: seedOf(), edge: false, yaw: 0 });
-    if (r.w >= 6 && r.theme !== 'vault') for (let k = 1; k <= Math.floor(r.h / 3); k++)
+    if (r.w >= 6 && r.theme !== 'vault' && !(tprops && tprops.noBeam)) for (let k = 1; k <= Math.floor(r.h / 3); k++)
       decor.push({ kind: 'beam', x: r.cx, y: r.y + k * 3 - 1, seed: seedOf(), edge: false, yaw: 0, len: (r.w - 0.3) * TILE });
   }
 
@@ -879,6 +919,14 @@ function layoutFloor(seed, floorNum, opts) {
     }
   }
 
+  for (const s of stalls) {                               // bazaar: a striped awning over two open sides of each stall block (a wall decal facing away from the stall). Last of all, so a late locked room's corridor cannot take the wall away
+    const sides = rng.shuffle([[s.x + (s.w >> 1), s.y - 1, 0, 1], [s.x + (s.w >> 1), s.y + s.h, 0, -1], [s.x - 1, s.y + (s.h >> 1), 1, 0], [s.x + s.w, s.y + (s.h >> 1), -1, 0]]);
+    for (let i = 0, n = 0; i < 4 && n < 2; i++) {
+      const [tx, ty, dx, dy] = sides[i], k = ty * w + tx;
+      if (at(tx, ty) !== T_FLOOR || blocked[k] || decalUsed.has(k) || !wallAt(tx + dx, ty + dy)) continue;
+      decalUsed.add(k); n++; decor.push({ kind: 'awning', x: tx, y: ty, seed: seedOf(), edge: true, yaw: Math.atan2(-dx, -dy) });
+    }
+  }
   for (const m of movers) for (let k = 0; k < 4; k++) blocked[(m.y + m.dy * k) * w + m.x + m.dx * k] = 0;   // (the shelves' strips: main.js flips tiles while they move)
   return { w, h, tiles, blocked, rooms, start, stairs, props, decor, doors, torches, enemies, shop, quest, ...(L.aisleChance ? { movers } : {}), steps: dist[stairs.y * w + stairs.x] };
 }

@@ -49,6 +49,7 @@ const MECH_PATCH = {
   glowcap: { seen: () => { const t = theme.mechanic.TUNE; return t && t.glow || 1.4; }, disc: ['item:glow', 'Glowing spores'] },
   dark:    { seen: () => theme.mechanic.TUNE.dark, disc: ['item:dark', 'Dark pockets'] },   // the Cellar: guards see you x TUNE.dark here, and your footsteps are quieter (the frame loop)
   ice:     { slippery: true, disc: ['item:ice', 'Ice'] },
+  crowd:   { seen: () => theme.mechanic.TUNE.blend, disc: ['item:crowd', 'Market crowd'] },   // the Goblin Market: you blend into a busy patch (guards see you x blend); your footsteps are muffled there too (din, in the frame loop)
   brush:   { seen: () => { const t = theme.mechanic.TUNE; return player.crouching ? t.stealthCrouch : t.stealth; }, disc: ['item:brush', 'Thick brush'] },   // the Jungle: a player-only stealth bonus (enemies see through it as ever)
 };
 const stageSeedOf = s => s === 1 ? runSeed : (runSeed ^ Math.imul(s, 0x9e3779b1)) >>> 0;
@@ -281,11 +282,58 @@ const parquetTexture = base => paintTex(base, 'parq', 256, (g, S, rng, col) => {
   g.fillStyle = 'rgba(201,162,58,0.28)'; g.fillRect(0, 126, S, 3); g.fillRect(126, 0, 3, S);
   speckle(g, S, 1400, rng);
 });
+// Goblin Market: canvas-and-timber walls (striped canvas panels between dark posts, rope, stitched patches), a cobbled floor strewn with straw, a patchwork cloth ceiling.
+const canvasWallTexture = base => paintTex(base, 'canvas', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.3); g.fillRect(0, 0, S, S);
+  for (let p = 0; p < 4; p++) {
+    g.fillStyle = shade(col, 0.65 + (p % 2) * 0.4 + rng() * 0.1); g.fillRect(p * 64 + 6, 0, 52, S);
+    g.fillStyle = 'rgba(0,0,0,0.07)'; for (let y = 0; y < S; y += 4) g.fillRect(p * 64 + 6, y, 52, 1);                                  // canvas weave
+    if (rng() < 0.75) { const x = p * 64 + 10 + rng() * 18, y = 20 + rng() * 190, w = 18 + rng() * 14, h = 18 + rng() * 18; g.fillStyle = shade(col, 0.5 + rng() * 0.9); g.fillRect(x, y, w, h); g.strokeStyle = 'rgba(30,20,10,0.6)'; g.setLineDash([3, 2]); g.strokeRect(x + 1, y + 1, w - 2, h - 2); g.setLineDash([]); }   // a stitched patch
+  }
+  g.fillStyle = shade(col, 0.25); for (let p = 0; p <= 4; p++) g.fillRect(p * 64 - 4, 0, 8, S);                                       // timber posts
+  g.strokeStyle = 'rgba(200,170,110,0.75)'; g.lineWidth = 3; for (const y of [60, 170]) { g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }   // rope bindings
+  speckle(g, S, 900, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.25)'); gr.addColorStop(0.12, 'rgba(0,0,0,0)'); gr.addColorStop(0.8, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(40,24,10,0.5)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);   // dirt at the foot
+});
+const cobbleFloorTexture = base => paintTex(base, 'cobble', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.3); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 8; r++) for (let c = -1; c < 8; c++) { const x = c * 32 + (r % 2 ? 16 : 0), y = r * 32; g.fillStyle = shade(col, 0.6 + rng() * 0.5); g.beginPath(); g.ellipse(x + 16, y + 16, 14 + rng() * 2, 13 + rng() * 2, 0, 0, 7); g.fill(); }   // round cobbles
+  for (let i = 0; i < 30; i++) blob(g, rng() * S, rng() * S, 6 + rng() * 14, 4 + rng() * 8, 'rgba(50,34,20,0.2)');                  // mud
+  g.lineWidth = 1; for (let i = 0; i < 160; i++) { g.strokeStyle = `rgba(${200 + rng() * 40 | 0},${160 + rng() * 40 | 0},80,0.6)`; const x = rng() * S, y = rng() * S; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rng() - 0.5) * 9, y + (rng() - 0.5) * 9); g.stroke(); }   // straw
+  speckle(g, S, 1200, rng);
+});
+const patchworkTexture = base => paintTex(base, 'patch', 128, (g, S, rng, col) => {
+  const pal = ['#8a3a2a', '#2a4a6a', '#6a5a2a', '#4a6a3a', '#6a3a5a', '#8a7a5a'];
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { g.fillStyle = pal[(rng() * 6) | 0]; g.fillRect(x * 32, y * 32, 32, 32); g.fillStyle = `rgba(0,0,0,${0.3 + rng() * 0.25})`; g.fillRect(x * 32, y * 32, 32, 32); }
+  g.strokeStyle = 'rgba(230,210,160,0.4)'; g.setLineDash([3, 3]); for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) g.strokeRect(x * 32 + 2, y * 32 + 2, 28, 28);
+  g.setLineDash([]); speckle(g, S, 300, rng);
+}, 1);
+// Final Chamber: dark purple ashlar with faint glowing runes, polished black slabs veined with violet, a void of a ceiling.
+const voidWallTexture = base => paintTex(base, 'voidwall', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.3); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 4; r++) for (let b = -1; b < 3; b++) { const x = b * 128 + (r % 2 ? 64 : 0), y = r * 64; g.fillStyle = shade(col, 0.55 + rng() * 0.4); g.fillRect(x + 3, y + 3, 122, 58); g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(x + 3, y + 3, 122, 2); }
+  g.strokeStyle = 'rgba(170,100,255,0.8)'; g.lineWidth = 1.5; g.shadowColor = 'rgba(170,100,255,0.9)'; g.shadowBlur = 6;   // glowing runes: short right-angled strokes
+  for (let i = 0; i < 9; i++) { const x = 12 + rng() * 220, y = 12 + rng() * 220; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 6 + rng() * 8, y); g.lineTo(x + 6 + rng() * 8, y + 6 + rng() * 10); g.lineTo(x + rng() * 6, y + 12 + rng() * 6); g.stroke(); }
+  g.shadowBlur = 0; speckle(g, S, 900, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.3)'); gr.addColorStop(0.14, 'rgba(0,0,0,0)'); gr.addColorStop(0.86, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.45)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+const obsidianFloorTexture = base => paintTex(base, 'obsidian', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) { g.fillStyle = shade(col, 0.6 + rng() * 0.5); g.fillRect(c * 128 + 2, r * 128 + 2, 124, 124); }
+  for (let i = 0; i < 24; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 24, 5 + rng() * 14, 'rgba(120,90,180,0.07)');                   // a dull sheen
+  g.strokeStyle = 'rgba(150,90,230,0.4)'; g.lineWidth = 1; for (let i = 0; i < 9; i++) { let x = rng() * S, y = rng() * S; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 5; k++) { x += (rng() - 0.5) * 40; y += (rng() - 0.5) * 40; g.lineTo(x, y); } g.stroke(); }   // violet veins
+  speckle(g, S, 1000, rng);
+});
+const voidTexture = base => paintTex(base, 'void', 128, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.6); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 8; i++) blob(g, rng() * S, rng() * S, 14 + rng() * 26, 6 + rng() * 14, 'rgba(90,50,150,0.14)');
+  for (let i = 0; i < 24; i++) { g.fillStyle = `rgba(200,170,255,${0.3 + rng() * 0.5})`; g.fillRect(rng() * S, rng() * S, 1, 1); }
+}, 1);
 // Texture generators by the theme schema's tex keys (theme.tex.wall / floor / ceil), each from the theme's base colour.
 const TEX_GENERATORS = {
-  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c), capstone: c => capstoneTexture(c), shelf: c => shelfWallTexture(c), planks: c => plankWallTexture(c), hedge: c => hedgeWallTexture(c) },
-  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c), wetwood: c => wetWoodTexture(c), grass: c => grassFloorTexture(c) },
-  ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c), starry: c => starryTexture(c) },
+  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c), capstone: c => capstoneTexture(c), shelf: c => shelfWallTexture(c), planks: c => plankWallTexture(c), hedge: c => hedgeWallTexture(c), canvas: c => canvasWallTexture(c), voidstone: c => voidWallTexture(c) },
+  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c), wetwood: c => wetWoodTexture(c), grass: c => grassFloorTexture(c), cobble: c => cobbleFloorTexture(c), obsidian: c => obsidianFloorTexture(c) },
+  ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c), starry: c => starryTexture(c), patchwork: c => patchworkTexture(c), void: c => voidTexture(c) },
 };
 // Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'rough' (Jungle): a box whose side faces bulge a little (a hash of each vertex, so shared corners stay closed);
 // every tile is also turned a quarter-turn at random and widened a hair (buildFloor), so a wall does not look stamped.
@@ -308,6 +356,7 @@ const DOOR_ANIM = {
   wither: (o, t) => { o.mesh.scale.y = Math.max(0.03, 1 - t); },                                                  // spore seal: the fungus mound shrinks away
   barred: (o, t) => { o.mesh.position.y = t * WALL_H; o.mesh.rotation.z = Math.sin(t * 24) * 0.04 * (1 - t); },                // tavern hatch: the barred door shudders as it heaves up
   fold: (o, t) => { if (o.leaf) o.leaf.scale.x = Math.max(0.05, 1 - t); },                                                    // garden gate: the iron leaf folds back to its hinge post
+  shutter: (o, t) => { const q = Math.floor(t * 12) / 12, s = 1 - 0.95 * q; o.mesh.scale.y = s; o.mesh.position.y = (1 - s) * WALL_H + q * 0.5; },   // shuttered stall: the slatted shutter rolls up in jerky steps (twelve of them)
   gate: (o, t) => { o.mesh.position.y = t * WALL_H; if (o.cogs) { o.cogs[0].rotation.z = t * 14; o.cogs[1].rotation.z = -t * 17; } },   // clockwork gate: slides up while its cogs spin
 };
 
@@ -468,7 +517,8 @@ function buildFloor() {
   if (floor.shop) buildShop();
   if (floor.safe) buildSafeRoom(walls.material, ce.material);
   // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
-  cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell').map(o => o.mesh), group);
+  cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell' && o.kind !== 'runes').map(o => o.mesh), group);   // (the rune circle and its mist stay separate: their shared materials pulse)
+  const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null;   // the Final Chamber's rune circle (centre in metres)
   buildTorches();
   cullChunks.push(...mergeStatic(torchGroups, group));
   enemies = floor.enemies.map(s => new Enemy(s, floor));
@@ -1240,6 +1290,7 @@ function updateCombat(dt) {
   if (floor.prints) updatePrints(dt);
   let seenMul = 1;
   if (mech) { if (mech.seen) seenMul = mech.seen(); discover(mech.disc[0], mech.disc[1]); }
+  if (floor.runes) { const k = updateRunes(); if (k > 1) { seenMul *= k; if (discover('item:runes', 'Rune circle')) flash('The runes flare: they show you up!'); } }   // the Final Chamber: inside a flaring circle guards see you farther
   const hidden = hatUpdate(dt);
   player.stealthMul = hidden ? 0 : (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
@@ -1420,6 +1471,23 @@ function updateSearch(dt) {
   } else prompt.style.display = 'none';
 }
 
+// The Final Chamber's rune circle (floor.runes = its centre): it swells for flareWarn s, then flares for flareLen s, once every flareEvery s (a phase of gameT). Pulses the shared rune and mist materials.
+// Returns the multiplier on how far guards see you: flareSeen while you stand within flareR m of the centre during a flare, else 1.
+function updateRunes() {
+  const T = theme.mechanic.TUNE, ph = gameT % T.flareEvery, on = ph >= T.flareEvery - T.flareLen, t0 = T.flareEvery - T.flareLen - T.flareWarn;
+  RUNE_MAT.opacity = on ? 1 : ph >= t0 ? 0.55 + 0.4 * (ph - t0) / T.flareWarn : 0.5 + 0.08 * Math.sin(gameT * 1.4);
+  MIST_MAT.opacity = 0.5 + 0.2 * Math.sin(gameT * 0.6);
+  return on && Math.hypot(player.x - floor.runes.x, player.z - floor.runes.z) < T.flareR ? T.flareSeen : 1;
+}
+// Goblin Market: a guard that sees you rifle a chest or barrel (within watchR, in sight, not already hunting) is put on notice and goes to look where you were.
+function watchedSearch() {
+  const T = theme.mechanic.TUNE; let n = 0;
+  for (const e of enemies) {
+    if (e.dead || e.dormant || e.state === 'alerted' || e.sleepT > 0 || Math.hypot(e.x - player.x, e.z - player.z) > T.watchR || !hasLOS(floor, e.x, e.z, player.x, player.z)) continue;
+    e.aware = Math.max(e.aware, T.watchAware); e.last = { x: player.x, z: player.z }; n++;
+  }
+  if (n) { flash('A stallkeeper saw that!'); addLog('A stallkeeper saw you rifle that and is coming to look.', '#ffa040'); discover('item:crowd', 'Market crowd'); }
+}
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
 function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
@@ -1449,6 +1517,7 @@ function finishSearch(o, smashed) {
   }
   loud(noise);
   if (chest) discover('item:chest', 'Chests');
+  if (theme.mechanic.kind === 'crowd' && o.p.kind !== 'door' && SEARCH_NOISE[o.p.kind]) watchedSearch();
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
@@ -1864,7 +1933,7 @@ function frame(now) {
     const under = floor.patches.get(player.tileY * floor.w + player.tileX), mt = theme.mechanic.TUNE;
     const hush = HUSH * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * hush }); rings.push({ x: player.x, z: player.z, r: pulse * hush, t: 0 }); }
-    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (under === 'dark' ? mt.darkFoot : 1) });   // brush rustles: +3 m while you move in it
+    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (under === 'dark' ? mt.darkFoot : 1) * (under === 'crowd' ? mt.din : 1) });   // brush rustles: +3 m while you move in it; the Market din muffles your steps on a crowd patch
     if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
       floor.patches.delete(player.tileY * floor.w + player.tileX);
       const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;

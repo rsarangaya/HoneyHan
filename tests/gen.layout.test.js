@@ -18,14 +18,14 @@ const N = parseInt(process.argv[2], 10) || 40;
 let fails = 0, checked = 0;
 const fail = (w, m) => { if (++fails <= 20) console.log(`FAIL ${w}: ${m}`); };
 const ev = (ctx, code) => vm.runInContext(code, ctx);
-const names = ev(OLD, 'THEMES.map(t => t.name)'), CHAP = 'The Frozen Chapel', REWORKED = [CHAP, 'The Mushroom Cellar', 'The Clockwork Library', 'The Sunken Tavern', 'The Moonlit Orchard'], NOW = { 'The Mushroom Cellar': ['caves', 'spore'], 'The Clockwork Library': ['aisles', 'gate'], 'The Sunken Tavern': ['warren', 'hatch'], 'The Moonlit Orchard': ['orchard', 'garden'] };   // the legacy six (the Jungle is new, the Chapel is reworked on purpose: halls, ice seals, Frost Seal keys; its 'rooms' layout must still match)
+const names = ev(OLD, 'THEMES.map(t => t.name)'), CHAP = 'The Frozen Chapel', REWORKED = [CHAP, 'The Mushroom Cellar', 'The Clockwork Library', 'The Sunken Tavern', 'The Moonlit Orchard', 'The Goblin Market'], NOW = { 'The Mushroom Cellar': ['caves', 'spore'], 'The Clockwork Library': ['aisles', 'gate'], 'The Sunken Tavern': ['warren', 'hatch'], 'The Moonlit Orchard': ['orchard', 'garden'], 'The Goblin Market': ['bazaar', 'shutter'] };   // the legacy six (the Jungle is new, the Chapel is reworked on purpose: halls, ice seals, Frost Seal keys; its 'rooms' layout must still match)
 
 // The Mushroom Cellar (caves, spore seals, Spore Key, dark pockets) and the Clockwork Library (aisles, clockwork gates, Gear Key) are reworked on purpose like the Chapel: their own door styles, key names, fog and
 // textures change what a floor holds, and with layoutStyle 'rooms' only those must still match (no extra rng calls, the same rooms and furniture).
 // views
 if (JSON.stringify(ev(NEW, 'THEMES.map(t => t.name)').slice(0, names.length)) !== JSON.stringify(names)) fail('views', 'THEMES names differ');
 for (const k of ['THEME_GIMMICK', 'THEME_NATIVES', 'THEME_BOSS']) {
-  const nn = k === 'THEME_GIMMICK' ? names.filter(n => n !== 'The Sunken Tavern' && n !== 'The Moonlit Orchard') : names;   // (their mechanics were reworked on purpose)
+  const nn = k === 'THEME_GIMMICK' ? names.filter(n => n !== 'The Sunken Tavern' && n !== 'The Moonlit Orchard' && n !== 'The Goblin Market') : k === 'THEME_NATIVES' ? names.filter(n => n !== 'The Goblin Market') : names;   // (their mechanics were reworked on purpose; the Market's roster gained bonus.thief)
   checked++; if (JSON.stringify(nn.map(n => ev(NEW, k)[n])) !== JSON.stringify(nn.map(n => ev(OLD, k)[n]))) fail('views', k + ' differs from the legacy table');
 }
 for (const n of names) {   // the schema carries the old colours and the old fixed fog density (not the reworked Chapel)
@@ -42,7 +42,9 @@ for (const n of names) {   // the schema carries the old colours and the old fix
 // different numbers from the rng. They are exempt from the legacy floor comparison below (EXEMPT), the schema checks above still pin their new styles; every other theme is compared byte for byte).
 // layouts
 const runs = 'generateFloor';
-const EXEMPT = ['The Sunken Tavern', 'The Moonlit Orchard'];
+// The Goblin Market (bazaar, shuttered stalls, Stall Key, crowd patches) is the last theme reworked: its crowd patches (14 to 20, was 3 to 5 tripwire bells; the bells are a second kind now) draw different numbers from the rng, so it is exempt on the 'rooms'
+// path as well. The Final Chamber is the boss arena (layoutBoss) under FINAL_THEME: with no theme the arena is generated exactly as before (nothing draws from the rng for it), and the unthemed floors below keep the whole legacy comparison alive for every flag.
+const EXEMPT = ['The Sunken Tavern', 'The Moonlit Orchard', 'The Goblin Market'];
 const strip = (f, chap) => JSON.stringify(f, (k, v) => (k === 'style' && v === 'plank') || (chap && (k === 'style' || k === 'keyLabel' || k === 'label')) ? undefined : v);   // (the Chapel's doors and keys are renamed on purpose)
 for (let s = 1; s <= N; s++) {
   const seed = (s * 2654435761) >>> 0;
