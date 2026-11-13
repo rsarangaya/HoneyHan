@@ -18,15 +18,17 @@ const N = parseInt(process.argv[2], 10) || 40;
 let fails = 0, checked = 0;
 const fail = (w, m) => { if (++fails <= 20) console.log(`FAIL ${w}: ${m}`); };
 const ev = (ctx, code) => vm.runInContext(code, ctx);
-const names = ev(OLD, 'THEMES.map(t => t.name)'), CHAP = 'The Frozen Chapel';   // the legacy six (the Jungle is new, the Chapel is reworked on purpose: halls, ice seals, Frost Seal keys; its 'rooms' layout must still match)
+const names = ev(OLD, 'THEMES.map(t => t.name)'), CHAP = 'The Frozen Chapel', REWORKED = [CHAP, 'The Mushroom Cellar', 'The Clockwork Library'];   // the legacy six (the Jungle is new, the Chapel is reworked on purpose: halls, ice seals, Frost Seal keys; its 'rooms' layout must still match)
 
+// The Mushroom Cellar (caves, spore seals, Spore Key, dark pockets) and the Clockwork Library (aisles, clockwork gates, Gear Key) are reworked on purpose like the Chapel: their own door styles, key names, fog and
+// textures change what a floor holds, and with layoutStyle 'rooms' only those must still match (no extra rng calls, the same rooms and furniture).
 // views
 if (JSON.stringify(ev(NEW, 'THEMES.map(t => t.name)').slice(0, names.length)) !== JSON.stringify(names)) fail('views', 'THEMES names differ');
 for (const k of ['THEME_GIMMICK', 'THEME_NATIVES', 'THEME_BOSS']) {
   checked++; if (JSON.stringify(names.map(n => ev(NEW, k)[n])) !== JSON.stringify(names.map(n => ev(OLD, k)[n]))) fail('views', k + ' differs from the legacy table');
 }
 for (const n of names) {   // the schema carries the old colours and the old fixed fog density (not the reworked Chapel)
-  if (n === CHAP) { const c = ev(NEW, `THEME_BY_NAME[${JSON.stringify(n)}]`); checked++; if (c.layout.style !== 'halls' || c.doors.style !== 'ice' || c.doors.keyNames.vault !== 'Frost Seal' || c.fog.density !== 0.07) fail(n, 'not the reworked Chapel'); continue; }
+  if (REWORKED.includes(n)) { if (n !== CHAP) { const c = ev(NEW, `THEME_BY_NAME[${JSON.stringify(n)}]`); checked++; if (c.layout.style !== (n === 'The Mushroom Cellar' ? 'caves' : 'aisles') || c.doors.style !== (n === 'The Mushroom Cellar' ? 'spore' : 'gate')) fail(n, 'not the reworked theme'); continue; } const c = ev(NEW, `THEME_BY_NAME[${JSON.stringify(n)}]`); checked++; if (c.layout.style !== 'halls' || c.doors.style !== 'ice' || c.doors.keyNames.vault !== 'Frost Seal' || c.fog.density !== 0.07) fail(n, 'not the reworked Chapel'); continue; }
   const o = ev(OLD, `THEMES.find(t => t.name === ${JSON.stringify(n)})`), s = ev(NEW, `THEME_BY_NAME[${JSON.stringify(n)}]`);
   checked++;
   if (!s || s.pal.wall !== o.wall || s.pal.floor !== o.floor || s.pal.ceil !== o.ceil || s.pal.fog !== o.fog || s.pal.light !== o.light) fail(n, 'palette differs');
@@ -44,7 +46,7 @@ for (let s = 1; s <= N; s++) {
     const opts = { ...flags, themeName, depth: fl > 2 ? 1 : 0 };
     OLD.floorNum = NEW.floorNum = fl; OLD.runSeed = NEW.runSeed = seed;
     OLD.__o = opts; NEW.__o = { ...opts, layoutStyle: 'rooms' };
-    const chap = themeName === CHAP, a = strip(JSON.parse(JSON.stringify(vm.runInContext(`${runs}(${seed}, ${fl}, __o)`, OLD))), chap), b = strip(JSON.parse(JSON.stringify(vm.runInContext(`${runs}(${seed}, ${fl}, __o)`, NEW))), chap);
+    const chap = REWORKED.includes(themeName), a = strip(JSON.parse(JSON.stringify(vm.runInContext(`${runs}(${seed}, ${fl}, __o)`, OLD))), chap), b = strip(JSON.parse(JSON.stringify(vm.runInContext(`${runs}(${seed}, ${fl}, __o)`, NEW))), chap);
     checked++;
     if (a !== b) fail(`seed ${seed} ${themeName} floor ${fl}`, 'floor differs from the legacy generator');
   }

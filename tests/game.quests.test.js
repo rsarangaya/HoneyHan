@@ -362,14 +362,14 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   // ---- the sack thief, seed 10 (floor 2) ----
   const TH = await open(THIEF_SEED);
   await TH.evaluate(QH); await TH.evaluate(WH);
-  // Wandering: a thief that has not noticed you walks between its two rooms and never sees you from out of sight.
+  // Wandering: a thief that has not noticed you walks between its two rooms and never sees you from out of sight. (90 s: seed 10 is the Mushroom Cellar now, whose winding one-tile passages make the walk between two rooms longer than a plain floor's.)
   const tw = await TH.evaluate(() => {
     const q = Ws.fresh(2), P = game.player, out = { line: questLine(floor) };
     Ws.far(q.route);
     const th = new Enemy({ x: q.route[0].x, y: q.route[0].y, route: q.route, seed: q.seed, type: 'sackthief' }, floor);
     const noise = { events: [], emit() {}, shoot() {}, steal() {} }, dt = 1 / 60;
     let turns = 0, last = th.ri, alerted = false;
-    for (let i = 0; i < 60 * 40; i++) { th.update(dt, P, noise); if (th.ri !== last) { turns++; last = th.ri; } if (th.state === 'alerted') alerted = true; }
+    for (let i = 0; i < 60 * 90; i++) { th.update(dt, P, noise); if (th.ri !== last) { turns++; last = th.ri; } if (th.state === 'alerted') alerted = true; }
     out.turns = turns; out.alerted = alerted;
     return out;
   });

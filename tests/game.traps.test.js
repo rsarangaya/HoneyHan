@@ -392,7 +392,7 @@ run('Mimic, locked and trapped chests and bomb goblins', async ({ open, check })
   // 20. Loot from a locked chest is one grade up: checked against the same chest's table at tier + 1 (gear and gold), on floor 1.
   const grade = await page.evaluate(() => {
     T.reset(); Q.only();
-    const sig = list => list.filter(d => ['weapon', 'armor', 'shield', 'wand', 'rechargewand', 'rage'].includes(d.type)).map(d => [d.type, d.tier, d.base, d.kind, d.cls, d.unique].join(':')).sort().join('|');
+    const sig = list => list.filter(d => ['weapon', 'armor', 'shield', 'wand', 'rechargewand', 'rage'].includes(d.type)).map(d => d.type === 'rage' ? 'rage' : [d.type, d.tier, d.base, d.kind, d.cls, d.unique].join(':')).sort().join('|');   // (a Rage recorder is given its tier when it enters the pack, so only its type is compared)
     const gold = list => list.filter(d => d.type === 'gold').reduce((a, d) => a + d.n, 0);
     const chests = propObjs.filter(o => o.p.kind === 'chest' && !o.p.mimic && !o.p.holdsKey && (o.p.tier | 0) < 4).slice(0, 12);
     const out = { checked: 0, discriminating: 0, bad: [] };

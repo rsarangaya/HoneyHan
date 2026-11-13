@@ -153,7 +153,7 @@ Recommended starting values for Prototype Test (to tune by play):
 ### 5.5 Enemy and player symmetry
 The player is hit in head, body and legs by the same rules as enemies.
 - Armor by slot (helmet, chest, boots) protects its own zone.
-- Leg hits slow or cripple the player. Head hits can daze (short blur and stamina drain, kept mild).
+- Leg hits slow or cripple the player. Head hits can daze (short blur and stamina drain, kept mild). A dazed enemy (trap gas, spore clouds and seals, a hex) sees half as far while it lasts (js/enemy.js); it used to be only a tint.
 - Give the player slightly more health or armor than same-tier enemies since the player takes more attacks per run.
 
 ### 5.6 Readable telegraphs

@@ -838,7 +838,7 @@ class Enemy {
       this.dormant = false; this.justWoke = true; this.last = { x: player.x, z: player.z }; this.set('alerted');
     }
     const los = hasLOS(f, this.x, this.z, player.x, player.z);
-    let range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul * this.T.vis;
+    let range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1);   // a dazed guard (spore clouds, gas) sees half as far
     const cosA = (dx * -Math.sin(this.yaw) + dz * -Math.cos(this.yaw)) / dist;
     this.seen = los && dist < range && cosA > COS_HALF_FOV;
     // Smell (wolves): a moving player is noticed through walls and while crouching, but not a still one.

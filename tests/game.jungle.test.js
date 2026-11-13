@@ -181,7 +181,7 @@ run('Jungle and Frozen Chapel', async ({ open, check }) => {
 
   // ---------- the tuning panel and the storage key ----------
   page = await open(7);
-  const tp = await page.evaluate(async () => ({ key: (await (await fetch('js/tune.js')).text()).includes('prototype-test-tune-21'), text: document.body.textContent.includes('rustle') && document.body.textContent.includes('printAge') && document.body.textContent.includes('stealthCrouch') }));
-  check('the tuning panel lists the Jungle and Frozen numbers (storage key bumped to 21)', tp.text && tp.key, JSON.stringify(tp));
+  const tp = await page.evaluate(async () => ({ key: (await (await fetch('js/tune.js')).text()).includes('prototype-test-tune-22'), text: document.body.textContent.includes('rustle') && document.body.textContent.includes('printAge') && document.body.textContent.includes('stealthCrouch') }));
+  check('the tuning panel lists the Jungle and Frozen numbers (storage key bumped to 22 with the Cellar and Library numbers)', tp.text && tp.key, JSON.stringify(tp));
   await page.close();
 });

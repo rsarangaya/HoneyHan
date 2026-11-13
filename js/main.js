@@ -38,13 +38,14 @@ const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) ha
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5, UP_RISE = 1.4;   // the way down sinks 1.5 m; the way back up rises 1.4 m
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
-const PATCH_KINDS = THEME_DEFS.filter(t => t.mechanic.n).map(t => t.mechanic.kind);   // the decal kinds the themes' mechanics place (puddle, grass, glowcap, bell, ice)
+const PATCH_KINDS = THEME_DEFS.flatMap(t => t.mechanic.n ? [t.mechanic.kind, ...(t.mechanic.also || []).map(a => a.kind)] : []);   // the decal kinds the themes' mechanics place (puddle, grass, glowcap, dark, bell, ice, brush)
 let HUSH = theme.mechanic.hush || 1;           // the Library's dead silence: every sound you make carries farther
 // Mechanic handlers, by the theme's mechanic.kind: what standing on a decal of that kind does to the player (hot path: one lookup a frame, no allocation).
 //   slippery: you slide.  seen: multiplier on how far guards see you.  disc: glossary entry.
 const MECH_PATCH = {
   grass:   { seen: () => player.crouching ? 0.55 : 0.85, disc: ['item:grass', 'Tall grass'] },
-  glowcap: { seen: () => 1.4, disc: ['item:glow', 'Glowing spores'] },
+  glowcap: { seen: () => { const t = theme.mechanic.TUNE; return t && t.glow || 1.4; }, disc: ['item:glow', 'Glowing spores'] },
+  dark:    { seen: () => theme.mechanic.TUNE.dark, disc: ['item:dark', 'Dark pockets'] },   // the Cellar: guards see you x TUNE.dark here, and your footsteps are quieter (the frame loop)
   ice:     { slippery: true, disc: ['item:ice', 'Ice'] },
   brush:   { seen: () => { const t = theme.mechanic.TUNE; return player.crouching ? t.stealthCrouch : t.stealth; }, disc: ['item:brush', 'Thick brush'] },   // the Jungle: a player-only stealth bonus (enemies see through it as ever)
 };
@@ -189,10 +190,62 @@ const vaultTexture = base => paintTex(base, 'vault', 128, (g, S, rng, col) => {
   for (let i = 0; i < 4; i++) { g.fillStyle = shade(col, 1.15); g.fillRect(i * 32 + 14, 0, 4, S); g.fillRect(0, i * 32 + 14, S, 4); }
   speckle(g, S, 400, rng);
 });
+// Mushroom Cellar and Clockwork Library textures (256 px, painted once per theme).
+// Cap-stone wall: dark ashlar whose blocks have rounded caps, a wine rack set into the middle band (a lattice with bottle ends in every cell).
+const capstoneTexture = base => paintTex(base, 'cap', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 8; r++) for (let b = -1; b < 4; b++) {
+    if (r >= 3 && r <= 5) continue;
+    const x = b * 64 + (r % 2 ? 32 : 0), y = r * 32; g.fillStyle = shade(col, 0.68 + rng() * 0.32);
+    g.beginPath(); g.moveTo(x + 2, y + 31); g.lineTo(x + 2, y + 11); g.quadraticCurveTo(x + 32, y - 3, x + 62, y + 11); g.lineTo(x + 62, y + 31); g.fill();
+    if (rng() < 0.3) blob(g, x + 10 + rng() * 44, y + 8 + rng() * 14, 5 + rng() * 8, 3 + rng() * 4, 'rgba(120,210,190,0.16)');   // a bloom of spores
+  }
+  g.fillStyle = '#1c1210'; g.fillRect(0, 96, S, 96);
+  const glass = ['#2a4a3a', '#3a2a5a', '#2a3a4a', '#4a2a3a'];
+  for (let gy = 0; gy < 3; gy++) for (let gx = 0; gx < 8; gx++) { const cx = gx * 32 + 16, cy = 96 + gy * 32 + 16; blob(g, cx, cy, 11, 11, glass[(rng() * 4) | 0]); blob(g, cx - 3, cy - 3, 3.5, 3, 'rgba(255,255,255,0.28)'); }
+  g.fillStyle = '#4a3220'; for (let i = 0; i <= 8; i++) g.fillRect(i * 32 - 2, 96, 4, 96); for (let j = 0; j <= 3; j++) g.fillRect(0, 96 + j * 32 - 2, S, 4);
+  speckle(g, S, 1000, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.3)'); gr.addColorStop(0.12, 'rgba(0,0,0,0)'); gr.addColorStop(0.86, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.4)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+// Damp cellar floor: dark flagstones, wet sheen in the dips and a few glowing spores.
+const dampFloorTexture = base => paintTex(base, 'damp', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) for (const dx of [0, -85]) { const x = q * 85 + (r % 2 ? 30 : 0) + dx, y = r * 85; g.fillStyle = shade(col, 0.6 + rng() * 0.3); g.fillRect(x + 2, y + 2, 81, 81); }
+  for (let i = 0; i < 26; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 22, 5 + rng() * 12, 'rgba(70,120,140,0.14)');
+  for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 1 + rng() * 2, 1 + rng() * 2, 'rgba(140,255,210,0.35)');
+  speckle(g, S, 1500, rng);
+});
+// Library wall: rows of book spines (a small colour palette) on dark wood shelves with brass edging.
+const shelfWallTexture = base => paintTex(base, 'shelf', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.35); g.fillRect(0, 0, S, S);
+  const pal = ['#6a2a2a', '#2a4a6a', '#3a6a3a', '#6a5a2a', '#5a2a6a', '#4a3a2a', '#7a4a2a', '#2a5a5a'];
+  for (let row = 0; row < 4; row++) {
+    const y0 = row * 64;
+    for (let x = 5; x < S - 9;) {
+      const bw = 7 + rng() * 9, bh = 34 + rng() * 20;
+      if (rng() < 0.08) { x += 10; continue; }
+      g.fillStyle = pal[(rng() * 8) | 0]; g.fillRect(x, y0 + 57 - bh, bw, bh); g.fillStyle = 'rgba(255,255,255,0.13)'; g.fillRect(x, y0 + 57 - bh, 1.5, bh); g.fillStyle = 'rgba(201,162,58,0.7)'; g.fillRect(x, y0 + 63 - bh, bw, 2); x += bw + 1;
+    }
+    g.fillStyle = shade(col, 0.8); g.fillRect(0, y0 + 57, S, 7); g.fillStyle = 'rgba(201,162,58,0.55)'; g.fillRect(0, y0 + 57, S, 1.5);
+  }
+  g.fillStyle = shade(col, 0.7); g.fillRect(0, 0, 5, S); g.fillRect(S - 5, 0, 5, S);
+  speckle(g, S, 700, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.3)'); gr.addColorStop(0.12, 'rgba(0,0,0,0)'); gr.addColorStop(0.86, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.4)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+// Parquet: basket-weave blocks of four planks with a thin brass inlay.
+const parquetTexture = base => paintTex(base, 'parq', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.35); g.fillRect(0, 0, S, S);
+  for (let by = 0; by < 4; by++) for (let bx = 0; bx < 4; bx++) for (let i = 0; i < 4; i++) {
+    g.fillStyle = shade(col, 0.75 + rng() * 0.4);
+    if ((bx + by) % 2) g.fillRect(bx * 64 + 1, by * 64 + i * 16 + 1, 62, 14); else g.fillRect(bx * 64 + i * 16 + 1, by * 64 + 1, 14, 62);
+  }
+  g.fillStyle = 'rgba(201,162,58,0.28)'; g.fillRect(0, 126, S, 3); g.fillRect(126, 0, 3, S);
+  speckle(g, S, 1400, rng);
+});
 // Texture generators by the theme schema's tex keys (theme.tex.wall / floor / ceil), each from the theme's base colour.
 const TEX_GENERATORS = {
-  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c) },
-  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c) },
+  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c), capstone: c => capstoneTexture(c), shelf: c => shelfWallTexture(c) },
+  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c) },
   ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c) },
 };
 // Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'rough' (Jungle): a box whose side faces bulge a little (a hash of each vertex, so shared corners stay closed);
@@ -213,6 +266,8 @@ const DOOR_ANIM = {
   slide: (o, t) => { o.mesh.position.y = t * WALL_H; },
   roll: (o, t) => { const s = 1 - 0.95 * t; o.mesh.scale.y = s; o.mesh.position.y = (1 - s) * WALL_H + t * 0.5; },   // (the last 0.5 m lifts the rolled-up sliver above the ceiling plane, so a culling pass that shows the mesh again cannot reveal it)
   sink: (o, t) => { o.mesh.position.y = -t * (WALL_H + 0.2); },
+  wither: (o, t) => { o.mesh.scale.y = Math.max(0.03, 1 - t); },                                                  // spore seal: the fungus mound shrinks away
+  gate: (o, t) => { o.mesh.position.y = t * WALL_H; if (o.cogs) { o.cogs[0].rotation.z = t * 14; o.cogs[1].rotation.z = -t * 17; } },   // clockwork gate: slides up while its cogs spin
 };
 
 // Free one object's GPU memory. Anything flagged userData.shared (the per-theme textures, creature part geometries, shared merged
@@ -248,6 +303,8 @@ function buildFloor() {
   }
   group = new THREE.Group();
   const { w, h, tiles } = floor;
+  const movers = floor.movers || [];
+  for (const m of movers) { if (m.sliding) { m.k ^= 1; m.t = 0; m.sliding = false; } for (let i = 0; i < 4; i++) tiles[moverTile(m, i)] = T_FLOOR; }   // Library shelves: all 4 strip tiles open while the static walls are found (a floor left mid-slide has finished it)
   const solid = (x, y) => x < 0 || y < 0 || x >= w || y >= h || tiles[y * w + x] === T_WALL;
 
   // walls: only tiles that touch an open tile (8-neighbourhood) get a box
@@ -261,8 +318,8 @@ function buildFloor() {
   const wallTex = themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
   const rough = theme.wallStyle === 'rough', wallGeo = (WALL_GEO[theme.wallStyle] || WALL_GEO.box)();
   const m = new THREE.Matrix4(), wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
-  const wallMesh = (list, mat) => {                // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws
-    const im = new THREE.InstancedMesh(wallGeo, mat, list.length);
+  const wallMesh = (list, mat, extra = 0) => {     // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws. extra: spare instances at the end (the Library's sliding shelves)
+    const im = new THREE.InstancedMesh(wallGeo, mat, list.length + extra);
     list.forEach(([x, y], i) => {
       if (rough) { const hh = ((x * 73856093) ^ (y * 19349663)) >>> 0, k = 1 + ((hh >> 2) & 7) * 0.006; wq.setFromAxisAngle(yAxis, (hh & 3) * Math.PI / 2); m.compose(wp.set((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE), wq, ws.set(k, 1, k)); }
       else m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE);
@@ -277,7 +334,17 @@ function buildFloor() {
     for (const r of floor.rooms) if (r.locked) for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) if (x >= 0 && y >= 0 && x < w && y < h) mask[y * w + x] = 1;
     for (let i = wallPos.length - 1; i >= 0; i--) if (mask[wallPos[i][1] * w + wallPos[i][0]]) caveList.push(wallPos.splice(i, 1)[0]);
   }
-  const walls = wallMesh(wallPos, themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })));   // per-pixel lighting: torch light pools smoothly across big faces
+  const walls = wallMesh(wallPos, themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), movers.length * 2);   // per-pixel lighting: torch light pools smoothly across big faces
+  floor.moverMesh = null;
+  if (movers.length) {                              // the shelves are extra instances of the wall mesh (same texture, a little lower and slimmer): no extra draw call; updateMovers slides them
+    floor.moverMesh = walls; floor.moverBase = wallPos.length;
+    movers.forEach((mv, j) => {
+      for (let i = 0; i < 2; i++) walls.setMatrixAt(wallPos.length + j * 2 + i, m.compose(wp.set(0, WALL_H * 0.43, 0), wq.set(0, 0, 0, 1), mv.dx ? ws.set(0.98, 0.86, 0.86) : ws.set(0.86, 0.86, 0.98)));
+      for (let i = 2 * mv.k; i < 2 * mv.k + 2; i++) tiles[moverTile(mv, i)] = T_WALL;
+      posMover(mv, j, 0);
+    });
+    walls.instanceMatrix.needsUpdate = true;
+  }
   if (caveList && caveList.length) {
     wallMesh(caveList, themeTexture('cavemat', () => new THREE.MeshPhongMaterial({ map: themeTexture('cavewall', () => TEX_GENERATORS.wall.cave('#3a3830')), shininess: 2, specular: 0x050505 })));
     const dark = themeTexture('cavedark', () => new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }));
@@ -406,13 +473,94 @@ function updatePrints(dt) {
   P.chk = 0.5;                                      // twice a second: wipe the prints that have faded
   for (let i = 0; i < PRINT_N; i++) if (P.list[i].t > -1e8 && gameT - P.list[i].t > T.printAge) { P.list[i].t = -1e9; P.pos.fill(0, i * 12, i * 12 + 12); P.geo.attributes.position.needsUpdate = true; }
 }
+// ---- Clockwork Library sliding shelves (floor.movers, laid out in js/gen.js: a strip of 4 tiles along (dx, dy) from (x, y); a 2 tile shelf sits on half of it, k = 0 or 1, and slides to the other half).
+// Each cycle (TUNE.shelfEvery s) it rests, then slides for TUNE.shelfSlide s: the whole strip is wall while it moves (it blocks sight, movement and guards' paths: they all read floor.tiles), a grinding noise
+// (TUNE.shelfRing m) goes out, and anyone standing where it is heading is shoved clear (TUNE.shelfPush m past the shelf's edge). The shelf is two extra instances of the wall mesh: no extra draw, nothing allocated per frame. ----
+const moverTile = (m, i) => (m.y + m.dy * i) * floor.w + m.x + m.dx * i;
+function posMover(m, j, e) {                     // e: 0 to 1, how far the shelf is from its state k toward the other half
+  const a = floor.moverMesh.instanceMatrix.array, sg = m.k === 0 ? 1 : -1;
+  for (let i = 0; i < 2; i++) { const o = (floor.moverBase + j * 2 + i) * 16, t = 2 * m.k + i + sg * 2 * e; a[o + 12] = (m.x + m.dx * t + 0.5) * TILE; a[o + 14] = (m.y + m.dy * t + 0.5) * TILE; }
+}
+function shoveOut(o, r, m) {                     // move something whose collider circle touches the half the shelf is heading for (not just its centre tile) clear of it: to the side, else past an end. Returns 0 (not touching), 1 (moved) or -1 (nowhere free)
+  const push = theme.mechanic.TUNE.shelfPush;
+  let inside = false;
+  for (let i = 2 * (1 - m.k); i < 2 * (1 - m.k) + 2 && !inside; i++) {
+    const tx = m.x + m.dx * i, ty = m.y + m.dy * i, qx = Math.max(tx * TILE, Math.min(o.x, (tx + 1) * TILE)), qz = Math.max(ty * TILE, Math.min(o.z, (ty + 1) * TILE));
+    inside = (o.x - qx) ** 2 + (o.z - qz) ** 2 < r * r;
+  }
+  if (!inside) return 0;
+  const cx = (m.x + 0.5) * TILE, cz = (m.y + 0.5) * TILE, px = m.dy, pz = m.dx, u = (o.x - cx) * px + (o.z - cz) * pz, v = (o.x - cx) * m.dx + (o.z - cz) * m.dy, side = u >= 0 ? 1 : -1;
+  for (let c = 0; c < 4; c++) {                  // the near side, the far side, then the strip's two ends
+    const d = c < 2 ? (c ? -side : side) * (TILE / 2 + r + push) - u : 0, e = c < 2 ? 0 : (c === 2 ? -(TILE / 2 + r + push) : 3 * TILE + TILE / 2 + r + push) - v;
+    const nx = o.x + px * d + m.dx * e, nz = o.z + pz * d + m.dy * e;
+    if (!Player.wallHit(floor, nx, nz, r)) { o.x = nx; o.z = nz; return 1; }   // (wallHit sees every other wall too: never pushed into one)
+  }
+  return -1;
+}
+function updateMovers(dt) {
+  const ms = floor.movers; if (!ms || !floor.moverMesh) return;
+  const T = theme.mechanic.TUNE, every = T.shelfEvery, slide = T.shelfSlide;
+  let moved = false;
+  for (let j = 0; j < ms.length; j++) {
+    const m = ms[j]; m.t += dt;
+    if (!m.sliding) {
+      if (m.t < every - slide) continue;
+      for (let i = 0; i < 4; i++) floor.tiles[moverTile(m, i)] = T_WALL;   // the strip turns solid; the shelf grinds
+      let stuck = false;
+      const sp = shoveOut(player, player.radius, m); if (sp === 1) { player.vx = player.vz = 0; flash('A shelf shoves you aside.'); } else if (sp < 0) stuck = true;
+      for (const e of enemies) if (!e.dead && shoveOut(e, 0.4, m) < 0) stuck = true;
+      const al = Enemy.ally; if (al && !al.dead && al.floor === floor && shoveOut(al, 0.4, m) < 0) stuck = true;
+      if (stuck) { for (let i = 2 * (1 - m.k); i < 2 * (1 - m.k) + 2; i++) floor.tiles[moverTile(m, i)] = T_FLOOR; continue; }   // someone cannot be moved clear: the shelf waits a tick and tries again
+      m.sliding = true;
+      pending.push({ x: (m.x + m.dx * 1.5 + 0.5) * TILE, z: (m.y + m.dy * 1.5 + 0.5) * TILE, r: T.shelfRing, src: null });
+      if (discover('item:shelf', 'Moving shelves')) flash('Stone grinds on stone: a whole shelf is moving.');
+    }
+    const q = Math.min(1, (m.t - (every - slide)) / slide);
+    posMover(m, j, q * q * (3 - 2 * q)); moved = true;
+    if (q >= 1) {                                // arrived: the half it left opens again
+      for (let i = 2 * m.k; i < 2 * m.k + 2; i++) floor.tiles[moverTile(m, i)] = T_FLOOR;
+      m.k ^= 1; m.sliding = false; m.t = Math.max(0, m.t - every);
+    }
+  }
+  if (moved) { const im = floor.moverMesh.instanceMatrix; im.updateRange.offset = floor.moverBase * 16; im.updateRange.count = ms.length * 32; im.needsUpdate = true; }   // upload only the shelves' own matrices
+}
+// ---- Mushroom Cellar spore clouds: a small pool of translucent spheres (no lights). The puffer's death cloud and the spore seal's puff are clouds; every 0.5 s whoever stands in one is dazed (enemies always,
+// the player only for the seal). Nothing runs unless a cloud is up. ----
+const clouds = []; let cloudsOn = 0;
+function spawnCloud(x, z, r, dur, daze, hitPlayer) {
+  let c = null; for (let i = 0; i < clouds.length; i++) if (!clouds[i].on) { c = clouds[i]; break; }
+  if (!c) {
+    if (clouds.length >= 6) c = clouds[0];
+    else { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xa88ae0, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); scene.add(m); clouds.push(c = { m, on: false }); }
+  }
+  if (!c.on) cloudsOn++;
+  c.on = true; c.t = 0; c.tick = 0; c.r = r; c.dur = dur; c.daze = daze; c.hitPlayer = hitPlayer; c.x = x; c.z = z;
+  c.m.position.set(x, 0.6, z); c.m.visible = true;
+}
+function clearClouds() { for (const c of clouds) { c.on = false; c.m.visible = false; } cloudsOn = 0; }
+function updateClouds(dt) {
+  if (!cloudsOn) return;
+  for (let i = 0; i < clouds.length; i++) {
+    const c = clouds[i]; if (!c.on) continue;
+    c.t += dt;
+    if (c.t >= c.dur) { c.on = false; c.m.visible = false; cloudsOn--; continue; }
+    const k = c.t / c.dur;
+    c.m.scale.setScalar(c.r * (0.4 + 0.6 * Math.min(1, c.t / 0.4))); c.m.material.opacity = 0.3 * (k < 0.7 ? 1 : (1 - k) / 0.3);
+    if ((c.tick -= dt) > 0) continue;
+    c.tick = 0.5;
+    const r2 = c.r * c.r;
+    if (c.hitPlayer && !inSafe && (player.x - c.x) ** 2 + (player.z - c.z) ** 2 < r2 && pst.apply('daze', c.daze)) discover('status:daze', 'Daze');
+    for (let j = 0; j < enemies.length; j++) { const e = enemies[j]; if (!e.dead && (e.x - c.x) ** 2 + (e.z - c.z) ** 2 < r2) e.addStatus('daze', c.daze); }
+    const al = Enemy.ally; if (al && !al.dead && al.floor === floor && (al.x - c.x) ** 2 + (al.z - c.z) ** 2 < r2) al.addStatus('daze', c.daze);
+  }
+}
 // Jungle: an enemy standing in brush is drawn faint (its body material goes see-through) and is left off the dev minimap. Every third frame, only on brush floors.
 function updateBrush() {
   const fade = theme.mechanic.TUNE.fade;
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i], mt = e.mats[0];
-    if (!mt || e.dead) continue;
-    const inB = floor.patches.get(((e.z / TILE) | 0) * floor.w + ((e.x / TILE) | 0)) === 'brush';
+    if (!mt) continue;
+    const inB = !e.dead && floor.patches.get(((e.z / TILE) | 0) * floor.w + ((e.x / TILE) | 0)) === 'brush';   // (a body is never faint: it resets to solid)
     if (inB === !!e.inBrush && (!inB || mt.opacity === fade)) continue;
     e.inBrush = inB; mt.transparent = inB; mt.opacity = inB ? fade : 1;
   }
@@ -716,6 +864,7 @@ Enemy.burst = e => {
   }
   for (const o of enemies) if (o !== e && !o.dead && Math.hypot(o.x - e.x, o.z - e.z) < 3) o.addStatus('slow', 4);
   const al = Enemy.ally; if (al && !al.dead && al.floor === floor && Math.hypot(al.x - e.x, al.z - e.z) < 3) al.addStatus('slow', 4);
+  const mt = theme.mechanic.TUNE; if (mt && mt.cloudDur) spawnCloud(e.x, e.z, mt.cloudR, mt.cloudDur, mt.cloudDaze, false);   // the Cellar: the cloud stays and dazes enemies standing in it
 };
 
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
@@ -872,7 +1021,7 @@ const bombs = (() => {
     return { g, sp, t: 0, x: 0, z: 0, on: false };
   });
 })();
-function clearBombs() { gasFx.on = false; gasFx.m.visible = false; for (const b of bombs) { b.on = false; b.g.visible = false; } for (const f of blastFx) { f.on = false; f.m.visible = false; } }
+function clearBombs() { clearClouds(); gasFx.on = false; gasFx.m.visible = false; for (const b of bombs) { b.on = false; b.g.visible = false; } for (const f of blastFx) { f.on = false; f.m.visible = false; } }
 const blastDmg = d => BOMB.dmg * (1 - BOMB.falloff * d / BOMB.radius);          // full at the centre, (1 - falloff) of it at the edge
 function explodeAt(x, z, src) {
   let fx = blastFx[0]; for (const f of blastFx) if (!f.on) { fx = f; break; }
@@ -1261,7 +1410,8 @@ function finishSearch(o, smashed) {
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
-    if (theme.doors.noise) loud(theme.doors.noise);                         // an ice seal shatters loudly
+    if (theme.doors.noise) loud(theme.doors.noise);                         // an ice seal shatters loudly, a gate grinds
+    if (theme.doors.style === 'spore') { const T = theme.mechanic.TUNE; spawnCloud(o.x, o.z, T.puffR, T.puffDur, T.puffDaze, true); flash('The spore seal bursts: a cloud of spores!'); }
     flash(`Unlocked the ${o.p.room}`); questDoorOpened(o);
     return;
   }
@@ -1664,14 +1814,14 @@ function frame(now) {
     gameT += dt;
     updateRespawn(dt);
     updateArrows(dt);
-    updateDoors(dt);
+    updateDoors(dt); updateMovers(dt);
     if (prisonerWalk) prisonerStep(Math.min(dt, 0.05));                                // a freed prisoner on its way to the stairs (js/quests.js): only while one is walking
     const events = pending.splice(0);              // noises guards made last frame
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
     const under = floor.patches.get(player.tileY * floor.w + player.tileX), mt = theme.mechanic.TUNE;
     const hush = HUSH * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * hush }); rings.push({ x: player.x, z: player.z, r: pulse * hush, t: 0 }); }
-    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush });   // brush rustles: +3 m while you move in it
+    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (under === 'dark' ? mt.darkFoot : 1) });   // brush rustles: +3 m while you move in it
     if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
       floor.patches.delete(player.tileY * floor.w + player.tileX);
       const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;
@@ -1688,7 +1838,7 @@ function frame(now) {
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
-    updateBombs(dt); updateGas(dt);
+    updateBombs(dt); updateGas(dt); updateClouds(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

@@ -62,8 +62,9 @@ for (let s = 1; s <= N; s++) {
       mapStats[n - 1].open += open; mapStats[n - 1].corr += open - inR; mapStats[n - 1].n++;
       for (const pr of f.props) if (pr.kind === 'chest') { if (!Number.isInteger(pr.tier) || pr.tier < 0 || pr.tier > 4) fail(where, `chest tier ${pr.tier}`); else tierCounts[n - 1][pr.tier]++; }
     }
-    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice', 'brush'].includes(d.kind));
-    if (gim && !boss && (patches.length < gim.n[0] - 2 || patches.length > gim.n[1] || patches.some(d => d.kind !== gim.kind))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
+    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice', 'brush', 'dark'].includes(d.kind)), also = (G.THEMES.find(t => t.name === themeName) || { mechanic: {} }).mechanic.also || [];   // (the Cellar's second kind: dark pockets)
+    const gmin = gim && gim.n[0] + also.reduce((a, g) => a + g.n[0], 0), gmax = gim && gim.n[1] + also.reduce((a, g) => a + g.n[1], 0);
+    if (gim && !boss && (patches.length < gmin - 2 || patches.length > gmax || patches.some(d => d.kind !== gim.kind && !also.some(g => g.kind === d.kind)))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
     if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
     for (const d of patches) if (f.tiles[d.y * f.w + d.x] === G.T_WALL || f.blocked[d.y * f.w + d.x] || (d.x === f.start.x && d.y === f.start.y)) fail(where, `a ${d.kind} patch on a wall, furniture or the start tile`);
     if (armory && !f.rooms.some(r => r.theme === 'armory')) fail(where, 'armory missing');
@@ -836,9 +837,9 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
 // only through its door and with its key, one key per door in a chest outside the locked rooms, the join tile open, reachable floor, the door's style and key name from the theme,
 // props and guard waypoints reachable, and the style's own look (clearings: big rooms, trees; halls: long naves, colonnades, side chapels).
 {
-  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal']];
+  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal'], ['The Mushroom Cellar', 'caves', 'spore', 'Spore Key'], ['The Clockwork Library', 'aisles', 'gate', 'Gear Key']];
   const QUESTS = [undefined, 'miniboss', 'prisoner', 'shrine', 'wanted', 'thief', 'ally'];
-  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99;
+  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99, caveFloors = 0, caveRooms = 0, darks = 0, rowFloors = 0, shelves = 0, shelfRooms = 0;
   for (const [themeName, style, doorStyle, keyName] of STYLES) for (let s = 1; s <= Math.max(80, N); s++) for (let fl = 1; fl <= 4; fl++) {
     const seed = (s * 2246822519 + 31) >>> 0, flags = { armory: fl === 1 + (s % 4), shop: s % 3 === 0 && fl === 2, quest: QUESTS[(s + fl) % QUESTS.length] };
     const where = `${style} seed ${seed} floor ${fl}`;
@@ -873,14 +874,45 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
       if (!j || f.tiles[at(j.x, j.y)] !== 1 || f.blocked[at(j.x, j.y)] || !closed[at(j.x, j.y)]) fail(where, `the join tile of the locked ${r.theme} is not open reachable floor`);
     }
     if (style === 'clearings') { if (ordinary.some(r => r.w >= 8 || r.h >= 8)) big++; }
-    else {
+    else if (style === 'caves') {                                                       // small chambers (a side of 6 or more never appears), a few more than usual, winding one tile passages, dark pockets and glowcaps
+      caveFloors++; caveRooms += ordinary.length;
+      if (ordinary.some(r => r.w > 5 || r.h > 5)) fail(where, 'a cave chamber bigger than 5');
+      const dk = f.decor.filter(d => d.kind === 'dark').length, gl = f.decor.filter(d => d.kind === 'glowcap').length; darks += dk;
+      if (dk < 2 || dk > 6 || gl < 3 || gl > 8) fail(where, `${dk} dark pockets, ${gl} glowcaps`);
+      if (f.decor.some(d => d.kind === 'dark' && (f.tiles[at(d.x, d.y)] === G.T_WALL || f.tiles[at(d.x, d.y)] === G.T_DOOR))) fail(where, 'a dark pocket on a wall or a door');
+      if (f.movers) fail(where, 'cave floors have no moving shelves');
+    } else if (style === 'aisles') {                                               // shelf rows (walls inside rooms) and sliding shelves: 4 open tiles in a row inside a large room, nothing on them, nothing cut off in any state
+      const inside = f.rooms.filter(r => !r.locked && r.w >= 5 && r.h >= 5 && (() => { let n = 0; for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) if (f.tiles[at(x, y)] === G.T_WALL) n++; return n >= 3; })());
+      if (inside.length) rowFloors++;
+      for (const r of inside) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (f.tiles[at(x, y)] === G.T_WALL && (x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1) && !f.rooms.some(o => o !== r && inRoom(o, x, y))) fail(where, 'a shelf row on the outer ring of its room');   // (a room overlapping this one may have shelves of its own there)   // the ring stays an open aisle
+      const g = { ...f, tiles: Uint8Array.from(f.tiles) };
+      for (const m of f.movers || []) {
+        shelves++;
+        const room = f.rooms.find(r => !r.locked && inRoom(r, m.x, m.y) && inRoom(r, m.x + m.dx * 3, m.y + m.dy * 3));   // one room holds the whole strip
+        for (let k = 0; k < 4; k++) { const x = m.x + m.dx * k, y = m.y + m.dy * k; if (!room || f.tiles[at(x, y)] !== 1 || f.blocked[at(x, y)]) fail(where, `shelf strip tile ${x},${y} is not open floor in a room`); g.tiles[at(x, y)] = G.T_WALL; }
+        if (!f.rooms.some(r => !r.locked && r !== f.rooms[0] && r.w >= 6 && r.h >= 6 && inRoom(r, m.x, m.y) && inRoom(r, m.x + m.dx * 3, m.y + m.dy * 3))) fail(where, 'a moving shelf outside a large room or in the start room');
+        if (![0, 1].includes(m.k) || !(m.t >= 0)) fail(where, 'bad shelf state');
+      }
+      if (f.movers && f.movers.length) {
+        const gc = flood(g, false);                                                  // every strip walled at once (a superset of both states and of a slide)
+        if (!touchable(g, gc, f.stairs.x, f.stairs.y)) fail(where, 'stairs cut off when every shelf strip is solid');
+        for (const p of f.props) if (!touchable(g, flood(g, true), p.x, p.y)) fail(where, `${p.kind} cut off when every shelf strip is solid`);
+        for (const r of f.rooms.filter(r => !r.locked)) if (!gc[at(r.cx, r.cy)]) fail(where, 'a room is cut off when every shelf strip is solid');
+        shelfRooms += f.rooms.filter(r => (f.movers || []).some(m => m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h)).length;
+      }
+      for (const m of f.movers || []) if (f.movers.filter(o => o !== m && Math.abs(o.x - m.x) < 4 && Math.abs(o.y - m.y) < 4 && f.rooms.some(r => m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h && o.x >= r.x && o.x < r.x + r.w && o.y >= r.y && o.y < r.y + r.h)).length > 1) fail(where, 'more than 2 shelves in one room area');
+    } else {
       if (ordinary.some(r => Math.max(r.w, r.h) >= 9 && Math.min(r.w, r.h) >= 7)) tall++;
       if (ordinary.some(r => r.w === 4 && r.h === 4)) chapels++;
       if (f.decor.some(d => d.kind === 'pew' || d.kind === 'brokenaltar')) pillars++;
     }
   }
   console.log(`layout styles: ${floors} floors, ${locked} locked doors, smallest floor has ${minRooms} ordinary rooms; clearings with a big room ${big}, halls with a nave ${tall}, with side chapels ${chapels}, with pews ${pillars}; shops ${shops}, encounters ${quests}`);
+  const meanCave = caveRooms / (caveFloors || 1);
+  console.log(`caves: ${caveFloors} floors, ${meanCave.toFixed(1)} ordinary rooms a floor, ${darks} dark pockets; aisles: ${rowFloors} floors with shelf rows, ${shelves} sliding shelves in ${shelfRooms} rooms`);
   if (!big || !tall || !chapels || !pillars || !locked || !shops || !quests) fail('layout styles', 'a style never produced its look, a shop, a locked room or an encounter');
+  if (!darks || meanCave < 7) fail('caves', `dark pockets ${darks}, ${meanCave.toFixed(1)} rooms a floor (want 7 or more: 2 more than the usual 8 to 11 would give on a small map)`);
+  if (rowFloors < 60 || !shelves || !shelfRooms) fail('aisles', 'no shelf rows or no sliding shelves came out');
 }
 
 console.log(`${checked} floors checked, ${fails} failures`);

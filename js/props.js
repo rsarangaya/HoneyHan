@@ -3,10 +3,10 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, bench: 0.55, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, brush: 0, fern: 0, glowmoss: 0, vines: 0, hammock: 0, log: 0.9, idol: 0.5, pew: 0.8, brokenaltar: 0.8, candlestand: 0.2, icicles: 0, snowdrift: 0, shaft: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, brush: 0, fern: 0, glowmoss: 0, vines: 0, hammock: 0, log: 0.9, idol: 0.5, pew: 0.8, brokenaltar: 0.8, candlestand: 0.2, icicles: 0, snowdrift: 0, shaft: 0, winerack: 0.8, mushroom: 0.6, stalactites: 0, dark: 0, orrery: 0.7, clock: 0.45, scrolltable: 0.9, globe: 0.5, ladder: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
-  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0, hammock: 1.2, shaft: 1.45, candlestand: 1.1 };
+  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0, hammock: 1.2, shaft: 1.45, candlestand: 1.1, winerack: 1.2, clock: 1.2, ladder: 1.35 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
   candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 },
@@ -205,6 +205,24 @@ const DOOR_BUILDERS = {
     SP(inner, 0.4, 0.4, 0.1, glow(0x7ad8ff), 0, 1.4, 0.2);                                                                  // a frozen rune over the lock
     for (const x of [-0.6, -0.2, 0.3, 0.7]) { const ic = new THREE.Mesh(cached('dicicle', () => new THREE.ConeGeometry(0.07, 0.4, 5)), glass); ic.rotation.x = Math.PI; ic.position.set(x, dh - 0.4, 0.2); ic.scale.y = 0.7 + rg() * 0.8; inner.add(ic); }
   },
+  // Spore seal (Mushroom Cellar): a lumpy purple fungus mound heaped in the doorway, spotted with glowing teal, small caps at its foot and a glowing sac over the lock. Opens by shrinking away (DOOR_ANIM.wither) and bursts into spores.
+  spore(inner, dr) {
+    const rg = makeRng(dr.x * 131 + dr.y), dh = WALL_H - 0.1, fung = [lam(0x5a3a7a), lam(0x6a4a8a), lam(0x4a3a6a)], pale = lam(0xd8d0f0);
+    B(inner, 3.0, dh, 0.3, lam(0x1a1226), 0, dh / 2, 0);                                                                    // the dark core fills the doorway
+    for (let c = 0; c < 5; c++) for (let r = 0; r < 4; r++) { const k = 0.8 + rg() * 0.5; SP(inner, 0.95 * k, 1.0 * k, 0.8 * k, fung[(c + r) % 3], (c - 2) * 0.62 + (rg() - 0.5) * 0.2, 0.5 + r * 0.9 + (rg() - 0.5) * 0.2, 0.15 + rg() * 0.15, rg() * 3); }   // the mound, in lumps
+    for (let i = 0; i < 10; i++) SP(inner, 0.14, 0.12, 0.1, glow(0x6affd0), (rg() - 0.5) * 2.4, 0.4 + rg() * (dh - 0.8), 0.5 + rg() * 0.12, 0);   // glowing spots
+    for (let i = 0; i < 5; i++) { const x = (rg() - 0.5) * 2.6, z = 0.5 + rg() * 0.25; C(inner, 0.04, 0.05, 0.3, pale, x, 0.15, z, 6); SP(inner, 0.3, 0.14, 0.3, lam(0x8a5ab0), x, 0.34, z, 0); }   // caps at its foot
+    SP(inner, 0.38, 0.38, 0.3, glow(0x8affd8), 0.9, 1.3, 0.6);                                                              // the lock: a glowing spore sac (the Spore Key)
+  },
+  // Clockwork gate (Library): brass bars in a dark frame (you can see through them), a lock plate, and two cogs on the head (made in makeDoor so they can spin). Slides up (DOOR_ANIM.gate).
+  gate(inner, dr) {
+    const dh = WALL_H - 0.1, brass = lam(0xb8923a, 0x2a2008), dark = lam(0x2a2018);
+    B(inner, 3.0, 0.2, 0.4, dark, 0, 0.1, 0); B(inner, 3.0, 0.2, 0.4, dark, 0, dh - 0.1, 0);                                // sill and head
+    for (const x of [-1.45, 1.45]) B(inner, 0.2, dh, 0.4, brass, x, dh / 2, 0);                                             // posts
+    for (let i = 0; i < 11; i++) B(inner, 0.07, dh - 0.3, 0.07, brass, -1.25 + i * 0.25, dh / 2, 0);                         // bars
+    for (const y of [0.7, 1.5, 2.3]) B(inner, 2.7, 0.08, 0.1, dark, 0, y, 0);                                                // rails
+    B(inner, 0.4, 0.5, 0.12, brass, 0.9, 1.3, 0.1); B(inner, 0.07, 0.14, 0.1, dark, 0.9, 1.3, 0.17);                         // lock plate and keyhole (the Gear Key)
+  },
   plank(inner, dr) {
   const rg = makeRng(dr.x * 131 + dr.y);
   const dh = WALL_H - 0.1;                                                                           // planks fill the doorway up to the ceiling
@@ -222,11 +240,20 @@ const DOOR_BUILDERS = {
 function makeDoor(dr) {
   const inner = new THREE.Group();
   (DOOR_BUILDERS[dr.style] || DOOR_BUILDERS.plank)(inner, dr);
-  if (dr.style === 'cave' || dr.style === 'ice') bakeMeshes(inner, NO_SKIP, { flash: null });                // the many small parts merge into 2 or 3 meshes (js/perf.js)
+  if (dr.style === 'cave' || dr.style === 'ice' || dr.style === 'spore' || dr.style === 'gate') bakeMeshes(inner, NO_SKIP, { flash: null });   // the many small parts merge into 2 or 3 meshes (js/perf.js)
   const mesh = new THREE.Group();
   const x = (dr.x + 0.5) * TILE, z = (dr.y + 0.5) * TILE;
   mesh.add(inner); mesh.position.set(x, 0, z); mesh.rotation.y = dr.axis === 'x' ? Math.PI / 2 : 0;
-  return { p: { kind: 'door', opened: false, x: dr.x, y: dr.y, lock: dr.lock, room: dr.room, keyLabel: dr.keyLabel }, mesh, x, z, r: 0, lid: null, mats: [] };
+  let cogs = null;
+  if (dr.style === 'gate') {                                       // two meshing cogs on the head: each is one baked mesh in its own group, turned by DOOR_ANIM.gate
+    const brass = lam(0xb8923a, 0x2a2008);
+    cogs = [[-0.55, 0.5, 12], [0.3, 0.38, 10]].map(([cx, r, n]) => {
+      const g = new THREE.Group(), disc = C(g, r, r, 0.08, brass, 0, 0, 0, 16); disc.rotation.x = Math.PI / 2;
+      for (let i = 0; i < n; i++) { const a = i * 2 * Math.PI / n; B(g, 0.13, 0.13, 0.08, brass, Math.cos(a) * (r + 0.04), Math.sin(a) * (r + 0.04), 0, 0, a); }
+      bakeMeshes(g, NO_SKIP, { flash: null }); g.position.set(cx, WALL_H - 0.9, 0.24); mesh.add(g); return g;
+    });
+  }
+  return { p: { kind: 'door', opened: false, x: dr.x, y: dr.y, lock: dr.lock, room: dr.room, keyLabel: dr.keyLabel }, mesh, x, z, r: 0, lid: null, mats: [], cogs };
 }
 
 // ---- furniture and decals: lived-in details for the guards' home ----
@@ -321,6 +348,76 @@ function makeDecor(d) {
       const b = B(inner, 0.9, 3.0, 1.4, new THREE.MeshBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.08, depthWrite: false }), 0, 1.5, 0.8); b.rotation.x = -0.45;
       break;
     }
+    // ---- Mushroom Cellar ----
+    case 'winerack': {                                             // a dark rack of bottle butts in a wooden lattice
+      const fr = lam(0x4a3220), gl = [lam(0x2a4a3a), lam(0x3a2a5a), lam(0x2a3a4a), lam(0x4a2a3a)];
+      RB(inner, 1.9, 2.1, 0.5, lam(0x1c1210), 0, 1.05, 0);
+      for (let i = 0; i <= 5; i++) B(inner, 0.05, 2.1, 0.52, fr, -0.85 + i * 0.34, 1.05, 0);
+      for (let j = 0; j <= 4; j++) B(inner, 1.9, 0.05, 0.52, fr, 0, 0.1 + j * 0.5, 0);
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 5; i++) if (rg() > 0.15) C(inner, 0.1, 0.1, 0.1, gl[(i + j) % 4], -0.68 + i * 0.34, 0.35 + j * 0.5, 0.26, 8).rotation.x = Math.PI / 2;   // a bottle's base in each cell
+      break;
+    }
+    case 'mushroom': {                                             // a giant mushroom: a pale stem, a broad purple cap with teal spots (blocks the way)
+      const cap = [lam(0x7a4a9a), lam(0x5a3a8a)], stem = lam(0xd8d0f0);
+      C(inner, 0.28, 0.4, 1.8, stem, 0, 0.9, 0, 10); SP(inner, 2.3, 0.9, 2.3, cap[0], 0, 2.1, 0); SP(inner, 1.9, 0.5, 1.9, cap[1], 0, 1.8, 0);
+      for (let i = 0; i < 7; i++) { const a = i * 0.9 + rg(), r = 0.5 + rg() * 0.5; SP(inner, 0.22, 0.1, 0.22, glow(0x6affd0), Math.cos(a) * r, 2.45 - r * 0.12, Math.sin(a) * r, 0); }
+      for (let i = 0; i < 3; i++) { const x = (rg() - 0.5) * 1.4, z = 0.5 + rg() * 0.4; C(inner, 0.03, 0.04, 0.2, stem, x, 0.1, z, 6); SP(inner, 0.2, 0.1, 0.2, cap[i % 2], x, 0.22, z, 0); }
+      break;
+    }
+    case 'stalactites': {                                          // rock teeth hanging from the ceiling
+      const top = WALL_H / (d.scale || 1), rm = lam(0x5a5468);
+      for (let i = 0; i < 8; i++) { const len = 0.5 + rg() * 1.2, c = new THREE.Mesh(cached('stalac', () => new THREE.ConeGeometry(0.12, 1, 6)), rm); c.rotation.x = Math.PI; c.scale.set(0.6 + rg() * 0.9, len, 0.6 + rg() * 0.9); c.position.set((rg() - 0.5) * 2.4, top - len / 2, (rg() - 0.5) * 2.4); inner.add(c); }
+      break;
+    }
+    case 'dark': {                                                 // a dark pocket: a soft black disc on the floor (the Cellar's mechanic: it hides you and muffles your steps)
+      const dk = new THREE.Mesh(cached('darkdisc', () => new THREE.CircleGeometry(1.5, 16)), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5, depthWrite: false }));
+      dk.rotation.x = -Math.PI / 2; dk.position.y = 0.018; inner.add(dk);
+      break;
+    }
+    // ---- Clockwork Library ----
+    case 'ladder': {                                               // a library ladder leaning on the shelves (a wall decal)
+      const wd = lam(0x6a4a2a), lg = new THREE.Group();
+      for (const sx of [-1, 1]) B(lg, 0.07, 3.1, 0.07, wd, sx * 0.32, 1.55, 0);
+      for (let i = 0; i < 9; i++) B(lg, 0.64, 0.05, 0.05, wd, 0, 0.3 + i * 0.31, 0);
+      B(lg, 0.8, 0.04, 0.06, lam(0xb8923a, 0x2a2008), 0, 3.05, 0.04);                                                       // a brass rail on the top
+      lg.position.z = 0.45; lg.rotation.x = -0.18; inner.add(lg);
+      break;
+    }
+    case 'orrery': {                                               // brass rings and planets round a glowing sun, on a pedestal
+      const br = lam(0xb8923a, 0x2a2008);
+      LA(inner, [[0, 0], [0.55, 0], [0.45, 0.1], [0.2, 0.2], [0.12, 0.9], [0.0, 0.9]], lam(0x3a2a1c), 0, 0, 0, 14);
+      SP(inner, 0.3, 0.3, 0.3, glow(0xffd070), 0, 1.35, 0);
+      for (const [R, tilt, c] of [[0.5, 0.2, 0xc8c8d0], [0.8, -0.35, 0xb8923a], [1.1, 0.5, 0x6a9ac8]]) {
+        const ring = new THREE.Mesh(cached(`orr${R}`, () => new THREE.TorusGeometry(R, 0.015, 5, 24)), br); ring.rotation.set(Math.PI / 2 + tilt, 0, tilt); ring.position.y = 1.35; inner.add(ring);
+        const a = rg() * 6.28; SP(inner, 0.13, 0.13, 0.13, lam(c), Math.cos(a) * R, 1.35 + Math.sin(a) * R * Math.sin(tilt), Math.sin(a) * R * Math.cos(tilt), 0);
+      }
+      break;
+    }
+    case 'clock': {                                                // a tall case clock: a dark trunk, a window onto a brass pendulum, a cream face
+      const wd = lam(0x3a2418), br = lam(0xb8923a, 0x2a2008);
+      RB(inner, 0.7, 0.3, 0.5, wd, 0, 0.15, 0); RB(inner, 0.5, 1.5, 0.4, wd, 0, 1.05, 0); RB(inner, 0.7, 0.6, 0.5, wd, 0, 2.1, 0); RB(inner, 0.6, 0.1, 0.55, wd, 0, 2.5, 0);
+      const face = C(inner, 0.22, 0.22, 0.03, lam(0xe6dcc0), 0, 2.1, 0.26, 20); face.rotation.x = Math.PI / 2;
+      B(inner, 0.03, 0.18, 0.02, lam(0x1a1410), 0, 2.18, 0.285); B(inner, 0.12, 0.03, 0.02, lam(0x1a1410), 0.05, 2.1, 0.285);
+      B(inner, 0.3, 1.0, 0.02, lam(0x1a1410), 0, 1.1, 0.205); C(inner, 0.012, 0.012, 0.9, br, 0, 1.2, 0.215, 5); C(inner, 0.09, 0.09, 0.02, br, 0, 0.75, 0.22, 12).rotation.x = Math.PI / 2;
+      break;
+    }
+    case 'scrolltable': {                                          // a worktable strewn with scrolls, a map and an inkpot
+      RB(inner, 1.7, 0.1, 0.95, wood, 0, 0.85, 0);
+      for (const sx of [-0.75, 0.75]) for (const sz of [-0.35, 0.35]) LA(inner, [[0, 0], [0.06, 0], [0.045, 0.2], [0.055, 0.8], [0.0, 0.8]], wood2, sx, 0, sz, 8);
+      B(inner, 0.7, 0.01, 0.5, lam(0xd8c898), 0.25, 0.91, 0.05, rg() * 0.6);
+      for (let i = 0; i < 4; i++) { const sc = C(inner, 0.05, 0.05, 0.45 + rg() * 0.3, lam(0xe6dcb8), -0.6 + i * 0.12 + (rg() - 0.5) * 0.1, 0.96, -0.15 + (rg() - 0.5) * 0.3, 8); sc.rotation.z = Math.PI / 2; sc.rotation.y = rg() * 3; }
+      LA(inner, [[0, 0], [0.05, 0], [0.065, 0.13], [0.06, 0.13], [0.0, 0.12]], lam(0x1a1a22), -0.3, 0.9, 0.3, 8);
+      break;
+    }
+    case 'globe': {                                                // a globe in a brass meridian on a turned stand
+      const br = lam(0xb8923a, 0x2a2008);
+      LA(inner, [[0, 0], [0.3, 0], [0.2, 0.1], [0.08, 0.2], [0.08, 0.8], [0.0, 0.8]], lam(0x3a2418), 0, 0, 0, 12);
+      SP(inner, 0.7, 0.7, 0.7, lam(0x2a5a8a), 0, 1.15, 0);
+      for (let i = 0; i < 4; i++) { const a = rg() * 6.28, b = (rg() - 0.5) * 1.6; SP(inner, 0.22, 0.14, 0.22, lam(0x4a8a4a), Math.cos(a) * Math.cos(b) * 0.33, 1.15 + Math.sin(b) * 0.33, Math.sin(a) * Math.cos(b) * 0.33, 0); }
+      const ring = new THREE.Mesh(cached('globering', () => new THREE.TorusGeometry(0.42, 0.02, 5, 24)), br); ring.position.y = 1.15; ring.rotation.z = 0.4; inner.add(ring);
+      C(inner, 0.015, 0.015, 0.95, br, -0.08, 1.15, 0, 5).rotation.z = 0.4;
+      break;
+    }
     case 'bed': {
       RB(inner, 2.0, 0.3, 1.1, wood, 0, 0.17, 0);                                                    // frame
       RB(inner, 1.88, 0.14, 0.98, straw, 0, 0.4, 0);                                                 // straw tick
@@ -329,6 +426,7 @@ function makeDecor(d) {
       RB(inner, 0.1, 0.75, 1.12, wood, -1.0, 0.45, 0);                                               // headboard
       for (const z of [0.5, -0.5]) LA(inner, [[0.0, 0], [0.05, 0], [0.04, 0.3], [0.06, 0.5], [0.0, 0.5]], wood, 1.0, 0, z, 8);   // turned foot posts
       if (rg() < 0.5) SP(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
+      break;
     }
     case 'puddle': {                                               // a flat, glossy patch of shallow water
       const pm = new THREE.MeshBasicMaterial({ color: 0x3a6a9a, transparent: true, opacity: 0.55 });
@@ -367,6 +465,7 @@ function makeDecor(d) {
       C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.02, 1.07, 0.12, 14); C(inner, 0.17, 0.17, 0.02, lam(0xb8bcc4), 0.5, 1.07, 0.12, 14);
       for (const x of [-0.1, 0.75]) RB(inner, 0.22, 0.2, 0.22, lam(0x6a4a2a), x, 1.13, -0.15);                                                             // goods crates
       flame(inner, -0.95, 1.2, -0.25); C(inner, 0.02, 0.02, 0.18, iron, -0.95, 1.1, -0.25, 6);
+      break;
     }
     case 'bookshelf': {
       RB(inner, 1.8, 2.3, 0.45, wood, 0, 1.15, 0);
@@ -382,6 +481,7 @@ function makeDecor(d) {
         }
       }
       LA(inner, [[0, 0], [0.07, 0], [0.05, 0.1], [0.09, 0.2], [0.0, 0.22]], lam(0xc9a23a, 0x2a2008), 0.6, 2.3, 0.05, 8);   // a vase on top
+      break;
     }
     case 'weaponrack': {
       RB(inner, 1.4, 1.5, 0.08, wood, 0, 0.9, 0);
@@ -389,6 +489,7 @@ function makeDecor(d) {
       for (let i = 0; i < 4; i++) RB(inner, 0.06, 0.9 + rg() * 0.5, 0.03, lam(0x9a9ea6), -0.5 + i * 0.33, 1.0, 0.12, 0, (rg() - 0.5) * 0.2);
       const sh = C(inner, 0.22, 0.22, 0.05, wood2, 0.45, 1.35, 0.12, 16); sh.rotation.x = Math.PI / 2;      // a round shield on the board
       SP(inner, 0.1, 0.1, 0.06, lam(0x9a9ea6), 0.45, 1.35, 0.17);                                       // its boss
+      break;
     }
     case 'barrels': {
       const spots = [[-0.5, -0.2], [0.35, -0.3], [0.0, 0.35]];
@@ -397,6 +498,7 @@ function makeDecor(d) {
         for (const [y, r] of [[0.18, 0.32], [0.62, 0.34]]) TR(inner, r, 0.02, iron, x, y, z);
       }
       RB(inner, 0.5, 0.05, 0.5, lam(0x3a2a18), 0.35, 0.87, -0.3, 0.4);                               // a board across one barrel
+      break;
     }
     case 'crates': {
       RB(inner, 1.0, 1.0, 1.0, wood, -0.25, 0.5, 0);
@@ -404,6 +506,7 @@ function makeDecor(d) {
       RB(inner, 0.7, 0.7, 0.7, wood, -0.15, 1.35, 0.05, 0.5);
       for (const [x, y, z] of [[-0.25, 0.5, 0.52], [0.5, 0.4, 0.58]]) { RB(inner, 0.9, 0.08, 0.03, wood2, x, y + 0.2, z); RB(inner, 0.9, 0.08, 0.03, wood2, x, y - 0.2, z); }   // slats
       SP(inner, 0.34, 0.2, 0.34, straw, 0.5, 0.85, 0.15);                                             // straw poking out
+      break;
     }
     case 'table': {
       if (d.seed % 3 === 0) { C(inner, 0.85, 0.85, 0.09, wood, 0, 0.85, 0, 24); LA(inner, [[0, 0], [0.32, 0], [0.12, 0.1], [0.1, 0.7], [0.2, 0.8], [0.0, 0.8]], wood2, 0, 0, 0, 12); }   // a round table on a turned pedestal
@@ -415,6 +518,7 @@ function makeDecor(d) {
         C(inner, 0.22, 0.22, 0.06, wood2, x, 0.46, z, 14);
         for (const [lx, lz] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]]) C(inner, 0.025, 0.035, 0.43, wood2, x + lx, 0.22, z + lz, 6);
       }
+      break;
     }
     case 'hearth': {
       RB(inner, 1.9, 1.5, 0.7, stone, 0, 0.75, 0);
@@ -440,6 +544,7 @@ function makeDecor(d) {
       for (let i = 0; i < 4; i++) SP(inner, 0.12, 0.06, 0.12, glow(0x8affaa), (rg() - 0.5) * 0.7, 0.96, (rg() - 0.5) * 0.7);   // bubbles
       C(inner, 0.025, 0.025, 0.95, wood2, 0.3, 1.2, 0.1, 6).rotation.z = 0.4;                         // stirring spoon
       for (let i = 0; i < 3; i++) C(inner, 0.05, 0.05, 0.25, lam(0x4a3018), 0.75 + i * 0.01, 0.07 + i * 0.1, 0.4 - i * 0.1, 6).rotation.z = Math.PI / 2;   // firewood
+      break;
     }
     case 'rug': {
       const c = cloths[Math.floor(rg() * cloths.length)];
@@ -454,6 +559,7 @@ function makeDecor(d) {
         SP(inner, 0.2, 0.18, 0.22, bone, (rg() - 0.5) * 0.6, 0.1, (rg() - 0.5) * 0.6, rg() * 3);       // skull
         SP(inner, 0.05, 0.05, 0.03, lam(0x120c08), 0.0, 0.12, 0.0);
       }
+      break;
     }
     case 'sacks': {
       for (let i = 0; i < 2; i++) {
@@ -462,6 +568,7 @@ function makeDecor(d) {
         LA(inner, [[0.0, 0], [0.1, 0], [0.07, 0.08], [0.12, 0.16], [0.0, 0.16]], bag, x, 0.54, 0, 8);   // its gathered neck
         TR(inner, 0.085, 0.015, lam(0x6a5230), x, 0.56, 0);                                            // tie
       }
+      break;
     }
     case 'candles': {
       for (let i = 0; i < 3; i++) {
