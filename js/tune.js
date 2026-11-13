@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-24';   // bumped so old saved values don't override the new defaults (last: Goblin Market crowd and Final Chamber runes)
+  const KEY = 'prototype-test-tune-25';   // bumped so old saved values don't override the new defaults (last: parry/block stamina restore)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -9,7 +9,7 @@ const tunePanel = (() => {
     ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossWindMul', 0.05], ['bossReachMul', 0.05], ['bossAtkSpd', 0.05], ['bossWeaponTier', 1], ['bossLegendary', 0.01]]],
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
-    ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
+    ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1], ['parryRestore', 1], ['blockRefund', 0.05]]],
     ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'jaguar', 'dartgoblin', 'strangler', 'tribal', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
     ['tavern water', THEME_BY_NAME['The Sunken Tavern'].mechanic.TUNE, [['slow', 0.05], ['splash', 0.5], ['splashRun', 0.5], ['enemySlow', 0.05]]],
     ['market crowd', THEME_BY_NAME['The Goblin Market'].mechanic.TUNE, [['blend', 0.05], ['din', 0.05], ['watchR', 0.5], ['watchAware', 0.05]]],

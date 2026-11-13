@@ -80,11 +80,13 @@ run('Core gameplay: floors, stairs, collision, combat basics, statuses', async (
         if (this.winding) { this.zone = 'body'; game.cb.want = true; if (game.cb.block) game.cb.blockT = 0; }
         return update.apply(this, a);
       };
+      game.cb.stamina = 40; game.cb.delay = 999;   // freeze regeneration so only the parry can raise stamina
       const staggered = await T.until(() => e.stun > 0.5, 15000);
       game.cb.want = false;
-      return { staggered, hp: game.inv.hp };
+      return { staggered, hp: game.inv.hp, stam: game.cb.stamina };
     });
     check('sword parry staggers the guard', parry.staggered && parry.hp === 100, `hp ${parry.hp}`);
+    check('a parry gives stamina back', Math.abs(parry.stam - (40 + 30)) < 0.01, `stamina ${parry.stam}`);
 
     // 7. Running out of HP ends the run with the death screen.
     const death = await page.evaluate(async () => {

@@ -10,7 +10,7 @@ run('Goblin Market and Final Chamber', async ({ open, check }) => {
   // ---------- Goblin Market ----------
   page = await open(seeds[MARK]);
   const mw = await page.evaluate(async () => {
-    const out = { themeName: theme.name, layout: theme.layout.style, tex: theme.tex, mt: { ...theme.mechanic.TUNE }, tune: (await (await fetch('js/tune.js')).text()).includes('prototype-test-tune-24') };
+    const out = { themeName: theme.name, layout: theme.layout.style, tex: theme.tex, mt: { ...theme.mechanic.TUNE }, tune: +((await (await fetch('js/tune.js')).text()).match(/prototype-test-tune-(\d+)/) || [])[1] >= 24 };
     let f = null;
     for (let n = 1; n <= 4 && !f; n++) { game.startFloor(n); await T.sleep(80); if (game.floor.doors.length) f = game.floor; }
     out.hasDoor = !!f; out.door = f && f.doors.map(d => d.style + '|' + d.keyLabel);

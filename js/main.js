@@ -1222,9 +1222,10 @@ function resolveEnemyAttack(e, zone, ranged = false) {
     }
     else if (cb.blockT <= bs.parryWin) {
       if (!ranged) { e.stun = 1.0; e.winding = false; e.atkCd = 0.6; }            // parrying a blow staggers the attacker, an arrow just stops
+      cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.parryRestore);   // a parry gives stamina back
       mark(ranged ? 'ARROW BLOCKED' : 'PARRY', '#7fe8ff'); loud(5); return;
     } else if (bs.cost > 0) {
-      if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); mark(ranged ? 'ARROW BLOCKED' : 'BLOCKED', '#cfe'); loud(5); return; }
+      if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); cb.stamina = Math.min(STAMINA_MAX, cb.stamina + bs.cost * TUNE.blockRefund); mark(ranged ? 'ARROW BLOCKED' : 'BLOCKED', '#cfe'); loud(5); return; }
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
   }

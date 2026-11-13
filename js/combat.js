@@ -19,6 +19,7 @@ const TUNE = {
   stageHpScale: 0.35, stageDmgScale: 0.20, stageBossHp: 0.5, stageBossDmg: 0.2, finalBossHp: 3.0, finalBossDmg: 1.8, finalBossScale: 1.25, stageLootDepth: 1.5,
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,
+  parryRestore: 30, blockRefund: 0.5,   // stamina a parry gives back, and the fraction of a normal block's cost that comes back (rewards blocking)
 };
 
 // dmg: base damage. dur: swing time. hitAt: fraction of the swing where the hit lands.
