@@ -62,7 +62,7 @@ for (let s = 1; s <= N; s++) {
       mapStats[n - 1].open += open; mapStats[n - 1].corr += open - inR; mapStats[n - 1].n++;
       for (const pr of f.props) if (pr.kind === 'chest') { if (!Number.isInteger(pr.tier) || pr.tier < 0 || pr.tier > 4) fail(where, `chest tier ${pr.tier}`); else tierCounts[n - 1][pr.tier]++; }
     }
-    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice'].includes(d.kind));
+    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice', 'brush'].includes(d.kind));
     if (gim && !boss && (patches.length < gim.n[0] - 2 || patches.length > gim.n[1] || patches.some(d => d.kind !== gim.kind))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
     if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
     for (const d of patches) if (f.tiles[d.y * f.w + d.x] === G.T_WALL || f.blocked[d.y * f.w + d.x] || (d.x === f.start.x && d.y === f.start.y)) fail(where, `a ${d.kind} patch on a wall, furniture or the start tile`);
@@ -830,6 +830,57 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
   }
   if (!prisoners || !allies) fail('stage plans', 'prisoner or ally never rolled in 400 stage plans');
   console.log(`stage plans: 400 rolled, ${prisoners} prisoners and ${allies} allies in all (at most one each per stage)`);
+}
+
+// ---- layout styles: the Jungle's clearings and the Chapel's halls. Over many seeds, floors and encounter flags: stairs reachable without keys, every locked room reachable
+// only through its door and with its key, one key per door in a chest outside the locked rooms, the join tile open, reachable floor, the door's style and key name from the theme,
+// props and guard waypoints reachable, and the style's own look (clearings: big rooms, trees; halls: long naves, colonnades, side chapels).
+{
+  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal']];
+  const QUESTS = [undefined, 'miniboss', 'prisoner', 'shrine', 'wanted', 'thief', 'ally'];
+  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99;
+  for (const [themeName, style, doorStyle, keyName] of STYLES) for (let s = 1; s <= Math.max(80, N); s++) for (let fl = 1; fl <= 4; fl++) {
+    const seed = (s * 2246822519 + 31) >>> 0, flags = { armory: fl === 1 + (s % 4), shop: s % 3 === 0 && fl === 2, quest: QUESTS[(s + fl) % QUESTS.length] };
+    const where = `${style} seed ${seed} floor ${fl}`;
+    const f = G.generateFloor(seed, fl, { ...flags, themeName });
+    floors++; checked++;
+    const closed = flood(f, false), open = flood(f, true), guardOpen = flood(f, true, true), at = (x, y) => y * f.w + x;
+    const size = [32, 36, 40, 44][fl - 1];
+    if (f.w !== size || f.h !== size) fail(where, `map is ${f.w}x${f.h}`);
+    const ordinary = f.rooms.filter(r => !r.locked);
+    minRooms = Math.min(minRooms, ordinary.length);
+    if (ordinary.length < 3) fail(where, `only ${ordinary.length} ordinary rooms`);   // start, stairs and one more
+    if (!touchable(f, closed, f.stairs.x, f.stairs.y)) fail(where, 'stairs not reachable without keys');
+    if (flags.armory && !f.rooms.some(r => r.theme === 'armory')) fail(where, 'armory missing');
+    if (flags.shop && f.shop) shops++;
+    if (flags.quest && f.quest) quests++;
+    for (const p of f.props) if (!touchable(f, open, p.x, p.y)) fail(where, `${p.kind} unreachable`);
+    for (const e of f.enemies) for (const p of [{ x: e.x, y: e.y }, ...e.route]) if (!guardOpen[at(p.x, p.y)]) fail(where, `guard waypoint ${p.x},${p.y} not on reachable open floor`);
+    for (const d of f.doors) {
+      locked++;
+      if (d.style !== doorStyle || d.keyLabel !== keyName) fail(where, `door ${d.style} / ${d.keyLabel}, want ${doorStyle} / ${keyName}`);
+      const holders = f.props.filter(p => (p.extra || []).some(it => it.type === 'key' && it.lock === d.lock));
+      if (d.room === 'cell') continue;                                             // the cell key is carried by a guard (quests.js)
+      if (holders.length !== 1) fail(where, `door ${d.room} has ${holders.length} keys`);
+      else { if (!touchable(f, closed, holders[0].x, holders[0].y)) fail(where, `key for ${d.room} is behind a locked door`); if (holders[0].extra.some(it => it.type === 'key' && it.label !== keyName)) fail(where, 'key label'); }
+    }
+    for (const r of f.rooms.filter(r => r.locked)) {
+      let any = false, reach = false;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) { if (closed[at(x, y)]) any = true; if (open[at(x, y)]) reach = true; }
+      if (any) fail(where, `locked ${r.theme} reachable without its key`);
+      if (!reach) fail(where, `locked ${r.theme} unreachable with its key`);
+      const j = r.join;
+      if (!j || f.tiles[at(j.x, j.y)] !== 1 || f.blocked[at(j.x, j.y)] || !closed[at(j.x, j.y)]) fail(where, `the join tile of the locked ${r.theme} is not open reachable floor`);
+    }
+    if (style === 'clearings') { if (ordinary.some(r => r.w >= 8 || r.h >= 8)) big++; }
+    else {
+      if (ordinary.some(r => Math.max(r.w, r.h) >= 9 && Math.min(r.w, r.h) >= 7)) tall++;
+      if (ordinary.some(r => r.w === 4 && r.h === 4)) chapels++;
+      if (f.decor.some(d => d.kind === 'pew' || d.kind === 'brokenaltar')) pillars++;
+    }
+  }
+  console.log(`layout styles: ${floors} floors, ${locked} locked doors, smallest floor has ${minRooms} ordinary rooms; clearings with a big room ${big}, halls with a nave ${tall}, with side chapels ${chapels}, with pews ${pillars}; shops ${shops}, encounters ${quests}`);
+  if (!big || !tall || !chapels || !pillars || !locked || !shops || !quests) fail('layout styles', 'a style never produced its look, a shop, a locked room or an encounter');
 }
 
 console.log(`${checked} floors checked, ${fails} failures`);

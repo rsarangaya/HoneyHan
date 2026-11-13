@@ -3,10 +3,10 @@
 // edge tile are pushed toward the wall and face the interior.
 const PROP_R = { chest: 0.6, barrel: 0.45, rubble: 0.5, rack: 0.7, potions: 0.7, pantry: 0.7, vaultchest: 0.65 };
 const DECOR_R = { bed: 0.85, bookshelf: 0.8, weaponrack: 0.55, barrels: 0.8, crates: 0.8, table: 0.9, hearth: 0.9, bench: 0.55, cauldron: 0.75,
-  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
+  sacks: 0.45, altar: 0.85, statue: 0.45, candles: 0.2, urn: 0.28, counter: 0.95, puddle: 0, grass: 0, glowcap: 0, bell: 0, ice: 0, brush: 0, fern: 0, glowmoss: 0, vines: 0, hammock: 0, log: 0.9, idol: 0.5, pew: 0.8, brokenaltar: 0.8, candlestand: 0.2, icicles: 0, snowdrift: 0, shaft: 0, rug: 0, bones: 0, banner: 0, chandelier: 0, beam: 0 };
 // How far toward the wall each kind sits when it is on an edge tile (a tile is 3 m, so the wall is 1.5 m out).
 const EDGE_SHIFT = { chest: 0.85, barrel: 0.8, rubble: 0.6, rack: 1.05, potions: 1.1, pantry: 1.1, vaultchest: 0.85,
-  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0 };
+  bed: 0.85, bookshelf: 1.2, weaponrack: 1.3, barrels: 0.7, crates: 0.6, hearth: 1.05, bench: 1.15, cauldron: 0.6, sacks: 0.8, statue: 0.8, banner: 1.46, candles: 0.9, urn: 1.0, hammock: 1.2, shaft: 1.45, candlestand: 1.1 };
 // Decor that glows: the light pool borrows these.
 const DECOR_LIGHT = { hearth: { color: 0xff8a30, y: 0.9, str: 1.15 }, cauldron: { color: 0x50ff80, y: 1.0, str: 0.8 },
   candles: { color: 0xffcc70, y: 0.5, str: 0.45 }, altar: { color: 0xffd070, y: 1.3, str: 0.6 },
@@ -178,6 +178,33 @@ function makeProp(p) {
 // ---- locked doors ----
 // Door looks by dr.style (set from the theme's doors.style in gen.js). Each builder fills `inner`, a doorway 3 m wide, local z across the wall. New styles add an entry; unknown styles fall back to 'plank'.
 const DOOR_BUILDERS = {
+  // Cave mouth (Jungle): a dark hole filling the doorway, a cluster of boulders heaped in front and a vine curtain over all of it. Opens by rolling up (DOOR_ANIM.roll).
+  cave(inner, dr) {
+    const rg = makeRng(dr.x * 131 + dr.y), dh = WALL_H - 0.1, rock = [lam(0x5a5a50), lam(0x4a4a42), lam(0x6a6a5c)], vine = [lam(0x2f6a22), lam(0x3f7a2a), lam(0x24561c)];
+    B(inner, 3.0, dh, 0.3, new THREE.MeshBasicMaterial({ color: 0x030504 }), 0, dh / 2, 0);                                  // the dark hole
+    RB(inner, 3.2, 0.5, 0.5, rock[1], 0, dh - 0.1, 0.05);                                                                   // a rough lintel
+    for (const [n, y, r] of [[5, 0.5, 0.5], [4, 1.25, 0.46], [3, 1.9, 0.4]]) for (let i = 0; i < n; i++) {                  // three rows of boulders, tighter toward the top
+      const x = (i - (n - 1) / 2) * (2.7 / n) + (rg() - 0.5) * 0.15, k = r * (0.9 + rg() * 0.3);
+      SP(inner, k * 2, k * 1.7, k * 1.9, rock[Math.floor(rg() * 3)], x, y, 0.3 + rg() * 0.15, rg() * 3);
+    }
+    for (let i = 0; i < 8; i++) {                                                                                           // the vine curtain: strands from the lintel to just above the floor, with leaves
+      const x = -1.3 + i * 0.37 + (rg() - 0.5) * 0.12, len = dh - 0.5 - rg() * 0.6, m = vine[i % 3];
+      C(inner, 0.03, 0.04, len, m, x, dh - 0.3 - len / 2, 0.62 + rg() * 0.05, 5);
+      for (let k = 0; k < 3; k++) B(inner, 0.22, 0.06, 0.12, m, x + (rg() - 0.5) * 0.15, dh - 0.5 - rg() * (len - 0.2), 0.66, rg() * 3);
+    }
+    B(inner, 0.3, 0.2, 0.3, glow(0x6aff90), 0.9, 0.12, 0.78);                                                               // a glowing moss tuft by the foot (the lock: the Cave Key)
+  },
+  // Ice seal (Frozen Chapel): a glassy slab fills the doorway in an iron-blue frame, with cracks and a frozen rune over the lock. Opens by sinking through the floor (DOOR_ANIM.sink), 8 m of noise.
+  ice(inner, dr) {
+    const rg = makeRng(dr.x * 131 + dr.y), dh = WALL_H - 0.1, frame = lam(0x3a4a60), glass = new THREE.MeshLambertMaterial({ color: 0xaee4ff, transparent: true, opacity: 0.55, emissive: 0x1a3a50, depthWrite: false });
+    B(inner, 2.8, dh, 0.3, glass, 0, dh / 2, 0);                                                                            // the slab (see-through, so the room behind shows as a blue haze)
+    B(inner, 3.0, 0.2, 0.4, frame, 0, 0.1, 0); B(inner, 3.0, 0.2, 0.4, frame, 0, dh - 0.1, 0);                              // sill and head
+    for (const x of [-1.4, 1.4]) B(inner, 0.2, dh, 0.4, frame, x, dh / 2, 0);                                               // posts
+    const white = glow(0xf0faff);
+    for (let i = 0; i < 6; i++) B(inner, 0.03, 0.4 + rg() * 0.9, 0.34, white, (rg() - 0.5) * 2.4, 0.6 + rg() * (dh - 1.4), 0, 0, (rg() - 0.5) * 1.2);   // cracks
+    SP(inner, 0.4, 0.4, 0.1, glow(0x7ad8ff), 0, 1.4, 0.2);                                                                  // a frozen rune over the lock
+    for (const x of [-0.6, -0.2, 0.3, 0.7]) { const ic = new THREE.Mesh(cached('dicicle', () => new THREE.ConeGeometry(0.07, 0.4, 5)), glass); ic.rotation.x = Math.PI; ic.position.set(x, dh - 0.4, 0.2); ic.scale.y = 0.7 + rg() * 0.8; inner.add(ic); }
+  },
   plank(inner, dr) {
   const rg = makeRng(dr.x * 131 + dr.y);
   const dh = WALL_H - 0.1;                                                                           // planks fill the doorway up to the ceiling
@@ -195,6 +222,7 @@ const DOOR_BUILDERS = {
 function makeDoor(dr) {
   const inner = new THREE.Group();
   (DOOR_BUILDERS[dr.style] || DOOR_BUILDERS.plank)(inner, dr);
+  if (dr.style === 'cave' || dr.style === 'ice') bakeMeshes(inner, NO_SKIP, { flash: null });                // the many small parts merge into 2 or 3 meshes (js/perf.js)
   const mesh = new THREE.Group();
   const x = (dr.x + 0.5) * TILE, z = (dr.y + 0.5) * TILE;
   mesh.add(inner); mesh.position.set(x, 0, z); mesh.rotation.y = dr.axis === 'x' ? Math.PI / 2 : 0;
@@ -214,6 +242,85 @@ function makeDecor(d) {
   const flame = (parent, x, y, z, s = 1) => { const f = new THREE.Mesh(cached('flame', () => new THREE.ConeGeometry(0.04, 0.13, 6)), FLAME_MAT); f.position.set(x, y, z); f.scale.setScalar(s); parent.add(f); return f; };
 
   switch (d.kind) {
+    // ---- Jungle ----
+    case 'brush': {                                                // a 3 m thicket of broad leaves and bushes: the Jungle's cover (a player stealth bonus; it rustles)
+      const gm = [lam(0x2f6a22), lam(0x3f7a2a), lam(0x24561c)];
+      for (let i = 0; i < 30; i++) { const h = 0.9 + rg() * 0.7; B(inner, 0.14, h, 0.03, gm[i % 3], (rg() - 0.5) * 2.5, h / 2, (rg() - 0.5) * 2.5, rg() * 3, (rg() - 0.5) * 0.35); }
+      for (let i = 0; i < 4; i++) B(inner, 0.6, 0.4, 0.6, gm[i % 3], (rg() - 0.5) * 2, 0.2, (rg() - 0.5) * 2, rg() * 3);
+      break;
+    }
+    case 'fern': {                                                 // a fern: leaves fanning out and drooping
+      const fm = [lam(0x3f8a30), lam(0x2f7424)];
+      for (let i = 0; i < 9; i++) { const a = i * 0.7 + rg() * 0.3, b = B(inner, 0.1, 0.55, 0.02, fm[i % 2], Math.sin(a) * 0.25, 0.25, Math.cos(a) * 0.25, a, 0.9); b.rotation.order = 'YZX'; }
+      break;
+    }
+    case 'vines': {                                                // hanging vines from the canopy
+      const top = WALL_H, vm = [lam(0x2f6a22), lam(0x3f7a2a)];
+      for (let i = 0; i < 5; i++) { const len = 1.2 + rg() * 1.8, x = (rg() - 0.5) * 2.2, z = (rg() - 0.5) * 2.2; C(inner, 0.025, 0.03, len, vm[i % 2], x, top - len / 2, z, 5); for (let k = 0; k < 3; k++) B(inner, 0.2, 0.05, 0.1, vm[(i + k) % 2], x + 0.06, top - rg() * len, z, rg() * 3); }
+      break;
+    }
+    case 'glowmoss': {                                             // glowing moss on the floor: emissive, not a light
+      const gm = glow(0x3ad868);
+      for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(cached('mossdisc', () => new THREE.CircleGeometry(0.4, 8)), gm); c.rotation.x = -Math.PI / 2; c.scale.setScalar(0.5 + rg() * 0.8); c.position.set((rg() - 0.5) * 1.6, 0.016 + i * 0.001, (rg() - 0.5) * 1.6); inner.add(c); }
+      for (let i = 0; i < 4; i++) { const x = (rg() - 0.5) * 1.6, z = (rg() - 0.5) * 1.6; C(inner, 0.02, 0.03, 0.12, lam(0xd8f0d0), x, 0.06, z, 5); B(inner, 0.12, 0.05, 0.12, glow(0x7affa0), x, 0.14, z); }
+      break;
+    }
+    case 'hammock': {                                              // two posts and a sagging cloth (an old camp)
+      for (const s of [-1, 1]) C(inner, 0.05, 0.06, 1.5, lam(0x5a3e24), s * 0.85, 0.75, 0, 6);
+      SP(inner, 1.6, 0.12, 0.5, lam(0x8a6a3a), 0, 0.75, 0); SP(inner, 0.4, 0.1, 0.34, lam(0xc8b890), -0.45, 0.82, 0);
+      for (const s of [-1, 1]) C(inner, 0.01, 0.01, 0.4, lam(0x3a2a18), s * 0.75, 0.95, 0, 4).rotation.z = s * 0.5;
+      break;
+    }
+    case 'log': {                                                  // a fallen log with moss on top (blocks the way)
+      const lg = C(inner, 0.38, 0.42, 2.3, lam(0x5a3e24), 0, 0.4, 0, 10); lg.rotation.z = Math.PI / 2;
+      SP(inner, 1.6, 0.2, 0.5, lam(0x3f7a2a), 0, 0.78, 0);
+      for (const s of [-1, 1]) { const e = C(inner, 0.3, 0.3, 0.05, lam(0x7a5a38), s * 1.15, 0.4, 0, 10); e.rotation.z = Math.PI / 2; }
+      for (let i = 0; i < 3; i++) SP(inner, 0.3, 0.15, 0.3, lam(0xb8a070), (rg() - 0.5) * 1.4, 0.8, 0.3);
+      break;
+    }
+    case 'idol': {                                                 // a mossy stone idol with glowing eyes
+      const st = lam(0x6a6a5c), mo = lam(0x3f7a2a);
+      LA(inner, [[0, 0], [0.42, 0], [0.38, 0.1], [0.34, 0.3], [0.0, 0.3]], st, 0, 0, 0, 10);
+      RB(inner, 0.6, 0.8, 0.5, st, 0, 0.7, 0); RB(inner, 0.7, 0.55, 0.55, st, 0, 1.38, 0);
+      for (const s of [-1, 1]) { SP(inner, 0.1, 0.08, 0.06, glow(0x7aff60), s * 0.16, 1.45, 0.29); RB(inner, 0.14, 0.4, 0.1, st, s * 0.38, 0.75, 0.1); }
+      RB(inner, 0.3, 0.06, 0.08, lam(0x1a1a16), 0, 1.25, 0.29); SP(inner, 0.5, 0.15, 0.4, mo, 0, 1.68, 0); SP(inner, 0.2, 0.3, 0.1, mo, 0.25, 0.7, 0.28);
+      break;
+    }
+    // ---- Frozen Chapel ----
+    case 'pew': {                                                  // a plank pew, frosted
+      const pw = lam(0x5a5e6c), fr = lam(0xdce8f4);
+      RB(inner, 1.7, 0.08, 0.45, pw, 0, 0.45, 0.1); RB(inner, 1.7, 0.55, 0.07, pw, 0, 0.8, -0.1);
+      for (const s of [-1, 1]) RB(inner, 0.08, 0.95, 0.55, pw, s * 0.85, 0.47, 0);
+      RB(inner, 1.7, 0.03, 0.4, fr, 0, 0.5, 0.1); RB(inner, 1.6, 0.03, 0.07, fr, 0, 1.09, -0.1);
+      break;
+    }
+    case 'brokenaltar': {                                          // a cracked altar, the top slab fallen
+      const st = lam(0x8a929e), fr = lam(0xdce8f4);
+      RB(inner, 1.5, 0.85, 0.8, st, 0, 0.43, 0); RB(inner, 1.0, 0.1, 0.9, st, -0.3, 0.9, 0, 0, 0.18); RB(inner, 0.7, 0.1, 0.9, st, 0.55, 0.15, 0.7, 0.6);
+      for (let i = 0; i < 4; i++) SP(inner, 0.25 + rg() * 0.2, 0.15, 0.25, st, (rg() - 0.5) * 1.8, 0.07, 0.6 + rg() * 0.4);
+      SP(inner, 1.2, 0.12, 0.7, fr, 0, 0.9, 0); SP(inner, 0.12, 0.3, 0.12, glow(0xaee4ff), 0.2, 1.1, 0);
+      break;
+    }
+    case 'candlestand': {                                          // a tall iron stand with three candles
+      C(inner, 0.03, 0.05, 1.4, iron, 0, 0.7, 0, 6); LA(inner, [[0, 0], [0.22, 0], [0.12, 0.08], [0.03, 0.14], [0.0, 0.14]], iron, 0, 0, 0, 8); TR(inner, 0.17, 0.02, iron, 0, 1.4, 0);
+      for (let i = 0; i < 3; i++) { const a = i * 2.1, x = Math.sin(a) * 0.14, z = Math.cos(a) * 0.14; C(inner, 0.035, 0.04, 0.2, bone, x, 1.52, z, 6); flame(inner, x, 1.68, z, 0.8); }
+      break;
+    }
+    case 'icicles': {                                              // icicles hanging from the vault
+      const top = WALL_H / (d.scale || 1), im = new THREE.MeshLambertMaterial({ color: 0xcfeaff, transparent: true, opacity: 0.75, emissive: 0x1a3a50, depthWrite: false });
+      for (let i = 0; i < 7; i++) { const len = 0.4 + rg() * 0.9, c = new THREE.Mesh(cached('icicle', () => new THREE.ConeGeometry(0.07, 1, 5)), im); c.rotation.x = Math.PI; c.scale.set(0.6 + rg() * 0.8, len, 0.6 + rg() * 0.8); c.position.set((rg() - 0.5) * 2.4, top - len / 2, (rg() - 0.5) * 2.4); inner.add(c); }
+      break;
+    }
+    case 'snowdrift': {                                            // a drift of snow
+      const sn = lam(0xe8f0f8);
+      for (let i = 0; i < 3; i++) SP(inner, 1.0 + rg() * 0.8, 0.22 + rg() * 0.15, 0.8 + rg() * 0.6, sn, (rg() - 0.5) * 1.2, 0.04, (rg() - 0.5) * 1.2, rg() * 3);
+      break;
+    }
+    case 'shaft': {                                                // a tall pale window in the wall, with a faint slanting shaft of light (decor, not a light)
+      B(inner, 1.0, 1.9, 0.06, glow(0xdff0ff), 0, 1.9, 0.02); for (const x of [-0.55, 0.55]) B(inner, 0.1, 2.1, 0.1, iron, x, 1.9, 0.03); B(inner, 1.2, 0.1, 0.1, iron, 0, 2.9, 0.03); B(inner, 1.2, 0.1, 0.1, iron, 0, 0.95, 0.03); B(inner, 0.06, 1.9, 0.08, iron, 0, 1.9, 0.03);
+      const b = B(inner, 0.9, 3.0, 1.4, new THREE.MeshBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.08, depthWrite: false }), 0, 1.5, 0.8); b.rotation.x = -0.45;
+      break;
+    }
     case 'bed': {
       RB(inner, 2.0, 0.3, 1.1, wood, 0, 0.17, 0);                                                    // frame
       RB(inner, 1.88, 0.14, 0.98, straw, 0, 0.4, 0);                                                 // straw tick

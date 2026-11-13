@@ -6,7 +6,7 @@ run('The five other themes', async ({ open, check }) => {
   const seeds = await page.evaluate(() => { const out = {}; for (let s = 1; s < 400 && Object.keys(out).length < THEMES.length; s++) { const n = makeRng(s).pick(THEMES).name; if (!out[n]) out[n] = s; } return out; });
   await page.close();
   const ORCH = 'The Moonlit Orchard', LIB = 'The Clockwork Library', CELL = 'The Mushroom Cellar', MARK = 'The Goblin Market', CHAP = 'The Frozen Chapel';
-  check('every theme can be reached from some seed', Object.keys(seeds).length === 6, Object.keys(seeds).length + ' themes');
+  check('every theme can be reached from some seed (seven themes with the Jungle)', Object.keys(seeds).length === 7, Object.keys(seeds).length + ' themes');
 
   // ---------- natives ----------
   page = await open(seeds[ORCH]);

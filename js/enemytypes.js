@@ -66,6 +66,16 @@ const ENEMY_TYPES = {
     info: ['A robed caster that curses you with a Slow for 5 s. The bolt is slow enough to dodge.'] },
   wisp:    { name: 'Frost Wisp', model: 'float', hover: 1.0, zones: [0.3, 0.7, 0], fur: 0x9adaff, hpMul: 0.5, dmgMul: 0.6, speed: 1.3, reach: 1.0, windMul: 0.7, r: 0.3, scale: 0.8, height: 1.7, vis: 1.2, onHit: 'slow',
     info: ['A floating ball of cold that drifts at head height. Its touch Slows you, and it is quick, so do not turn your back.', 'Fragile: one good hit.'] },
+  // The Overgrown Ruin's natives (the Jungle). Reused rigs, new tints: the jaguar is a quad, the rest are goblins.
+  jaguar:  { name: 'Jaguar', model: 'quad', zones: [0, 0.5, 0.5], fur: 0xc89a3a, hpMul: 0.8, dmgMul: 1.1, speed: 1.3, reach: 1.3, windMul: 0.6, cdMul: 0.85, r: 0.4, scale: 1.05, height: 0.9, vis: 0.9, hear: 1.2, sneakCap: 2, ambush: 5,
+    info: ['A big cat that lies in wait as scenery until you come within about 5 m (about 2 m if you creep up crouched). Then it pounces, faster than a sprint, and goes for your body and legs.', 'Creep past it, or catch it asleep with a dagger. It is fragile for its speed: it has 80% of a guard\'s health.'] },
+  dartgoblin: { name: 'Poison-Dart Goblin', zones: [0.3, 0.7, 0], skin: 0x3f8a6a, noGear: true, weapon: 'dagger', look: 'bow', hpMul: 0.7, dmgMul: 0.5, speed: 1.1, vis: 1.1, hear: 1.0,
+    ranged: { kind: 'dart', min: 4, max: 11, wind: 0.7, cd: 1.8, speed: 26 },
+    info: ['A leaf-hooded blowpipe goblin. It keeps its distance and spits poison darts that make you Bleed for 5 s. A shield does not stop them, but a dart is quick, so break line of sight.', 'Fragile: close in behind cover, or use the brush to creep up on it.'] },
+  strangler: { name: 'Vine Strangler', zones: [0.3, 0.5, 0.2], skin: 0x3a6a2a, noGear: true, weapon: 'mace', hpMul: 1.6, dmgMul: 1.1, speed: 0.7, reach: 1.6, windMul: 1.3, cdMul: 1.1, r: 0.5, scale: 1.3, ambush: 3.5, onHit: 'slow', sneakCap: 2,
+    info: ['A tangle of vines that hangs in the undergrowth with its arms out until you come within about 3.5 m (about 1.4 m crouched). Then it lashes out with a long reach and its vines Slow you.', 'Slow on its feet: walk away from it, or stay out of its reach and strike first.'] },
+  tribal:  { name: 'Tribal Guard', elite: true, zones: [0.3, 0.5, 0.2], skin: 0x9a6a3a, weapon: 'mace', shield: true, hpMul: 2, dmgMul: 1.3, speed: 0.95, reach: 1.2, windMul: 1.2, r: 0.5, scale: 1.2, blockFront: 0.4, sneakCap: 2.5, shout: 1.3,
+    info: ['An elite guard in feathers and face paint with a big shield: hits from the front only do 40% damage. Flank it, stun it or sneak up on it. A dagger cannot kill it in one stab.'] },
   // Generic ambushers. The mimic is never placed by the spawn mix: js/gen.js turns about 8% of ordinary chests from floor 2 on
   // into one (the prop's `mimic` flag) and main.js builds it. The bomb goblin comes from the mix in assignEnemyTypes.
   mimic:   { name: 'Mimic', model: 'mimic', mimic: true, zones: [0.3, 0.7, 0], weapon: 'mace', noGear: true, hpMul: 2.5, dmgMul: 2, speed: 0.15, reach: 0.7, windMul: 1.1, cdMul: 1.3, r: 0.55, scale: 1, height: 0.75, noStagger: true, sneakCap: 2, resistBleed: true, hear: 0, shout: 0.5,

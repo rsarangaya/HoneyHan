@@ -46,6 +46,7 @@ const MECH_PATCH = {
   grass:   { seen: () => player.crouching ? 0.55 : 0.85, disc: ['item:grass', 'Tall grass'] },
   glowcap: { seen: () => 1.4, disc: ['item:glow', 'Glowing spores'] },
   ice:     { slippery: true, disc: ['item:ice', 'Ice'] },
+  brush:   { seen: () => { const t = theme.mechanic.TUNE; return player.crouching ? t.stealthCrouch : t.stealth; }, disc: ['item:brush', 'Thick brush'] },   // the Jungle: a player-only stealth bonus (enemies see through it as ever)
 };
 const stageSeedOf = s => s === 1 ? runSeed : (runSeed ^ Math.imul(s, 0x9e3779b1)) >>> 0;
 let shopFloor = 0, armoryFloor = 0, questPlan = {};
@@ -125,16 +126,94 @@ function ceilingTexture(base) {
   speckle(g, S, 500, rng);
   return finishTexture(c, 1, 1);
 }
+// Jungle and Frozen Chapel textures: 256 px (ceilings 128), painted once per theme (themeTexture) from the theme's colours.
+function paintTex(base, tag, S, fn, repeat = 1) {
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), rng = makeRng(hashStr(base + tag)), col = new THREE.Color(base);
+  fn(g, S, rng, col); return finishTexture(c, repeat, repeat);
+}
+const blob = (g, x, y, rx, ry, style) => { g.fillStyle = style; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, 7); g.fill(); };
+// Vine stone: rough blocks, moss in the joints, vines hanging down with small leaves.
+const vineWallTexture = base => paintTex(base, 'vine', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 6; r++) for (let b = -1; b < 4; b++) { const x = b * 64 + (r % 2 ? 32 : 0) + (rng() - 0.5) * 6, y = r * 43 + (rng() - 0.5) * 4; g.fillStyle = shade(col, 0.55 + rng() * 0.35); g.fillRect(x + 2, y + 2, 60, 39); }
+  for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 4 + rng() * 14, 3 + rng() * 8, `rgba(70,130,40,${0.1 + rng() * 0.25})`);   // moss
+  for (let v = 0; v < 9; v++) {                                                                                                               // vines
+    let x = rng() * S; g.strokeStyle = 'rgba(30,80,22,0.85)'; g.lineWidth = 1.5 + rng() * 1.5; g.beginPath(); g.moveTo(x, 0);
+    for (let y = 0; y < S; y += 32) { x += (rng() - 0.5) * 16; g.lineTo(x, y + 32); blob(g, x + (rng() - 0.5) * 8, y + 20, 5, 2.5, 'rgba(60,140,40,0.9)'); } g.stroke();
+  }
+  speckle(g, S, 1200, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.3)'); gr.addColorStop(0.14, 'rgba(0,0,0,0)'); gr.addColorStop(0.86, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.4)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+// Cave rock (the Jungle's locked rooms): dark, lumpy, no mortar.
+const caveWallTexture = base => paintTex(base, 'cave', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.22); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 90; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 26, 6 + rng() * 18, `rgba(${20 + rng() * 30 | 0},${20 + rng() * 26 | 0},${16 + rng() * 20 | 0},0.5)`);
+  for (let i = 0; i < 14; i++) blob(g, rng() * S, rng() * S, 3 + rng() * 8, 2 + rng() * 4, 'rgba(60,110,40,0.25)');
+  speckle(g, S, 1400, rng);
+});
+// Moss floor: dirt with soft green mottling and fallen leaves.
+const mossFloorTexture = base => paintTex(base, 'moss', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.7); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 70; i++) blob(g, rng() * S, rng() * S, 6 + rng() * 22, 5 + rng() * 14, rng() < 0.6 ? `rgba(70,120,40,${0.15 + rng() * 0.25})` : `rgba(60,40,24,${0.15 + rng() * 0.2})`);
+  for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 2 + rng() * 3, 1 + rng() * 1.5, `rgba(${120 + rng() * 60 | 0},${130 + rng() * 40 | 0},40,0.6)`);
+  speckle(g, S, 1600, rng);
+});
+// Canopy ceiling: dark leaves with lighter gaps where the light gets through.
+const canopyTexture = base => paintTex(base, 'canopy', 128, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.7); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 70; i++) blob(g, rng() * S, rng() * S, 4 + rng() * 10, 2 + rng() * 5, `rgba(${30 + rng() * 40 | 0},${80 + rng() * 60 | 0},${30 + rng() * 20 | 0},0.7)`);
+  for (let i = 0; i < 9; i++) blob(g, rng() * S, rng() * S, 3 + rng() * 5, 3 + rng() * 5, 'rgba(230,240,150,0.5)');
+}, 1);
+// Ice blocks: pale blue blocks with bright edges, hairline cracks and frost.
+const iceWallTexture = base => paintTex(base, 'ice', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.5); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 8; r++) for (let b = -1; b < 4; b++) {
+    const x = b * 64 + (r % 2 ? 32 : 0), y = r * 32, k = 0.8 + rng() * 0.3;
+    g.fillStyle = shade(col, k); g.fillRect(x + 1.5, y + 1.5, 61, 29); g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(x + 1.5, y + 1.5, 61, 2); g.fillStyle = 'rgba(20,50,90,0.14)'; g.fillRect(x + 1.5, y + 28, 61, 2);
+  }
+  g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 1;
+  for (let i = 0; i < 12; i++) { let x = rng() * S, y = rng() * S; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rng() - 0.5) * 30; y += 8 + rng() * 14; g.lineTo(x, y); } g.stroke(); }
+  for (let i = 0; i < 700; i++) { g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(rng() * S, rng() * S, 1 + rng() * 1.5, 1 + rng() * 1.5); }
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.22)'); gr.addColorStop(0.12, 'rgba(0,0,0,0)'); gr.addColorStop(0.88, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.3)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+// Frosted nave floor: flagstones under a skin of frost with drifted snow in the joints.
+const frostFloorTexture = base => paintTex(base, 'frost', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.45); g.fillRect(0, 0, S, S);
+  for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) for (const dx of [0, -85]) { const x = q * 85 + (r % 2 ? 30 : 0) + dx, y = r * 85, k = 0.85 + rng() * 0.3; g.fillStyle = shade(col, k); g.fillRect(x + 2, y + 2, 81, 81); g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 2, y + 2, 81, 2); }
+  for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 6 + rng() * 20, 4 + rng() * 12, `rgba(235,245,255,${0.08 + rng() * 0.16})`);
+  for (let i = 0; i < 900; i++) { g.fillStyle = 'rgba(255,255,255,0.2)'; g.fillRect(rng() * S, rng() * S, 1 + rng() * 1.5, 1 + rng() * 1.5); }
+});
+// Chapel vault ceiling: pale stone ribs.
+const vaultTexture = base => paintTex(base, 'vault', 128, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.8); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 4; i++) { g.fillStyle = shade(col, 1.15); g.fillRect(i * 32 + 14, 0, 4, S); g.fillRect(0, i * 32 + 14, S, 4); }
+  speckle(g, S, 400, rng);
+});
 // Texture generators by the theme schema's tex keys (theme.tex.wall / floor / ceil), each from the theme's base colour.
 const TEX_GENERATORS = {
-  wall:  { stone: c => wallTexture(c) },
-  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true) },
-  ceil:  { beams: c => ceilingTexture(c) },
+  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c) },
+  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c) },
+  ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c) },
 };
-// Wall geometry by the theme's wallStyle (more styles may add up to 2 more wall InstancedMeshes).
-const WALL_GEO = { box: () => new THREE.BoxGeometry(TILE, WALL_H, TILE) };
-// Door open animations by the theme's doors.openAnim: t runs 0 to 1.
-const DOOR_ANIM = { slide: (o, t) => { o.mesh.position.y = t * WALL_H; } };
+// Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'rough' (Jungle): a box whose side faces bulge a little (a hash of each vertex, so shared corners stay closed);
+// every tile is also turned a quarter-turn at random and widened a hair (buildFloor), so a wall does not look stamped.
+const WALL_GEO = {
+  box: () => new THREE.BoxGeometry(TILE, WALL_H, TILE),
+  rough: () => {
+    const g = new THREE.BoxGeometry(TILE, WALL_H, TILE, 2, 3, 2), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i), s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453, k = 1 + (s - Math.floor(s)) * 0.09 - 0.015;
+      p.setXYZ(i, x * k, y, z * k);
+    }
+    g.computeVertexNormals(); return g;
+  },
+};
+// Door open animations by the theme's doors.openAnim: t runs 0 to 1. slide: up out of the way. roll (cave mouth): the curtain and boulders roll up to the lintel. sink (ice seal): the slab drops through the floor.
+const DOOR_ANIM = {
+  slide: (o, t) => { o.mesh.position.y = t * WALL_H; },
+  roll: (o, t) => { const s = 1 - 0.95 * t; o.mesh.scale.y = s; o.mesh.position.y = (1 - s) * WALL_H + t * 0.5; },   // (the last 0.5 m lifts the rolled-up sliver above the ceiling plane, so a culling pass that shows the mesh again cannot reveal it)
+  sink: (o, t) => { o.mesh.position.y = -t * (WALL_H + 0.2); },
+};
 
 // Free one object's GPU memory. Anything flagged userData.shared (the per-theme textures, creature part geometries, shared merged
 // materials, icons) outlives the floor and is never disposed here.
@@ -180,12 +259,30 @@ function buildFloor() {
     if (touches) wallPos.push([x, y]);
   }
   const wallTex = themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
-  const walls = new THREE.InstancedMesh((WALL_GEO[theme.wallStyle] || WALL_GEO.box)(),
-    themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
-  const m = new THREE.Matrix4();
-  wallPos.forEach(([x, y], i) => { m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE); walls.setMatrixAt(i, m); });
-  walls.frustumCulled = false;                    // an instanced mesh is culled by its first box only, so never cull it
-  group.add(walls);
+  const rough = theme.wallStyle === 'rough', wallGeo = (WALL_GEO[theme.wallStyle] || WALL_GEO.box)();
+  const m = new THREE.Matrix4(), wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
+  const wallMesh = (list, mat) => {                // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws
+    const im = new THREE.InstancedMesh(wallGeo, mat, list.length);
+    list.forEach(([x, y], i) => {
+      if (rough) { const hh = ((x * 73856093) ^ (y * 19349663)) >>> 0, k = 1 + ((hh >> 2) & 7) * 0.006; wq.setFromAxisAngle(yAxis, (hh & 3) * Math.PI / 2); m.compose(wp.set((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE), wq, ws.set(k, 1, k)); }
+      else m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE);
+      im.setMatrixAt(i, m);
+    });
+    im.frustumCulled = false;                      // an instanced mesh is culled by its first box only, so never cull it
+    group.add(im); return im;
+  };
+  let caveList = null;                             // the Jungle's locked rooms are dark caves: their walls (and a dark patch on the floor) use cave rock
+  if (rough && floor.rooms.some(r => r.locked)) {
+    const mask = new Uint8Array(w * h); caveList = [];
+    for (const r of floor.rooms) if (r.locked) for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) if (x >= 0 && y >= 0 && x < w && y < h) mask[y * w + x] = 1;
+    for (let i = wallPos.length - 1; i >= 0; i--) if (mask[wallPos[i][1] * w + wallPos[i][0]]) caveList.push(wallPos.splice(i, 1)[0]);
+  }
+  const walls = wallMesh(wallPos, themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })));   // per-pixel lighting: torch light pools smoothly across big faces
+  if (caveList && caveList.length) {
+    wallMesh(caveList, themeTexture('cavemat', () => new THREE.MeshPhongMaterial({ map: themeTexture('cavewall', () => TEX_GENERATORS.wall.cave('#3a3830')), shininess: 2, specular: 0x050505 })));
+    const dark = themeTexture('cavedark', () => new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }));
+    for (const r of floor.rooms) if (r.locked) { const p = new THREE.Mesh(new THREE.PlaneGeometry(r.w * TILE, r.h * TILE), dark); p.rotation.x = -Math.PI / 2; p.position.set((r.x + r.w / 2) * TILE, 0.02, (r.y + r.h / 2) * TILE); p.renderOrder = 1; group.add(p); }
+  }
 
   const planeGeo = new THREE.PlaneGeometry(w * TILE, h * TILE);
   // floor is a shape with a rectangular hole where the stairwell goes down
@@ -278,9 +375,47 @@ function buildFloor() {
   const fb = enemies.find(e => e.final); if (fb) nameTag(fb, FINAL_BOSS.tag, '#c060ff');                // the placeholder final boss says what it is
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
+  floor.prints = theme.mechanic.prints && !floor.boss ? buildPrints() : null;
   scene.add(group);
   scene.background = new THREE.Color(theme.pal.fog);
   scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density);
+}
+
+// ---- Frozen Chapel footprints: the last 8 steps you took in the snow, one merged quad mesh over a ring buffer (no allocation after the floor is built).
+// Guards that are not alerted follow a fresh print they can see (Enemy.followPrints in js/enemy.js), newest first. Numbers: theme.mechanic.TUNE (printAge, printSusp, printGap, printSight). ----
+const PRINT_N = 8;
+let gameT = 0;                                      // seconds of play, for the age of a print
+function buildPrints() {
+  const pos = new Float32Array(PRINT_N * 12), idx = [];
+  for (let i = 0; i < PRINT_N; i++) idx.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x14202e, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+  mesh.frustumCulled = false; mesh.renderOrder = 1; group.add(mesh);
+  return { list: Array.from({ length: PRINT_N }, () => ({ x: 0, z: 0, t: -1e9, id: 0 })), next: 0, id: 0, lx: 1e9, lz: 1e9, side: 1, chk: 0, pos, geo };
+}
+function layPrint(P, fx, fz) {                     // (fx, fz): the unit direction you are walking
+  const p = P.list[P.next], a = P.next * 12, pos = P.pos, rx = -fz, rz = fx, ox = player.x + rx * 0.12 * P.side, oz = player.z + rz * 0.12 * P.side;
+  p.x = player.x; p.z = player.z; p.t = gameT; p.id = ++P.id; P.side = -P.side;
+  for (let k = 0; k < 4; k++) { const sx = k === 0 || k === 3 ? -1 : 1, sf = k < 2 ? -1 : 1; pos[a + k * 3] = ox + rx * 0.08 * sx + fx * 0.17 * sf; pos[a + k * 3 + 1] = 0.03; pos[a + k * 3 + 2] = oz + rz * 0.08 * sx + fz * 0.17 * sf; }
+  P.geo.attributes.position.needsUpdate = true; P.next = (P.next + 1) % PRINT_N;
+}
+function updatePrints(dt) {
+  const P = floor.prints, T = theme.mechanic.TUNE, vl = Math.hypot(player.vx, player.vz);
+  if (vl > 0.5 && Math.hypot(player.x - P.lx, player.z - P.lz) >= T.printGap) { layPrint(P, player.vx / vl, player.vz / vl); P.lx = player.x; P.lz = player.z; }
+  if ((P.chk -= dt) > 0) return;
+  P.chk = 0.5;                                      // twice a second: wipe the prints that have faded
+  for (let i = 0; i < PRINT_N; i++) if (P.list[i].t > -1e8 && gameT - P.list[i].t > T.printAge) { P.list[i].t = -1e9; P.pos.fill(0, i * 12, i * 12 + 12); P.geo.attributes.position.needsUpdate = true; }
+}
+// Jungle: an enemy standing in brush is drawn faint (its body material goes see-through) and is left off the dev minimap. Every third frame, only on brush floors.
+function updateBrush() {
+  const fade = theme.mechanic.TUNE.fade;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i], mt = e.mats[0];
+    if (!mt || e.dead) continue;
+    const inB = floor.patches.get(((e.z / TILE) | 0) * floor.w + ((e.x / TILE) | 0)) === 'brush';
+    if (inB === !!e.inBrush && (!inB || mt.opacity === fade)) continue;
+    e.inBrush = inB; mt.transparent = inB; mt.opacity = inB ? fade : 1;
+  }
 }
 
 // ---- the safe room behind the boss arena (floor.safe, built in js/gen.js layoutBoss). Until the boss dies its door is a slab that looks like
@@ -555,7 +690,7 @@ function applyWand(kind, e) {
 }
 
 // ---- Hanahan's Rage: nearby enemies fight each other for a while ----
-const SPEAK = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
+const SPEAK = typeof speechSynthesis !== 'undefined' && !params.has('mute') && !params.has('norender') ? speechSynthesis : null;   // ?mute=1 or the test mode (?norender=1) silences the voice lines
 function playRage(it) {
   if (cb.rageCd > 0) { flash('The recorder is still rewinding.'); return; }
   cb.rageCd = RAGE.cd; loud(RAGE.noise);
@@ -588,16 +723,22 @@ function spawnEnemyShot(s) {
   const gravity = s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
   const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
   const jitter = () => (gameRng() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
-  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff' }[s.kind]) };
+  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind]) };
   a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
 }
-// An enemy shot (arrow, hex, thorn, curse) that reached the player's ally first: arrows hurt by zone, the others apply their status.
+// An enemy shot (arrow, hex, thorn, curse, dart) that reached the player's ally first: arrows hurt by zone, the others apply their status.
 function allyShotHit(a, ev) {
   const al = ev.e, k = a.kind;
-  if (k === 'thorn') al.addStatus('bleed', 4); else if (k === 'curse') al.addStatus('slow', 5); else if (k === 'hex') al.addStatus(gameRng() < 0.5 ? 'slow' : 'daze', 4);
+  if (k === 'thorn') al.addStatus('bleed', 4); else if (k === 'dart') al.addStatus('bleed', 5); else if (k === 'curse') al.addStatus('slow', 5); else if (k === 'hex') al.addStatus(gameRng() < 0.5 ? 'slow' : 'daze', 4);
   else { al.cause = 'was shot'; al.hurt(TUNE.enemyDmg * a.from.dmgMul * ZONE_MUL[ev.zone] * (al.resist[ev.zone] || 1), a.from); }
 }
 function enemyShotHit(a) {
+  if (a.kind === 'dart') {                                                           // a poison dart: bleed for 5 s, no block stops it
+    hitReaction(4);
+    if (pst.apply('bleed', 5)) discover('status:bleed', STATUS.bleed.name);
+    mark('POISONED', '#7aff5a'); addLog('Poisoned: Bleed!', '#7aff5a');
+    return;
+  }
   if (a.kind === 'thorn' || a.kind === 'curse') {                                    // thorns make you bleed, a curse slows you; no block stops them
     hitReaction(4);
     const s = a.kind === 'thorn' ? 'bleed' : 'slow';
@@ -902,7 +1043,10 @@ function updateCombat(dt) {
   player.noiseBonus = inv.armorNoise();
   const patch = floor.patches.get(player.tileY * floor.w + player.tileX);       // the theme's gimmick under your feet
   const mech = patch && MECH_PATCH[patch];                                       // the theme mechanic's handler for this decal (puddles and bells act elsewhere)
-  player.slippery = !!(mech && mech.slippery);
+  const mt = theme.mechanic.TUNE;                                                 // the theme's mechanic numbers (undefined in themes with none)
+  if (mech && mech.slippery) player.slipT = mt.carry; else if (player.slipT > 0) player.slipT -= dt;   // ice: the slide carries on for a moment after you leave it
+  player.slippery = player.slipT > 0; if (mt && mt.slip) player.slipRate = mt.slip;
+  if (floor.prints) updatePrints(dt);
   let seenMul = 1;
   if (mech) { if (mech.seen) seenMul = mech.seen(); discover(mech.disc[0], mech.disc[1]); }
   const hidden = hatUpdate(dt);
@@ -1117,6 +1261,7 @@ function finishSearch(o, smashed) {
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
     openDoor(o);
+    if (theme.doors.noise) loud(theme.doors.noise);                         // an ice seal shatters loudly
     flash(`Unlocked the ${o.p.room}`); questDoorOpened(o);
     return;
   }
@@ -1342,7 +1487,7 @@ function drawMinimap(step = 1) {
     mctx.fillRect(x * S, y * S, S + 0.5, S + 0.5);
   }
   if (dev.on) for (const e of enemies) {
-    if (e.dead) continue;
+    if (e.dead || e.inBrush) continue;                        // (an enemy in Jungle brush is hidden on the minimap)
     mctx.fillStyle = e.state === 'alerted' ? '#ff3a3a' : e.state === 'unaware' ? '#e07a3a' : '#ffc23a';
     mctx.beginPath(); mctx.arc(e.x / TILE * S, e.z / TILE * S, 2.5, 0, 7); mctx.fill();
   }
@@ -1516,15 +1661,17 @@ function frame(now) {
     inv.update(dt);
     updateSearch(dt);
     updateCombat(dt);
+    gameT += dt;
     updateRespawn(dt);
     updateArrows(dt);
     updateDoors(dt);
     if (prisonerWalk) prisonerStep(Math.min(dt, 0.05));                                // a freed prisoner on its way to the stairs (js/quests.js): only while one is walking
     const events = pending.splice(0);              // noises guards made last frame
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
-    if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * HUSH }); rings.push({ x: player.x, z: player.z, r: pulse * HUSH, t: 0 }); }
-    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: player.noiseRadius * HUSH });
-    const under = floor.patches.get(player.tileY * floor.w + player.tileX);
+    const under = floor.patches.get(player.tileY * floor.w + player.tileX), mt = theme.mechanic.TUNE;
+    const hush = HUSH * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
+    if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * hush }); rings.push({ x: player.x, z: player.z, r: pulse * hush, t: 0 }); }
+    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush });   // brush rustles: +3 m while you move in it
     if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
       floor.patches.delete(player.tileY * floor.w + player.tileX);
       const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;
@@ -1537,7 +1684,7 @@ function frame(now) {
       if (discover('item:puddle', 'Shallow water')) flash('Splash! Shallow water carries sound.');
     }
     pulse = 0;
-    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold };
+    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold, prints: floor.prints, pt: mt, t: gameT };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
@@ -1565,7 +1712,7 @@ function frame(now) {
   frameCount++;
   if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);
   if (frameCount % 2 === 0) updateTorches(now);                  // the lights drift slowly: every other frame is plenty
-  if (frameCount % 3 === 0) drawMinimap(3);                      // and the minimap three times a second per 9 frames, not every frame
+  if (frameCount % 3 === 0) { if (state === 'play' && theme.mechanic.kind === 'brush') updateBrush(); drawMinimap(3); }                      // and the minimap three times a second per 9 frames, not every frame
   updateHud();
   perfStats.logic = perfStats.logic * 0.95 + (performance.now() - tl0) * 0.05;
   if (!params.has('norender')) { renderer.render(scene, camera); if (state === 'play') adaptQuality(dt, r => { renderer.setPixelRatio(r); resize(); }); }   // ?norender=1: tests skip the (software) drawing and keep all the game logic

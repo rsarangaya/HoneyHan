@@ -21,9 +21,18 @@ function makeRng(seed) {
 //   wallStyle: 'box' (one InstancedMesh of boxes; more styles may add up to 2 more meshes).  layout.style: 'rooms' is the original generator (no extra rng calls).
 //   doors: style ('plank' | later 'cave', 'ice', 'spore', 'gate'), keyNames per locked room type, openAnim.  natives/boss: see js/enemytypes.js.
 //   mechanic: kind (the floor decal; no n = no decals), n: how many per floor, hush: noise multiplier, hint: the first-floor log line.
+// Layout styles (layoutFloor reads these; the style 'rooms' is the original generator, byte for byte). span: the biggest room side, roomCountMul: x the room target,
+// extChance: odds of a second rectangle (L/T shape, or a side chapel in halls), loops: extra corridors (0 = the original rule), loopMax: longest loop corridor, maxShop: biggest room the shop may take.
+// clearings (Jungle): big rooms with eroded corners and sparse tree pillars, wide corridors.  halls (Frozen Chapel): long naves with a colonnade and side chapels.
+const LAYOUTS = {
+  rooms:     { style: 'rooms',     roomMin: 4, roomMax: 8, span: 8,  roomCountMul: 1,    extChance: 0.3, wideChance: 0.3,  loops: 0, loopMax: 16, pillarChance: 0.75, maxShop: 60 },
+  clearings: { style: 'clearings', roomMin: 6, roomMax: 11, span: 11, roomCountMul: 0.6,  extChance: 0.3, wideChance: 0.7,  loops: 3, loopMax: 24, pillarChance: 0.3,  maxShop: 140 },
+  halls:     { style: 'halls',     roomMin: 7, roomMax: 9, span: 12, roomCountMul: 0.75, extChance: 0.7, wideChance: 0.15, loops: 1, loopMax: 20, pillarChance: 0.9,  maxShop: 140,
+               typeW: { big: [2, 2, 0.5, 0.5, 1.5, 1, 5], small: [2, 0.5, 0.2, 1, 1, 1, 4] } },   // room type weights: shrines (the pews and altar) dominate
+};
 const KEYS_DEFAULT = { armory: 'Armory Key', vault: 'Vault Key', brewery: 'Brewery Key', lair: 'Lair Key', cell: 'Cell Key' };
 const mkTheme = (name, id, pal, o) => ({
-  name, id, pal, fog: { density: 0.085 }, tex: { wall: 'stone', floor: 'tile', ceil: 'beams' }, wallStyle: 'box', layout: { style: 'rooms' },
+  name, id, pal, fog: { density: 0.085 }, tex: { wall: 'stone', floor: 'tile', ceil: 'beams' }, wallStyle: 'box', layout: LAYOUTS.rooms,
   doors: { style: 'plank', keyNames: KEYS_DEFAULT, openAnim: 'slide' }, props: {}, natives: null, boss: null, mechanic: { kind: null }, audio: null, ...o,
 });
 const THEME_DEFS = [
@@ -51,10 +60,26 @@ const THEME_DEFS = [
     natives: { commons: ['mguard', 'boar'], signature: 'thief', elite: 'captain', prefer: { mguard: 'barracks', boar: 'storeroom' } },
     boss: { name: 'Goblin Warlord', dress: 'warlord', skin: 0x7a9a3a },
     mechanic: { kind: 'bell', n: [3, 5], hint: 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.' } }),
-  mkTheme('The Frozen Chapel', 'chapel', { wall: '#6c7e90', floor: '#4a5868', ceil: '#202a36', fog: 0x0a1018, light: 0xc8e4ff }, {
+  // Frozen Chapel: ice-blue blocks, a frosted nave, long halls with colonnades and side chapels. Locked rooms are ICE SEALS (a glassy slab that shatters down, 8 m noise, the Frost Seal).
+  // Mechanic: ice patches (slide, and the slide carries on a moment after you leave them), footprints in the snow that guards follow, and wind that muffles a crouching player.
+  mkTheme('The Frozen Chapel', 'chapel', { wall: '#8aa6c0', floor: '#6a7e94', ceil: '#2a3a4e', fog: 0x0a1018, light: 0xc8e4ff }, {
+    fog: { density: 0.07 }, tex: { wall: 'iceblock', floor: 'frost', ceil: 'vault' }, layout: { ...LAYOUTS.halls },
+    doors: { style: 'ice', keyNames: { armory: 'Frost Seal', vault: 'Frost Seal', brewery: 'Frost Seal', lair: 'Frost Seal', cell: 'Frost Seal' }, openAnim: 'sink', noise: 8 },
+    props: { edge: [['candlestand', 1, 2], ['shaft', 1, 2]], inner: [['pew', 2, 4], ['brokenaltar', 0, 1]], floor: [['icicles', 1, 2], ['snowdrift', 1, 3]], locked: [['icicles', 1, 2], ['snowdrift', 0, 1]] },
     natives: { commons: ['skeleton', 'cultist'], signature: 'wisp', elite: 'iceknight', prefer: { cultist: 'shrine', skeleton: 'shrine' } },
     boss: { name: 'Frost Giant', dress: 'frost', skin: 0x9ac4e0 },
-    mechanic: { kind: 'ice', n: [5, 8], hint: 'Patches of ice make you slide.' } }),
+    mechanic: { kind: 'ice', n: [5, 8], prints: true, hint: 'Ice makes you slide, and your footprints in the snow lead guards to you. The wind muffles a crouching player.',
+      TUNE: { slip: 2.2, carry: 0.6, printAge: 10, printSusp: 0.5, printGap: 1.2, printSight: 5, wind: 0.8 } } }),   // slip: steering rate on ice (14 normally), carry: seconds the slide lasts after leaving it, printAge: seconds a print lasts, printSusp: awareness a print gives, printGap: metres between prints, printSight: how near a guard must be, wind: noise x while crouched
+  // Jungle: vine stone, a canopy ceiling, a moss floor, dappled green-gold light, rough walls. Locked rooms are CAVE MOUTHS (boulders and a vine curtain over a dark hole, rolling up with the Cave Key;
+  // the room behind is a dark cave). Mechanic: brush patches hide a player (a stealth bonus only, enemies still see through it) but rustle; enemies standing in brush are drawn faint.
+  mkTheme('The Overgrown Ruin', 'jungle', { wall: '#55703f', floor: '#3b4a26', ceil: '#1c3a1a', fog: 0x08140a, light: 0xffe8a0 }, {
+    fog: { density: 0.075 }, tex: { wall: 'vine', floor: 'moss', ceil: 'canopy' }, wallStyle: 'rough', layout: { ...LAYOUTS.clearings },
+    doors: { style: 'cave', keyNames: { armory: 'Cave Key', vault: 'Cave Key', brewery: 'Cave Key', lair: 'Cave Key', cell: 'Cave Key' }, openAnim: 'roll' },
+    props: { noCeil: true, edge: [['hammock', 0, 1]], inner: [['log', 0, 1], ['idol', 0, 1]], floor: [['fern', 3, 5], ['glowmoss', 0, 2], ['vines', 2, 3]], locked: [['glowmoss', 1, 2], ['bones', 1, 2]] },
+    natives: { commons: ['dartgoblin', 'strangler'], signature: 'jaguar', elite: 'tribal', prefer: { dartgoblin: 'library', strangler: 'storeroom' } },
+    boss: { name: 'Cave Warlord', dress: 'warlord', skin: 0x5a8a3a },
+    mechanic: { kind: 'brush', n: [10, 14], hint: 'Thick brush hides you from guards (more if you crouch) but rustles when you move through it. Jaguars lie in wait.',
+      TUNE: { stealth: 0.5, stealthCrouch: 0.35, rustle: 3, fade: 0.45 } } }),   // stealth: guards see you x this in brush, stealthCrouch: crouched, rustle: extra noise metres while moving in brush, fade: opacity of an enemy standing in brush
 ];
 const THEMES = THEME_DEFS;                                  // the stage theme pool (the Final Chamber is not in it)
 const THEME_BY_NAME = {}; for (const t of THEME_DEFS) THEME_BY_NAME[t.name] = t;
@@ -103,8 +128,9 @@ const ROOM_THEMES = {
 // The key's name and the door's style come from the floor's theme (plank themes keep the classic names).
 const keyNameFor = (type, themeName) => { const t = THEME_BY_NAME[themeName]; return (t && t.doors.keyNames[type]) || LOCKED_ROOMS[type].key; };
 const doorStyleFor = themeName => { const t = THEME_BY_NAME[themeName]; return t ? t.doors.style : 'plank'; };
-const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue']);   // guards path around these: anything with a collision circle bigger than candles
-const DECALS = new Set(['rug', 'bones', 'candles', 'banner']);                                                     // never fill a tile alone
+const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue', 'log', 'idol', 'pew', 'brokenaltar']);   // guards path around these: anything with a collision circle bigger than candles
+const DECALS = new Set(['rug', 'bones', 'candles', 'banner', 'fern', 'glowmoss', 'vines', 'icicles', 'snowdrift', 'shaft']);   // flat or hanging, no collision
+const WALLDEC = new Set(['banner', 'shaft']);                                                                       // hung on a wall: they share an edge tile and face the room                                                     // never fill a tile alone
 const LOCKED_ROOMS = {
   armory:     { w: 7, h: 6, theme: 'armory',     name: 'armory',  key: 'Armory Key' },
   vault:      { w: 5, h: 5, theme: 'vault',      name: 'vault',   key: 'Vault Key' },
@@ -273,7 +299,8 @@ function layoutBoss(seed, floorNum) {
 }
 
 function layoutFloor(seed, floorNum, opts) {
-  const layoutStyle = opts.layoutStyle || 'rooms';   // 'rooms' is the original path below; other styles are not built yet (they will branch where the rooms are made, never adding rng calls to 'rooms')
+  const th = THEME_BY_NAME[opts.themeName], layoutStyle = opts.layoutStyle || (th && th.layout.style) || 'rooms';   // 'rooms' is the original path below; the other styles branch where the rooms are made and never add rng calls to 'rooms'
+  const L = th && th.layout.style === layoutStyle ? th.layout : LAYOUTS[layoutStyle] || LAYOUTS.rooms, tprops = L.style !== 'rooms' && th ? th.props : null;   // the style's numbers, and the theme's own furniture (new styles only)
   const rng = makeRng(seed * 7919 + floorNum * 104729);
   const w = mapSizeFor(floorNum), h = w;
   const tiles = new Uint8Array(w * h);
@@ -288,25 +315,32 @@ function layoutFloor(seed, floorNum, opts) {
   const mk = (x, y, rw, rh) => ({ x, y, w: rw, h: rh, cx: x + (rw >> 1), cy: y + (rh >> 1), theme: 'generic', locked: false });
   const clash = (a, b) => a.x < b.x + b.w + 2 && a.x + a.w + 2 > b.x && a.y < b.y + b.h + 2 && a.y + a.h + 2 > b.y;
   const fits = r => r.x >= 2 && r.y >= 2 && r.x + r.w <= w - 2 && r.y + r.h <= h - 2 && !rooms.some(o => clash(r, o));
-  const target = roomTargetFor(floorNum) + rng.int(0, 1);
+  const target = Math.max(1, Math.round((roomTargetFor(floorNum) + rng.int(0, 1)) * L.roomCountMul));
+  const hall = L.style === 'halls', clear = L.style === 'clearings';
   for (let tries = 0, made = 0; tries < 900 && made < target; tries++) {
-    const r = mk(rng.int(2, w - 11), rng.int(2, h - 11), rng.int(4, 8), rng.int(4, 8));
+    const r = mk(rng.int(2, w - L.span - 3), rng.int(2, h - L.span - 3), rng.int(L.roomMin, L.roomMax), rng.int(L.roomMin, L.roomMax));
+    if (hall) { const long = rng.int(9, L.span); if (rng() < 0.5) { r.w = long; r.cx = r.x + (r.w >> 1); } else { r.h = long; r.cy = r.y + (r.h >> 1); } }   // a nave: one long side
     if (!fits(r)) continue;
     const group = [r];
-    if (rng() < 0.3) {                           // L or T shape
-      const ew = rng.int(4, 6), eh = rng.int(4, 6);
-      const e = mk(rng() < 0.5 ? r.x + r.w - 2 : r.x - ew + 2, r.y + rng.int(-2, r.h - 2), ew, eh);
+    if (rng() < L.extChance) {                   // L or T shape (halls: a 4 x 4 side chapel on a long side)
+      const ew = hall ? 4 : rng.int(4, 6), eh = hall ? 4 : rng.int(4, 6), ov = hall ? 1 : 2;
+      const e = mk(rng() < 0.5 ? r.x + r.w - ov : r.x - ew + ov, r.y + (hall ? rng.int(1, Math.max(1, r.h - 5)) : rng.int(-2, r.h - 2)), ew, eh);
       if (fits(e)) group.push(e);
     }
+    if (clear) for (const g of group) { const cap = Math.floor(Math.min(g.w, g.h) / 3); g.cuts = [rng.int(0, cap), rng.int(0, cap), rng.int(0, cap), rng.int(0, cap)]; }   // eroded corners: irregular clearings
     rooms.push(...group); made++;
   }
+  if (L.style !== 'rooms') for (let tries = 0; tries < 600 && rooms.length < 5; tries++) {   // big rooms may not fit a small map: fill up with ordinary ones so every floor has a start, a stairs room and a few more
+    const r = mk(rng.int(2, w - 11), rng.int(2, h - 11), rng.int(5, 8), rng.int(5, 8)); if (fits(r)) rooms.push(r);
+  }
+  const cutTile = (r, x, y) => { if (!r.cuts) return false; const dx = x - r.x, dy = y - r.y, ex = r.x + r.w - 1 - x, ey = r.y + r.h - 1 - y; return dx + dy < r.cuts[0] || ex + dy < r.cuts[1] || dx + ey < r.cuts[2] || ex + ey < r.cuts[3]; };
   for (const r of rooms)
-    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) set(x, y, T_FLOOR);
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (!cutTile(r, x, y)) set(x, y, T_FLOOR);
 
   // ---- corridors: each room links to the next (one connected map), plus extra loops.
   // About a third are two tiles wide.
   const carve = (a, b) => {
-    const wide = rng() < 0.3;
+    const wide = rng() < L.wideChance;
     let x = a.cx, y = a.cy;
     const open = (px, py) => { if (px > 0 && py > 0 && px < w - 1 && py < h - 1 && at(px, py) === T_WALL) set(px, py, T_FLOOR); };
     const hLine = tx => { while (x !== tx) { x += Math.sign(tx - x); open(x, y); if (wide) open(x, y + 1); } };
@@ -326,7 +360,7 @@ function layoutFloor(seed, floorNum, opts) {
   const loops = [];
   for (let i = 0; i < rooms.length; i++) for (let k = i + 1; k < rooms.length; k++) if (!edges.has(i + ',' + k) && !edges.has(k + ',' + i)) loops.push({ a: rooms[i], b: rooms[k], d: gap(rooms[i], rooms[k]) });
   loops.sort((p, q) => p.d - q.d);
-  for (const l of loops.slice(0, floorNum >= 2 ? 2 : 1)) if (l.d <= 16) carve(l.a, l.b);
+  for (const l of loops.slice(0, L.loops || (floorNum >= 2 ? 2 : 1))) if (l.d <= L.loopMax) carve(l.a, l.b);
 
   // ---- start in room 0, stairs in the room farthest from it by walking distance ----
   const start = { x: rooms[0].cx, y: rooms[0].cy };
@@ -353,13 +387,13 @@ function layoutFloor(seed, floorNum, opts) {
     if (i === 0) { r.theme = 'generic'; return; }
     const big = r.w * r.h >= 36;
     const names = ['generic', 'barracks', 'messhall', 'brewery', 'library', 'storeroom', 'shrine'];
-    r.theme = pickWeighted(names, big ? [2, 3, 3, 1.5, 2, 1.5, 1] : [3, 1, 0.3, 2, 2, 2, 1.5]);
+    r.theme = pickWeighted(names, big ? (L.typeW ? L.typeW.big : [2, 3, 3, 1.5, 2, 1.5, 1]) : (L.typeW ? L.typeW.small : [3, 1, 0.3, 2, 2, 2, 1.5]));
   });
 
   // ---- the shop: a mid-size ordinary room that is neither the start nor the stairs room (opts.shop) ----
   let shopRoom = null;
   if (opts.shop) {
-    const cands = rooms.filter((r, i) => i > 0 && r !== far && r.w * r.h >= 16 && r.w * r.h <= 60);
+    const cands = rooms.filter((r, i) => i > 0 && r !== far && r.w * r.h >= 16 && r.w * r.h <= L.maxShop);
     if (cands.length) { shopRoom = rng.pick(cands); shopRoom.theme = 'shop'; }
   }
 
@@ -369,9 +403,18 @@ function layoutFloor(seed, floorNum, opts) {
   const nearCentre = (x, y) => rooms.some(r => Math.abs(x - r.cx) <= 1 && Math.abs(y - r.cy) <= 1);
   const open8 = (x, y) => { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (wallAt(x + dx, y + dy)) return false; return true; };
   for (const r of rooms) {
+    if (hall) {                                  // a colonnade: two rows of pillars down the nave, two tiles in from each wall
+      if (Math.max(r.w, r.h) < 9 || Math.min(r.w, r.h) < 7) continue;
+      const tall = r.h >= r.w;
+      for (const side of [2, (tall ? r.w : r.h) - 3]) for (let k = 2; k <= (tall ? r.h : r.w) - 3; k += 2) {
+        const x = tall ? r.x + side : r.x + k, y = tall ? r.y + k : r.y + side;
+        if (!nearCentre(x, y) && open8(x, y) && rng() < L.pillarChance) set(x, y, T_WALL);
+      }
+      continue;
+    }
     if (r.w < 7 || r.h < 7) continue;
     for (let y = r.y + 2; y <= r.y + r.h - 3; y += 2) for (let x = r.x + 2; x <= r.x + r.w - 3; x += 2)
-      if (!nearCentre(x, y) && open8(x, y) && rng() < 0.75) set(x, y, T_WALL);
+      if (!nearCentre(x, y) && open8(x, y) && rng() < L.pillarChance) set(x, y, T_WALL);   // (clearings: sparse trees)
   }
 
   // ---- locked rooms: carved into solid rock, joined to the map by a short corridor with a locked
@@ -480,12 +523,12 @@ function layoutFloor(seed, floorNum, opts) {
     const addDecor = (kind, list) => {
       if (DECALS.has(kind)) {
         let c = null;
-        if (kind === 'banner') c = [...edge].reverse().find(t => !decalUsed.has(t.y * w + t.x)) || null;   // wall decal: shares an edge tile
+        if (WALLDEC.has(kind)) c = [...edge].reverse().find(t => !decalUsed.has(t.y * w + t.x)) || null;   // wall decal: shares an edge tile
         else { while (any.length && !c) { const t = any.pop(); if (!decalUsed.has(t.y * w + t.x)) c = t; } }
         if (!c) return;
         decalUsed.add(c.y * w + c.x);
         const [dx, dy] = wallDir(c.x, c.y);
-        decor.push({ kind, x: c.x, y: c.y, seed: seedOf(), edge: kind === 'banner', yaw: kind === 'banner' ? Math.atan2(-dx, -dy) : rng() * 6.28 });
+        decor.push({ kind, x: c.x, y: c.y, seed: seedOf(), edge: WALLDEC.has(kind), yaw: WALLDEC.has(kind) ? Math.atan2(-dx, -dy) : rng() * 6.28 });
         return;
       }
       const c = take(list, BLOCKING_DECOR.has(kind)); if (!c) return;
@@ -500,7 +543,12 @@ function layoutFloor(seed, floorNum, opts) {
     for (const [kind, lo, hi] of spec.inner) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, inner);
     for (const [kind, lo, hi] of spec.edge) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, edge);
     for (const [kind, lo, hi] of spec.floor) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, inner);
+    if (tprops) {                                         // the theme's own furniture (new layout styles only): locked rooms get just their dressing
+      if (r.locked) { for (const [kind, lo, hi] of tprops.locked || []) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, inner); }
+      else for (const [list, group] of [[edge, tprops.edge], [inner, tprops.inner], [inner, tprops.floor]]) for (const [kind, lo, hi] of group || []) for (let i = rng.int(lo, hi); i > 0; i--) addDecor(kind, list);
+    }
   };
+  if (L.style !== 'rooms') for (const lr of rooms) if (lr.locked && lr.join) used.add(lr.join.y * w + lr.join.x);   // keep the doorstep of each locked room free of furniture
   rooms.forEach(furnish);
 
   // ---- the shop's counter near the middle of its room, with the merchant standing behind it ----
@@ -541,7 +589,7 @@ function layoutFloor(seed, floorNum, opts) {
   // shrines and rich locked rooms), a couple more in big rooms, and wooden beams across rooms of 6+ tiles ----
   const always = new Set(['barracks', 'messhall', 'library', 'shrine', 'armory', 'vault', 'shop']);
   for (const r of rooms) {
-    if (r.w * r.h < 20) continue;
+    if (r.w * r.h < 20 || (tprops && tprops.noCeil)) continue;   // (the Jungle has a canopy, not chandeliers and beams)
     if (always.has(r.theme) || rng() < 0.5) decor.push({ kind: 'chandelier', x: r.cx, y: r.cy, seed: seedOf(), edge: false, yaw: 0 });
     if (r.w * r.h >= 64) for (const [ox, oy] of [[-3, 0], [3, 0], [0, -3], [0, 3]])
       if (rng() < 0.4 && at(r.cx + ox, r.cy + oy) === T_FLOOR && r.cx + ox >= r.x && r.cx + ox < r.x + r.w && r.cy + oy >= r.y && r.cy + oy < r.y + r.h)
@@ -559,7 +607,19 @@ function layoutFloor(seed, floorNum, opts) {
   rng.shuffle(keyHolders);
   keyHolders.sort((a, b) => (a.kind === 'chest' ? 0 : 1) - (b.kind === 'chest' ? 0 : 1));
   for (const d of doors) {
-    const holder = keyHolders.shift();
+    let holder = keyHolders.shift();
+    if (!holder && L.style !== 'rooms') {                 // big, sparse rooms may leave no prop to hide a key in: set a chest on a free edge tile of an ordinary room (the floor must stay connected)
+      for (const r of rng.shuffle(rooms.filter((q, i) => i > 0 && !q.locked && q.theme !== 'shop'))) {
+        const tiles2 = []; for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y) && open4(x, y) <= 3) tiles2.push({ x, y });
+        for (const c of rng.shuffle(tiles2)) {
+          blocked[c.y * w + c.x] = 1;
+          if (reachCount() !== reach - 1) { blocked[c.y * w + c.x] = 0; continue; }
+          reach--; used.add(c.y * w + c.x); const [dx, dy] = wallDir(c.x, c.y);
+          holder = { kind: 'chest', x: c.x, y: c.y, opened: false, seed: seedOf(), yaw: Math.atan2(-dx, -dy) }; props.push(holder); break;
+        }
+        if (holder) break;
+      }
+    }
     if (!holder) break;
     holder.kind = 'chest'; if (holder.tier === undefined) holder.tier = pickWeighted([0, 1, 2], chestTierWeights(floorNum).slice(0, 3));
     holder.extra = [{ type: 'key', lock: d.lock, label: d.keyLabel }];

@@ -147,9 +147,9 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
   check('floor cache holds at most 6 floors at every point of the run', A.maxCached <= 6, `max ${A.maxCached}`);
 
   // Floor 1 arrivals of stages 2 to 4 (each holds the previous stage's boss floor, the rest is trimmed). Layouts differ per stage,
-  // so the geometry count moves with the layout; the check is that it does not climb stage over stage, and textures stay flat.
+  // so the geometry count moves with the layout and the theme (the Jungle and the Chapel have more furniture kinds; 75 to 180 seen); the check is that it stays bounded (a leak would climb past it, and tests/game.jungle.test.js rebuilds a floor and compares), and textures stay flat.
   const g = [2, 3, 4].map(s => A.first[s].geos), t = [2, 3, 4, 5].map(s => A.first[s].tex);
-  check('renderer geometries do not grow stage over stage, and textures stay flat (floor 1 arrivals)', A.first[4].geos <= A.first[2].geos * 1.5 && t.every(v => v === t[0]),
+  check('renderer geometries stay bounded stage over stage, and textures stay flat (floor 1 arrivals)', g.every(v => v < 260) && t.every(v => v === t[0]),
     `geometries stage 2/3/4 ${g.join('/')}, final arena ${A.first[5].geos}; textures ${t.join('/')} (stage 1: ${A.first[1].geos}/${A.first[1].tex})`);
 
   const c = A.climbs;

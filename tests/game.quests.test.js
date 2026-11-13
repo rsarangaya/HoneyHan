@@ -21,12 +21,14 @@ const QH = () => {
       return false;
     },
     altar: () => propObjs.find(o => o.p.kind === 'altar'),
+    // the shrine scenarios are about the altar, not the floor's guards (a theme's ambushers, such as the Jungle's jaguars, would otherwise wake and bite while the test stands there)
+    calm() { for (const e of game.enemies) e.mesh.parent && e.mesh.parent.remove(e.mesh); game.enemies.length = 0; },
     press: code => window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true })),
     invText: () => { const r = document.getElementById('invScreen'); return r && r.style.display !== 'none' ? r.textContent : null; },
     // a clean pack, full health, a deal for this altar, and no leftovers from the last scenario
     fresh(deal) {
       game.inv.maxHp = 100; game.inv.hp = 100; game.inv.stamBonus = 0; game.inv.pack = []; game.inv.equip.helmet = null;
-      game.cb.stamina = 100; game.cb.delay = 0;
+      game.cb.stamina = 100; game.cb.delay = 0; Qs.calm();
       if (deal) game.floor.quest.deal = deal;
     },
   };
@@ -86,7 +88,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
   const shrineOn = () => plain.evaluate(() => { game.startFloor(4); return !!(floor.quest && floor.quest.type === 'shrine' && Qs.altar()); });
   check('the shrine floor has an altar where the quest says', await shrineOn());
   const cant = await plain.evaluate(async () => {
-    game.startFloor(4); const a = Qs.altar(); Qs.face(a); game.inv.hp = 100;
+    game.startFloor(4); Qs.calm(); const a = Qs.altar(); Qs.face(a); game.inv.hp = 100;
     playerHit();                                   // swing at the altar
     await T.sleep(50);
     return { state: game.state, opened: !!a.p.opened, used: !!floor.quest.used, hp: game.inv.hp };
@@ -97,7 +99,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
 
   // Hold E: the deal screen opens (the game pauses, the screen is shown).
   const holdE = async () => {
-    await plain.evaluate(() => { Qs.face(Qs.altar()); Qs.key(true); });
+    await plain.evaluate(() => { Qs.calm(); Qs.face(Qs.altar()); Qs.key(true); });
     const ok = await plain.evaluate(() => T.until(() => game.state === 'deal', 15000));
     await plain.evaluate(() => Qs.key(false));
     return ok;

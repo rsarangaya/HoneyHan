@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-20';   // bumped so old saved values don't override the new defaults (last: stage numbers)
+  const KEY = 'prototype-test-tune-21';   // bumped so old saved values don't override the new defaults (last: Jungle and Frozen Chapel mechanics)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
@@ -10,7 +10,9 @@ const tunePanel = (() => {
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1]]],
-    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'jaguar', 'dartgoblin', 'strangler', 'tribal', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ['jungle brush', THEME_BY_NAME['The Overgrown Ruin'].mechanic.TUNE, [['stealth', 0.05], ['stealthCrouch', 0.05], ['rustle', 0.5], ['fade', 0.05]]],
+    ['frozen ice and prints', THEME_BY_NAME['The Frozen Chapel'].mechanic.TUNE, [['slip', 0.1], ['carry', 0.1], ['printAge', 1], ['printSusp', 0.05], ['printGap', 0.1], ['printSight', 0.5], ['wind', 0.05]]],
     ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
     ['bomb', BOMB, [['fuse', 0.1], ['warn', 0.1], ['trigger', 0.1], ['radius', 0.1], ['dmg', 1], ['falloff', 0.05], ['noise', 1], ['dropDelay', 0.1], ['chain', 0.1], ['fx', 0.05]]],
     ['lockpick', LOCKPICK, [['time', 0.5], ['noise', 1], ['breakChance', 0.05], ['drop', 0.01], ['corpseDrop', 0.05]]],

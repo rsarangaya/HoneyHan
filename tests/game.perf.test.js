@@ -19,6 +19,27 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   check('and under 260 in the middle of the busiest room, looking every way', calls.worst < 260, 'worst ' + calls.worst);
   check('triangle counts stay modest (under 150k)', calls.out.every(r => r.tris < 150000), calls.out.map(r => r.tris).join(', '));
 
+  // 1b. Every theme has its own walls, doors, textures and furniture: the same budgets hold in each (floors 1 to 4 at the start, the busiest room on floor 3).
+  const themeSeeds = await page.evaluate(() => { const out = {}; for (let s = 1; s < 400 && Object.keys(out).length < THEMES.length; s++) { const n = makeRng(s).pick(THEMES).name; if (!out[n]) out[n] = s; } return out; });
+  await page.close();
+  for (const [name, seed] of Object.entries(themeSeeds)) {
+    const pg = await open(seed);
+    const r = await pg.evaluate(async () => {
+      const out = [];
+      for (const n of [1, 2, 3, 4]) { game.startFloor(n); await T.sleep(100); const i = game.renderInfo(); out.push({ n, calls: i.calls, tris: i.tris }); }
+      game.startFloor(3); await T.sleep(100);
+      const room = [...game.floor.rooms].filter(r => !r.locked).sort((a, b) => b.w * b.h - a.w * a.h)[0], P = game.player;
+      P.x = (room.cx + 0.5) * TILE; P.z = (room.cy + 0.5) * TILE; let worst = 0, walls = 0;
+      for (let a = 0; a < 8; a++) { P.yaw = a * Math.PI / 4; worst = Math.max(worst, game.renderInfo().calls); }
+      group.traverse(o => { if (o.isInstancedMesh) walls++; });
+      return { out, worst, walls };
+    });
+    check(`${name}: under 220 draw calls at the start of every floor, under 260 in the busiest room, under 150k triangles, at most 3 wall draws`,
+      r.out.every(x => x.calls < 220 && x.tris < 150000) && r.worst < 260 && r.walls <= 3, r.out.map(x => `f${x.n}: ${x.calls}/${(x.tris / 1000).toFixed(0)}k`).join(', ') + `; worst ${r.worst}, wall draws ${r.walls}`);
+    await pg.close();
+  }
+  page = await open(7);
+
   // 2. Furniture is merged: far fewer meshes than decor pieces, and the merged geometry is not lost.
   const merged = await page.evaluate(async () => {
     game.startFloor(2); await T.sleep(120);

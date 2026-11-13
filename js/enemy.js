@@ -186,6 +186,7 @@ class Enemy {
     this.sleepT = 0;                    // asleep (a sleep wand): sees and hears nothing, any damage wakes it
     this.rageT = 0; this.rageFrom = null; this.rageTarget = null;   // Hanahan's Rage: fights other enemies instead of the player
     this.fuse = -1; this.exploded = false; this.spark = null; this.keep = null;   // bomb goblins: seconds left on the fuse (-1 = not lit yet)
+    this.printId = 0;                                               // the newest footprint this guard has followed (Frozen Chapel)
     this.windOvr = 0; this.propObj = null;                          // mimics: a fixed wind-up for the first bite, and the chest prop it stands in for
     this.cause = 'died';
     this.foe = null; this.isAlly = this.type === 'ally';             // foe: the ally this enemy is fighting instead of the player (js/quests.js sets it)
@@ -268,7 +269,7 @@ class Enemy {
       if (vest.cls >= 1) part(0.58, 0.5, 0.06, vm, 0, 0.4, 0.18);                                  // back piece
       if (vest.cls === 2) for (const s of [-1, 1]) part(0.22, 0.12, 0.3, vm, s * 0.38, 0.72, 0);   // pauldrons
     }
-    this.look = { helmet: !!helmet && !crowned, hat: (!helmet && (hood || ['bandit', 'archer'].includes(this.type))) || crowned, vest: !!vest, clothOverArmor: false };   // what is drawn, for the tests
+    this.look = { helmet: !!helmet && !crowned, hat: (!helmet && (hood || ['bandit', 'archer', 'dartgoblin'].includes(this.type))) || crowned, vest: !!vest, clothOverArmor: false };   // what is drawn, for the tests
     const pad = rg() < 0.6;
     if (pad && !vest) part(0.28, 0.12, 0.28, leather, -0.38, 0.74, 0);                            // shoulder pad (clothing, so not under armor)
     if (rg() < 0.5) { part(0.04, 0.12, 0.04, bone, 0.38, 0.86, -0.05); part(0.04, 0.1, 0.04, bone, 0.38, 0.84, 0.07); }   // bone spikes
@@ -334,8 +335,8 @@ class Enemy {
     } else if (this.type === 'bandit') {
       if (!helmet) { part(0.4, 0.09, 0.4, lam(0x8a1f1f), 0, 1.04, 0); part(0.1, 0.12, 0.05, lam(0x8a1f1f), 0.18, 0.99, 0.2); }   // red bandana (a helmet replaces it)
       box(0.1, 0.3, 0.1, lam(0x2f6a3a), 0, -0.58, -0.1, this.arms[0]); box(0.06, 0.1, 0.06, lam(0x2f6a3a), 0, -0.4, -0.1, this.arms[0]);   // a bottle in the off hand
-    } else if (this.type === 'archer') {
-      if (!helmet) { part(0.42, 0.3, 0.42, lam(0x3a5a2a), 0, 1.04, 0); part(0.4, 0.34, 0.07, lam(0x3a5a2a), 0, 0.9, 0.2); }  // a green hood (a helmet replaces it)
+    } else if (this.type === 'archer' || this.type === 'dartgoblin') {
+      if (!helmet) { const lf = this.type === 'archer' ? 0x3a5a2a : 0x4a8a2a; part(0.42, 0.3, 0.42, lam(lf), 0, 1.04, 0); part(0.4, 0.34, 0.07, lam(lf), 0, 0.9, 0.2); }  // a green hood (a helmet replaces it); the dart goblin's is leaf-bright
       part(0.13, 0.42, 0.13, leather, 0.18, 0.55, 0.22); for (const x of [0.14, 0.19, 0.24]) part(0.03, 0.12, 0.03, bone, x, 0.8, 0.22);   // a quiver of arrows
     } else if (this.T.robe) {                                                                                                   // casters: shaman, scholar, warden, librarian, cultist
       const robe = lam(this.T.robe);
@@ -375,6 +376,12 @@ class Enemy {
       part(0.4, 0.14, 0.4, lam(0x2a2a2a), 0, 1.06, 0); for (const s of [-1, 1]) part(0.12, 0.08, 0.04, lam(0xa0d8e8), s * 0.085, 0.95, -0.2);                                       // goggles on a leather cap
     } else if (this.type === 'captain') {
       part(0.08, 0.3, 0.1, lam(0xc02020), 0, 1.3, 0); part(0.4, 0.7, 0.06, lam(0xc02020), 0, 0.35, 0.22);         // a plume and a red cape
+    } else if (this.type === 'tribal') {
+      for (const [x, c] of [[-0.14, 0xc83a2a], [0, 0xe8c040], [0.14, 0x2a8a4a]]) part(0.06, 0.34, 0.04, lam(c), x, 1.26, 0.02);        // a feather crest
+      part(0.34, 0.06, 0.02, lam(0xe8e0c8), 0, 0.9, -0.2);                                                                              // war paint across the eyes
+    } else if (this.type === 'strangler') {
+      for (const [x, y, z, h] of [[-0.3, 0.4, -0.15, 0.9], [0.3, 0.3, -0.12, 0.8], [0, 0.55, 0.2, 1.0], [0.12, 0.9, -0.14, 0.5]]) part(0.07, h, 0.07, lam(0x4a8a2a), x, y, z);   // vines wrapped round it
+      for (const s of [-1, 1]) part(0.22, 0.05, 0.22, lam(0x2a5a1a), s * 0.2, 1.12, 0);                                                  // a leafy crown
     } else if (this.type === 'iceknight') {
       for (const x of [-0.12, 0, 0.12]) part(0.05, 0.22, 0.05, lam(0xd8f0ff), x, 1.28, 0);                          // icicle crest
     } else if (this.type === 'golem') {
@@ -855,6 +862,7 @@ class Enemy {
       }
     }
 
+    if (noise.prints && this.state !== 'alerted') this.followPrints(noise);   // fresh footprints in the snow: investigate them, newest first
     let attack = null;
     const hd = this.handlerRef;
     if (hd && !hd.dead && hd.state === 'alerted' && this.state !== 'alerted') { this.last = hd.last || { x: player.x, z: player.z }; this.aware = 1; }
@@ -946,6 +954,23 @@ class Enemy {
     }
     this.sync(dt);
     return attack;
+  }
+
+  // The Frozen Chapel's footprints (js/main.js: floor.prints, a ring of 8 with ids that count up). A guard that is not alerted and can see a print newer than the last
+  // one it followed, within pt.printSight metres and pt.printAge seconds old, turns suspicious and heads for it (and on to the next, newer one). No allocation unless it finds one.
+  followPrints(noise) {
+    const P = noise.prints, pt = noise.pt, f = this.floor;
+    let best = null;
+    for (let i = 0; i < P.list.length; i++) {
+      const p = P.list[i];
+      if (p.id <= this.printId || noise.t - p.t > pt.printAge || (best && p.id < best.id)) continue;
+      if (Math.abs(p.x - this.x) > pt.printSight || Math.abs(p.z - this.z) > pt.printSight || Math.hypot(p.x - this.x, p.z - this.z) > pt.printSight) continue;
+      best = p;
+    }
+    if (!best || !hasLOS(f, this.x, this.z, best.x, best.z)) return;
+    this.printId = best.id; this.last = { x: best.x, z: best.z };
+    this.aware = Math.max(this.aware, pt.printSusp);
+    if (this.state === 'suspicious' || this.state === 'searching') { this.wait = 0; this.set('suspicious'); }
   }
 
   sync(dt) {

@@ -22,6 +22,7 @@ class Player {
     this.stealthMul = 1;     // 0.5 with a shadow potion: guards see half as far
     this.acc = 0;
     this.slippery = false;   // on ice (set each frame by main.js)
+    this.slipT = 0; this.slipRate = 2.2;   // seconds of slide left after leaving the ice, and how little you steer on it (14 on normal floor)
   }
 
   place(floor) {
@@ -105,7 +106,7 @@ class Player {
     const wz = (-cos * fx - sin * sx) * speed;
 
     // ease velocity toward the target so starts and stops feel weighty
-    const a = 1 - Math.exp(-(this.slippery ? 2.2 : 14) * STEP);       // on ice you barely steer or stop
+    const a = 1 - Math.exp(-(this.slippery ? this.slipRate : 14) * STEP);       // on ice you barely steer or stop
     this.vx += (wx - this.vx) * a;
     this.vz += (wz - this.vz) * a;
 
