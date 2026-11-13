@@ -42,7 +42,7 @@ run('Mushroom Cellar and Clockwork Library', async ({ open, check }) => {
     out.tx = [!!themeTex.get(theme.name + '|wall'), !!themeTex.get(theme.name + '|floor')];
     return out;
   });
-  check('the Cellar is caves with cap-stone walls, a damp floor and spore seals keyed with the Spore Key', cw.themeName === CELL && cw.layout === 'caves' && cw.tex.wall === 'capstone' && cw.tex.floor === 'damp' && cw.hasDoor && cw.door.every(s => s === 'spore|Spore Key'), JSON.stringify([cw.layout, cw.tex, cw.door]));
+  check('the Cellar is caves with cave rock walls, a damp floor and spore seals keyed with the Spore Key', cw.themeName === CELL && cw.layout === 'caves' && cw.tex.wall === 'cave' && cw.tex.floor === 'damp' && cw.hasDoor && cw.door.every(s => s === 'spore|Spore Key'), JSON.stringify([cw.layout, cw.tex, cw.door]));
   check('the Cellar keeps one wall draw, bakes its seal into a few meshes and has small chambers', cw.inst.length === 1 && cw.doorMeshes >= 2 && cw.doorMeshes <= 8 && cw.maxRoom <= 5, JSON.stringify([cw.inst, cw.doorMeshes, cw.maxRoom]));
   check('the Cellar has its own furniture (wine racks, mushrooms, stalactites, glow-moss)', (cw.kinds.winerack || 0) + (cw.kinds.mushroom || 0) + (cw.kinds.stalactites || 0) + (cw.kinds.glowmoss || 0) > 0, JSON.stringify(cw.kinds));
   check('the Cellar numbers live in the theme (glow 1.4, dark 0.7, footsteps 0.8, cloud 6 s, puff 2 s)', cw.mt.glow === 1.4 && cw.mt.dark === 0.7 && cw.mt.darkFoot === 0.8 && cw.mt.cloudDur === 6 && cw.mt.puffDur === 2 && cw.mt.puffDaze === 1, JSON.stringify(cw.mt));

@@ -348,19 +348,66 @@ const TEX_GENERATORS = {
   floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c), wetwood: c => wetWoodTexture(c), grass: c => grassFloorTexture(c), cobble: c => cobbleFloorTexture(c), obsidian: c => obsidianFloorTexture(c) },
   ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c), starry: c => starryTexture(c), patchwork: c => patchworkTexture(c), void: c => voidTexture(c) },
 };
-// Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'rough' (Jungle): a box whose side faces bulge a little (a hash of each vertex, so shared corners stay closed);
-// every tile is also turned a quarter-turn at random and widened a hair (buildFloor), so a wall does not look stamped.
+// Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'box': plain boxes (buildings). The round styles ('shrub' Orchard hedges, 'tree' Jungle, 'rock' Cellar caves) are visual only: a few lumpy blobs
+// merged into one shared geometry per kind (vertex colours, radial normals, hashed lumps), stamped once per wall tile that touches open floor with a hash of the tile for turn, size and tint (no rng draws).
+// Nothing reaches more than ~0.3 m past the tile edge (blobs are clamped to a 1.75 m radius), so the walkable floor stays honest. Collision, sight and the minimap stay tile based.
+const hash3 = (x, y, z) => { const s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453; return s - Math.floor(s); };
+function addPart(P, geo, col, fn) {              // append a geometry to the merge lists; fn(v, n) may move the vertex and the normal and returns a brightness factor
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv, base = P.pos.length / 3, c = new THREE.Color(col), v = new THREE.Vector3(), nn = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i); nn.fromBufferAttribute(n, i); const f = fn(v, nn);
+    P.pos.push(v.x, v.y, v.z); P.nor.push(nn.x, nn.y, nn.z); P.col.push(c.r * f * P.gain, c.g * f * P.gain, c.b * f * P.gain); P.uv.push(uv.getX(i) * 2, uv.getY(i) * 2);
+  }
+  for (const i of geo.index.array) P.idx.push(base + i);
+  geo.dispose();
+}
+// A lumpy ellipsoid at (cx, cy, cz) with radii (rx, ry, rz): a dome (up: half sphere standing on its rim, down: hanging from it) or a whole one; lumps = hashed in/out push; darker toward the ground.
+function leafBlob(P, col, cx, cy, cz, rx, ry, rz, lump = 0.14, part = 'full', w = 8, h = 4) {
+  const geo = new THREE.SphereGeometry(1, w, h, 0, Math.PI * 2, part === 'down' ? Math.PI / 2 : 0, part === 'full' ? Math.PI : Math.PI / 2);
+  addPart(P, geo, col, (v, nn) => {
+    const dx = v.x, dy = v.y, dz = v.z, q = hash3(Math.round(dx * 997) + cx * 7.3, Math.round(dy * 997) + cy * 3.1, Math.round(dz * 997) + cz * 5.7), k = 1 + (q - 0.5) * 2 * lump;
+    let x = cx + dx * rx * k, y = cy + dy * ry * k, z = cz + dz * rz * k; const r = Math.hypot(x, z);
+    if (r > 1.75) { x *= 1.75 / r; z *= 1.75 / r; }
+    v.set(x, y, z); nn.set(dx / rx, dy / ry, dz / rz).normalize();
+    return (0.66 + 0.34 * Math.min(1, Math.max(0, y / 2.2))) * (0.92 + 0.16 * q);
+  });
+}
+function trunk(P, col, rt, rb, h, w = 8, rings = 3) {       // a thick round trunk standing on the floor, its rings pushed in and out a little
+  addPart(P, new THREE.CylinderGeometry(rt, rb, h, w, rings, true), col, (v, nn) => {
+    const k = 1 + (hash3(Math.round(v.y * 50), Math.round(Math.atan2(v.z, v.x) * 20), rt) - 0.5) * 0.16; v.set(v.x * k, v.y + h / 2, v.z * k);
+    return 0.85 + 0.3 * hash3(Math.round(v.y * 9), Math.round(Math.atan2(v.z, v.x) * 4), rb);
+  });
+}
+const wallGeoCache = new Map();
+function roundGeo(kind, gain, make) {
+  let g = wallGeoCache.get(kind);
+  if (!g) {
+    const P = { pos: [], nor: [], col: [], uv: [], idx: [], gain }; make(P);
+    g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(P.nor, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(P.col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(P.uv, 2)); g.setIndex(P.idx);
+    g.userData.shared = true; wallGeoCache.set(kind, g);
+  }
+  return g;
+}
 const WALL_GEO = {
   box: () => new THREE.BoxGeometry(TILE, WALL_H, TILE),
-  rough: () => {
-    const g = new THREE.BoxGeometry(TILE, WALL_H, TILE, 2, 3, 2), p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), y = p.getY(i), z = p.getZ(i), s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453, k = 1 + (s - Math.floor(s)) * 0.09 - 0.015;
-      p.setXYZ(i, x * k, y, z * k);
-    }
-    g.computeVertexNormals(); return g;
-  },
+  shrub: () => roundGeo('shrub', 2.0, P => {          // a hedge tile: three overlapping domes of dark leaves
+    leafBlob(P, 0x24502a, -0.35, 0, -0.3, 1.35, 2.7, 1.35, 0.10, 'up', 9, 4); leafBlob(P, 0x2d6232, 0.55, 0, 0.2, 1.2, 2.4, 1.2, 0.10, 'up', 9, 4); leafBlob(P, 0x1c4122, -0.1, 0, 0.65, 1.1, 2.1, 1.1, 0.10, 'up', 9, 4);
+  }),
+  appletree: () => roundGeo('appletree', 1.5, P => {  // an apple tree: a thick flared trunk, a root swell and a round crown of lumpy leaf balls
+    trunk(P, 0x4a3422, 0.6, 0.9, 3.2); leafBlob(P, 0x4a3422, 0, 0, 0, 1.15, 0.7, 1.15, 0.12, 'up', 8, 3);
+    leafBlob(P, 0x2f5a34, 0, 3.5, 0, 1.5, 1.1, 1.5, 0.12, 'full', 8, 5); leafBlob(P, 0x386a3a, 0.55, 3.2, 0.3, 1.2, 0.9, 1.2, 0.12, 'full', 7, 4); leafBlob(P, 0x27502e, -0.5, 3.3, -0.35, 1.2, 0.9, 1.2, 0.12, 'full', 7, 4); leafBlob(P, 0x3a7040, 0.1, 4.0, -0.2, 1.0, 0.8, 1.0, 0.12, 'full', 7, 4);
+  }),
+  tree: () => roundGeo('tree', 1.1, P => {            // a jungle tile: a thick trunk in a mound of leaves, a heavy crown, and a dark leaf curtain at the foot
+    trunk(P, 0x3a2e20, 0.65, 1.0, 4.2, 8, 2); leafBlob(P, 0x2a5a24, 0.1, 0, 0.1, 1.7, 1.9, 1.7, 0.2, 'up', 8, 3); leafBlob(P, 0x356a2a, -0.5, 0, 0.6, 1.2, 1.5, 1.2, 0.2, 'up', 7, 3);
+    leafBlob(P, 0x2f6226, 0, 3.7, 0, 1.6, 1.0, 1.6, 0.18, 'full', 8, 4); leafBlob(P, 0x3d7430, 0.6, 3.1, -0.4, 1.2, 0.9, 1.2, 0.18, 'full', 6, 3); leafBlob(P, 0x23501c, -0.7, 3.2, 0.4, 1.1, 0.9, 1.1, 0.18, 'full', 6, 3);
+  }),
+  rock: () => roundGeo('rock', 1.7, P => {            // cave rock: a boulder standing on the floor, one hanging from the ceiling, a lumpy waist between them
+    leafBlob(P, 0x6a665e, -0.2, 0, 0.2, 1.6, 2.1, 1.6, 0.22, 'up', 8, 4); leafBlob(P, 0x57534c, 0.2, WALL_H, -0.2, 1.5, 1.8, 1.5, 0.22, 'down', 8, 4); leafBlob(P, 0x77726a, 0.1, 1.8, 0, 1.5, 1.3, 1.5, 0.22, 'full', 8, 4);
+  }),
 };
+// per kind of round wall: y scale range (the Jungle's trees are irregular; shrubs vary a little; rock reaches the ceiling), whether the wall texture is painted on it
+const ROUND_WALL = { shrub: { y0: 0.85, y1: 1.1, map: true }, appletree: { y0: 0.9, y1: 1.1, map: false }, tree: { y0: 0.75, y1: 1.1, map: false }, rock: { y0: 1, y1: 1, map: true } };
 // Door open animations by the theme's doors.openAnim: t runs 0 to 1. slide: up out of the way. roll (cave mouth): the curtain and boulders roll up to the lintel. sink (ice seal): the slab drops through the floor.
 const DOOR_ANIM = {
   slide: (o, t) => { o.mesh.position.y = t * WALL_H; },
@@ -419,25 +466,30 @@ function buildFloor() {
     if (touches) wallPos.push([x, y]);
   }
   const wallTex = themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
-  const rough = theme.wallStyle === 'rough', wallGeo = (WALL_GEO[theme.wallStyle] || WALL_GEO.box)();
-  const m = new THREE.Matrix4(), wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
-  const wallMesh = (list, mat, extra = 0) => {     // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws. extra: spare instances at the end (the Library's sliding shelves)
-    const im = new THREE.InstancedMesh(wallGeo, mat, list.length + extra);
+  const round = theme.wallStyle !== 'box' && WALL_GEO[theme.wallStyle] ? theme.wallStyle : null;   // 'shrub' | 'tree' | 'rock': lumpy blobs, no boxes
+  const m = new THREE.Matrix4(), wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0), tint = new THREE.Color();
+  const wallMesh = (list, mat, kind, extra = 0) => {     // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws. extra: spare instances at the end (the Library's sliding shelves)
+    const im = new THREE.InstancedMesh((WALL_GEO[kind] || WALL_GEO.box)(), mat, list.length + extra), R = ROUND_WALL[kind];
     list.forEach(([x, y], i) => {
-      if (rough) { const hh = ((x * 73856093) ^ (y * 19349663)) >>> 0, k = 1 + ((hh >> 2) & 7) * 0.006; wq.setFromAxisAngle(yAxis, (hh & 3) * Math.PI / 2); m.compose(wp.set((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE), wq, ws.set(k, 1, k)); }
-      else m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE);
+      if (R) {                                      // a hash of the tile (never the rng): turn, size, height and tint, so the wall does not look stamped
+        const hh = Math.imul(x, 73856093) ^ Math.imul(y, 19349663), a = (hh >>> 0) % 997 / 997, b = (hh >>> 4) % 991 / 991, c = (hh >>> 9) % 983 / 983, k = 0.95 + a * 0.1;
+        wq.setFromAxisAngle(yAxis, a * 6.283); m.compose(wp.set((x + 0.5) * TILE, 0, (y + 0.5) * TILE), wq, ws.set(k, R.y0 + b * (R.y1 - R.y0), k)); im.setColorAt(i, tint.setRGB(0.86 + c * 0.2, 0.86 + b * 0.2, 0.86 + a * 0.16));
+      } else m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE);
       im.setMatrixAt(i, m);
     });
     im.frustumCulled = false;                      // an instanced mesh is culled by its first box only, so never cull it
     group.add(im); return im;
   };
+  const roundMat = (key, map, kind) => themeTexture(key, () => new THREE.MeshPhongMaterial({ map: ROUND_WALL[kind].map ? map() : null, vertexColors: true, shininess: 4, specular: 0x101010 }));
   let caveList = null;                             // the Jungle's locked rooms are dark caves: their walls (and a dark patch on the floor) use cave rock
   if (theme.doors.style === 'cave' && floor.rooms.some(r => r.locked)) {
     const mask = new Uint8Array(w * h); caveList = [];
     for (const r of floor.rooms) if (r.locked) for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) if (x >= 0 && y >= 0 && x < w && y < h) mask[y * w + x] = 1;
     for (let i = wallPos.length - 1; i >= 0; i--) if (mask[wallPos[i][1] * w + wallPos[i][0]]) caveList.push(wallPos.splice(i, 1)[0]);
   }
-  const walls = wallMesh(wallPos, themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), movers.length * 2);   // per-pixel lighting: torch light pools smoothly across big faces
+  let pillarList = null;                           // the Orchard's lone trunks (a wall tile with no wall around it) are apple trees, the hedge tiles are shrubs
+  if (round === 'shrub') { pillarList = []; for (let i = wallPos.length - 1; i >= 0; i--) { const [x, y] = wallPos[i]; let lone = true; for (let dy = -1; dy <= 1 && lone; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && solid(x + dx, y + dy)) { lone = false; break; } if (lone) pillarList.push(wallPos.splice(i, 1)[0]); } }
+  const walls = wallMesh(wallPos, round ? roundMat('wallmat', () => wallTex, round) : themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), round || 'box', movers.length * 2);   // per-pixel lighting: torch light pools smoothly across big faces
   floor.moverMesh = null;
   if (movers.length) {                              // the shelves are extra instances of the wall mesh (same texture, a little lower and slimmer): no extra draw call; updateMovers slides them
     floor.moverMesh = walls; floor.moverBase = wallPos.length;
@@ -448,8 +500,10 @@ function buildFloor() {
     });
     walls.instanceMatrix.needsUpdate = true;
   }
+  if (pillarList && pillarList.length) wallMesh(pillarList, roundMat('treemat', null, 'appletree'), 'appletree');
   if (caveList && caveList.length) {
-    wallMesh(caveList, themeTexture('cavemat', () => new THREE.MeshPhongMaterial({ map: themeTexture('cavewall', () => TEX_GENERATORS.wall.cave('#3a3830')), shininess: 2, specular: 0x050505 })));
+    const cavekind = round ? 'rock' : 'box', caveTex = () => themeTexture('cavewall', () => TEX_GENERATORS.wall.cave('#3a3830'));
+    wallMesh(caveList, round ? roundMat('cavemat', caveTex, 'rock') : themeTexture('cavemat', () => new THREE.MeshPhongMaterial({ map: caveTex(), shininess: 2, specular: 0x050505 })), cavekind);
     const dark = themeTexture('cavedark', () => new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }));
     for (const r of floor.rooms) if (r.locked) { const p = new THREE.Mesh(new THREE.PlaneGeometry(r.w * TILE, r.h * TILE), dark); p.rotation.x = -Math.PI / 2; p.position.set((r.x + r.w / 2) * TILE, 0.02, (r.y + r.h / 2) * TILE); p.renderOrder = 1; group.add(p); }
   }
@@ -1305,7 +1359,7 @@ function updateCombat(dt) {
     if (r.hp && inv.hp > 1) inv.hp = Math.max(1, inv.hp - r.hp);   // starving hurts but never kills
     if (r.stage) { flash(HUNGER_MSG[r.stage]); if (r.stage !== 'fed') discover('item:hunger', 'Hunger'); }
   }
-  if (!dev.on && !inSafe && bleed <= 0 && inv.hp < inv.maxHp) inv.hp = Math.min(inv.maxHp, inv.hp + hunger.hpRegen() * dt);   // slow passive healing, slower the hungrier you are, none while bleeding
+  if (!dev.on && bleed <= 0) { const cap = inv.maxHp * hunger.healCap(inv.hp / inv.maxHp); if (inv.hp < cap) inv.hp = Math.min(cap, inv.hp + hunger.hpRegen() * dt); }   // passive healing (also in the safe room) up to a tier ceiling (50 / 75 / 90%), slower the hungrier you are, none while bleeding
   if (inv.eatReq) { startEat(inv.eatReq); inv.eatReq = null; }
   if (cb.eat) {
     const ea = cb.eat; ea.t += dt; cb.atk = null; cb.block = false;

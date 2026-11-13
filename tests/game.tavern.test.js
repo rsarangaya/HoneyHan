@@ -91,7 +91,7 @@ run('Sunken Tavern and Moonlit Orchard', async ({ open, check }) => {
     return out;
   });
   check('the Orchard is rows of trees with hedge walls, grass, a starry sky and garden gates keyed with the Garden Key', ow.themeName === ORCH && ow.layout === 'orchard' && ow.tex.wall === 'hedge' && ow.tex.floor === 'grass' && ow.tex.ceil === 'starry' && ow.hasDoor && ow.door.every(s => s === 'garden|Garden Key'), JSON.stringify([ow.layout, ow.tex, ow.door]));
-  check('big open rooms, hedge walls drawn in one mesh (no cave rock), the gate is a few baked meshes with a folding leaf', ow.bigRoom >= 7 && ow.inst.length === 1 && ow.doorMeshes >= 2 && ow.doorMeshes <= 14 && ow.leaf, JSON.stringify([ow.bigRoom, ow.inst, ow.doorMeshes, ow.leaf]));
+  check('big open rooms, shrub hedges plus the apple-tree trunk mesh (at most 2 wall draws, no cave rock), the gate is a few baked meshes with a folding leaf', ow.bigRoom >= 7 && ow.inst.length <= 2 && ow.doorMeshes >= 2 && ow.doorMeshes <= 14 && ow.leaf, JSON.stringify([ow.bigRoom, ow.inst, ow.doorMeshes, ow.leaf]));
   check('the gate folds back to its hinge and is quiet-ish (4 m)', ow.midScale < 1 && ow.midScale > 0.05 && ow.done && ow.noise >= 4, JSON.stringify([ow.midScale, ow.done, ow.noise]));
   check('the Orchard has its own furniture (apple trees, hedges, wells, fireflies, windfalls)', (ow.kinds.appletree || 0) + (ow.kinds.hedge || 0) + (ow.kinds.well || 0) + (ow.kinds.fireflies || 0) + (ow.kinds.fruit || 0) > 0, JSON.stringify(ow.kinds));
   check('the moonlight numbers live in the theme (moon 1.3, shade 0.6)', ow.mt.moon === 1.3 && ow.mt.shade === 0.6, JSON.stringify(ow.mt));

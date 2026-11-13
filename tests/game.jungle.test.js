@@ -34,7 +34,7 @@ run('Jungle and Frozen Chapel', async ({ open, check }) => {
   });
   const leak = await page.evaluate(async () => { const o = []; for (let k = 0; k < 3; k++) { game.startFloor(1); await T.sleep(100); o.push(game.renderInfo().geos); } return o; });
   check('rebuilding a Jungle floor frees its geometry (the count stays flat)', leak[1] === leak[0] && leak[2] === leak[0], leak.join(', '));
-  check('the Jungle uses rough walls and the clearings layout', jw.themeName === JUNG && jw.style === 'rough' && jw.layout === 'clearings');
+  check('the Jungle uses tree walls and the clearings layout', jw.themeName === JUNG && jw.style === 'tree' && jw.layout === 'clearings');
   check('wall draws stay at 3 or fewer, and a floor with a locked room has a second (cave rock) wall mesh', jw.inst.length >= 2 && jw.inst.length <= 3, JSON.stringify(jw.inst));
   check('locked doors are cave mouths keyed with the Cave Key', jw.hasDoor && jw.door.every(s => s === 'cave|Cave Key'), JSON.stringify(jw.door));
   check('a cave door is baked into a few meshes (not dozens)', jw.doorMeshes >= 2 && jw.doorMeshes <= 6, jw.doorMeshes + ' meshes');

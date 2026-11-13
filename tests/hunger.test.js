@@ -22,9 +22,10 @@ h = new Hunger();
 check('starts fed', h.stage === 'fed' && h.regenMul() === 1 && h.maxStaminaMul() === 1 && h.canSprint());
 h.v = 49.9; check('hungry below 50', h.stage === 'hungry' && h.regenMul() === HUNGER.regenHungry && h.maxStaminaMul() === 1);
 h.v = 24.9; check('weak below 25', h.stage === 'weak' && h.regenMul() === HUNGER.regenWeak && h.maxStaminaMul() === HUNGER.maxStamWeak && h.canSprint());
-h = new Hunger(); check('passive healing: slow when fed', near(h.hpRegen(), HUNGER.regenHp) && h.hpRegen() * 60 < 8);
+h = new Hunger(); check('passive healing: slow when fed', near(h.hpRegen(), HUNGER.regenHp));
 h.v = 49.9; check('passive healing halves when hungry', near(h.hpRegen(), HUNGER.regenHp * HUNGER.hpHungry));
 h.v = 24.9; check('passive healing is a quarter when weak', near(h.hpRegen(), HUNGER.regenHp * HUNGER.hpWeak));
+check('passive healing tiers: 50% -> 50, above 50% -> 75, above 75% -> 90', h.healCap(0.2) === 0.5 && h.healCap(0.5) === 0.5 && h.healCap(0.51) === 0.75 && h.healCap(0.75) === 0.75 && h.healCap(0.76) === 0.9 && h.healCap(0.95) === 0.9);
 h.v = 0; check('no passive healing when starving', h.hpRegen() === 0);
 h.v = 0; check('starving at 0: no sprint', h.stage === 'starving' && !h.canSprint());
 

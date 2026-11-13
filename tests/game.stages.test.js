@@ -142,7 +142,7 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
   check('the stage bosses and the final boss get their own glossary cards once seen', [1, 2, 3, 4].every(s => A.disc[s]) && A.discFinal, JSON.stringify(A.disc));
 
   const p2 = A.pack;
-  check('the pack carries over: items, gold, hunger, HP, max HP and the stamina boon', p2 && p2.after.pack === p2.before.pack && p2.after.gold === p2.before.gold && p2.after.maxHp === 85 && Math.abs(p2.after.hp - 60) < 1 && p2.after.stam === 0.25 && Math.abs(p2.after.hunger - p2.before.hunger) < 2, JSON.stringify(p2));
+  check('the pack carries over: items, gold, hunger, HP, max HP and the stamina boon', p2 && p2.after.pack === p2.before.pack && p2.after.gold === p2.before.gold && p2.after.maxHp === 85 && p2.after.hp >= 60 && p2.after.hp <= 63.76 && p2.after.stam === 0.25 && Math.abs(p2.after.hunger - p2.before.hunger) < 2, JSON.stringify(p2));
   check('each stage starts with a new seeded RNG (distinct values)', new Set([1, 2, 3, 4, 5].map(s => A.first[s].rng)).size === 5);
   check('floor cache holds at most 6 floors at every point of the run', A.maxCached <= 6, `max ${A.maxCached}`);
 

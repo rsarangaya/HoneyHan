@@ -116,8 +116,8 @@ run('The safe room behind the boss', async ({ open, check }) => {
     out.starveHp = I.hp; out.starveV = H.v;
     H.v = 60; for (let i = 0; i < 240; i++) updateCombat(0.5);                   // two minutes peckish: no drain
     out.drainV = H.v;
-    I.hp = 20; for (let i = 0; i < 240; i++) updateCombat(0.5);                  // and no free healing
-    out.idleHp = I.hp;
+    I.hp = 20; for (let i = 0; i < 240; i++) updateCombat(0.5);                  // passive healing works here but stops at the 50% tier
+    out.idleHp = I.hp; out.idleCap = I.maxHp * 0.5;
     I.hp = 60; springTrap('gas', { x: P.x, z: P.z }); out.gasHp = I.hp; pst.clear();
     explodeAt(P.x, P.z, null); out.blastHp = I.hp;                               // a blast right on top of you
     explodeAt((d.x + 0.5) * TILE, (d.y + 0.5) * TILE, null); out.doorBlastHp = I.hp;   // a blast at the door, from outside
@@ -139,7 +139,7 @@ run('The safe room behind the boss', async ({ open, check }) => {
   });
   check('the player is inside the safe room, past the door', safe.inSafe && safe.row <= safe.roomBottom, `row ${safe.row}, room bottom ${safe.roomBottom}`);
   check('no damage from an enemy hit, bleeding, starving, a gas trap or a bomb blast', [safe.hitHp, safe.guardHp, safe.bleedHp, safe.starveHp, safe.gasHp, safe.blastHp, safe.doorBlastHp].every(h => h === 60) && safe.hitHp === 60, JSON.stringify(safe));
-  check('hunger neither drains nor refills by itself, and there is no free healing', safe.starveV === 0 && safe.drainV === 60 && safe.idleHp === 20, `starving ${safe.starveV}, fed ${safe.drainV}, hp ${safe.idleHp}`);
+  check('hunger neither drains nor refills by itself, and passive healing here stops at the 50% tier', safe.starveV === 0 && safe.drainV === 60 && Math.abs(safe.idleHp - safe.idleCap) < 0.01, `starving ${safe.starveV}, fed ${safe.drainV}, hp ${safe.idleHp}`);
   check('attacks and the bow do nothing (no swing, no draw, no arrow)', !safe.swing && !safe.bowDraw && !safe.bowShot, JSON.stringify({ swing: safe.swing, draw: safe.bowDraw, shot: safe.bowShot }));
   check('eating from the pack still works and feeds', safe.eating && safe.ateItem && Math.abs(safe.fedTo - 65) < 1, `hunger ${safe.fedTo}`);
   check('a potion from the pack still heals', safe.potionHp === 60, `hp ${safe.potionHp}`);

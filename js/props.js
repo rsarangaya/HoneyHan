@@ -563,7 +563,8 @@ function makeDecor(d) {
     }
     case 'hedge': {                                                // a clipped hedgerow along a wall
       const hm = [lam(0x2f5a2e), lam(0x386a36)];
-      RB(inner, 2.4, 1.1, 0.8, hm[0], 0, 0.55, 0); for (let i = 0; i < 4; i++) SP(inner, 0.8, 0.5, 0.7, hm[i % 2], -0.9 + i * 0.6, 1.1, (rg() - 0.5) * 0.1);
+      for (let i = 0; i < 5; i++) SP(inner, 0.85, 0.7 + (i % 2) * 0.12, 0.8, hm[i % 2], -0.95 + i * 0.475, 0.5 + (i % 2) * 0.06, (rg() - 0.5) * 0.12);   // a row of round, overlapping bushes (no box)
+      for (let i = 0; i < 4; i++) SP(inner, 0.7, 0.5, 0.65, hm[(i + 1) % 2], -0.7 + i * 0.47, 0.95, (rg() - 0.5) * 0.1);
       break;
     }
     case 'well': {                                                 // a stone well with a little roof on two posts and a bucket

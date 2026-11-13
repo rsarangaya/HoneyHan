@@ -1,7 +1,7 @@
 # Status
 
 Project: HoneyHan (formerly Prototype Test), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-13 (branch `impatience`: themes spec T5, the reworked Goblin Market and the Final Chamber; the theme overhaul is complete)
+Last updated: 2026-11-13 (branch `impatience`: round walls for the Orchard, Jungle and Cellar; the theme overhaul is complete)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
@@ -208,6 +208,12 @@ Every theme is one object in `THEME_DEFS` (`js/gen.js`); `THEMES`, `THEME_GIMMIC
 | Goblin Market | bazaar: squares with stall clusters | shuttered stall (Stall Key) | crowd patches, watching guards, more thieves |
 | Final Chamber (stage 5, not in the pool) | the boss arena | (the safe room door) | rune circle flares |
 How to add a theme: (1) add a `LAYOUTS` style if it needs its own rooms (a new `layoutFloor` branch that adds no rng calls to `'rooms'`) or reuse one; (2) add a `mkTheme(...)` entry to `THEME_DEFS` with `pal`, `fog`, `tex`, `wallStyle`, `layout`, `doors` (style, `keyNames`, `openAnim`, `noise`), `props` (edge/inner/floor/locked groups), `natives`, `boss`, `mechanic` (`kind`, `n`, `also`, `hint`, `TUNE`); (3) in `js/main.js` add texture painters to `TEX_GENERATORS`, a `DOOR_ANIM`, a `WALL_GEO` if needed and a `MECH_PATCH` handler for the decal kind (and its frame-loop effect); (4) in `js/props.js` add a `DOOR_BUILDERS` entry (and list it in `makeDoor`'s bake line) plus the new decor kinds (add blocking ones to `BLOCKING_DECOR` / `DECOR_R`, flat or hung ones to `DECALS`); (5) add glossary cards in `js/menu.js` and a tuning-panel row in `js/tune.js` (bump the storage key); (6) add the per-style invariants to `tests/gen.test.js`, a `tests/game.<theme>.test.js` for the mechanic, and an exemption note in `tests/gen.layout.test.js`. Budgets: no new PointLights, textures through `themeTexture` (3 per theme, freed per theme), at most 3 wall draws, worst view under 260 calls (`tests/game.perf.test.js` iterates the pool).
+
+### Round walls (2026-11-13, visual only)
+- New `wallStyle`s in `js/main.js` (`WALL_GEO`): `shrub` (Moonlit Orchard hedges: three lumpy leaf domes a tile; lone wall tiles are apple trees with a thick round trunk and a leaf crown, a second mesh), `tree` (Jungle walls: thick trunk, leaf mound and crown; locked-room cave walls are rock), `rock` (Mushroom Cellar: floor boulder, hanging boulder, lumpy waist; its wall texture is now `cave`). Other themes keep boxes. Orchard `hedge` decor is a row of round bushes.
+- One shared geometry per kind (vertex colours, radial normals, flagged shared), stamped per wall tile that touches open floor with a hash of the tile for turn, size, height and tint (no rng). Blobs are clamped to 1.75 m from the tile centre (about 0.25 m past the edge). Collision, sight, pathing, culling and the minimap are unchanged tile logic.
+- Cost: draw calls +1 on the Orchard (shrub + tree meshes), 0 elsewhere. Wall triangles per floor: Orchard 32k to 72k, Jungle 33k to 63k, Cellar 38k to 47k (boxes were 1k to 3k); worst whole-frame floor start 110k (Orchard floor 2), under the 150k budget. Test: `tests/game.walls.test.js`.
+- Deferred: trunk-width collision (tiles stay square), distance LOD for wall blobs if a floor gets denser, a brighter Cellar rock.
 
 ## Decisions made
 - Name: HoneyHan (formerly "Prototype Test").
