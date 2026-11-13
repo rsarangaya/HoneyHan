@@ -81,7 +81,7 @@ function makeProp(p) {
   const o = { p, mesh: null, x: 0, z: 0, r: PROP_R[p.kind], lid: null, mats: [] };
   const mat = (c, em) => { const m = lam(c, em); o.mats.push(m); return m; };
   const rg = makeRng(p.seed);
-  const wood = new THREE.Color(theme.wall).multiplyScalar(0.8).getHex();
+  const wood = new THREE.Color(theme.pal.wall).multiplyScalar(0.8).getHex();
   if (p.kind === 'chest' || p.kind === 'vaultchest') {
     // five grades (js/loot.js CHEST_NAMES): plain wood, iron bands, silver trim, purple and gold, a glowing golden hoard
     const vault = p.kind === 'vaultchest', t = vault ? 2 : p.tier | 0, L = vault ? { body: 0x3a3a4a, lid: 0x4a4a5c, trim: 0xc9a23a } : CHEST_LOOK[t], s = vault ? 1.18 : 1;
@@ -176,8 +176,9 @@ function makeProp(p) {
 }
 
 // ---- locked doors ----
-function makeDoor(dr) {
-  const inner = new THREE.Group();
+// Door looks by dr.style (set from the theme's doors.style in gen.js). Each builder fills `inner`, a doorway 3 m wide, local z across the wall. New styles add an entry; unknown styles fall back to 'plank'.
+const DOOR_BUILDERS = {
+  plank(inner, dr) {
   const rg = makeRng(dr.x * 131 + dr.y);
   const dh = WALL_H - 0.1;                                                                           // planks fill the doorway up to the ceiling
   for (let i = 0; i < 5; i++) {
@@ -189,6 +190,11 @@ function makeDoor(dr) {
   B(inner, 0.4, 0.5, 0.12, lam(0xc9a23a, 0x2a2008), 0, 1.3, 0.2);                                  // lock plate
   B(inner, 0.07, 0.14, 0.1, lam(0x120c08), 0, 1.3, 0.28);                                           // keyhole
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.03, 6, 12), iron); ring.position.set(0.9, 1.1, 0.2); inner.add(ring);
+  },
+};
+function makeDoor(dr) {
+  const inner = new THREE.Group();
+  (DOOR_BUILDERS[dr.style] || DOOR_BUILDERS.plank)(inner, dr);
   const mesh = new THREE.Group();
   const x = (dr.x + 0.5) * TILE, z = (dr.y + 0.5) * TILE;
   mesh.add(inner); mesh.position.set(x, 0, z); mesh.rotation.y = dr.axis === 'x' ? Math.PI / 2 : 0;
@@ -199,7 +205,7 @@ function makeDoor(dr) {
 function makeDecor(d) {
   const inner = new THREE.Group();
   const rg = makeRng(d.seed);
-  const T = c => new THREE.Color(theme[c]);
+  const T = c => new THREE.Color(theme.pal[c]);
   const wood = lam(T('wall').multiplyScalar(0.8).getHex());
   const wood2 = lam(T('floor').multiplyScalar(1.5).getHex());
   const stone = lam(0x75726c), dstone = lam(0x4a4844), iron = lam(0x2a2a30), straw = lam(0xb89a58), bone = lam(0xe6e0c8);

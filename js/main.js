@@ -38,9 +38,15 @@ const BOSS_WALL_H = 10;    // the arena ceiling, so the boss (about 3 m tall) ha
 const STAIR_HALF_W = 1.1, STAIR_HALF_L = 1.3, STAIR_DEPTH = 1.5, UP_RISE = 1.4;   // the way down sinks 1.5 m; the way back up rises 1.4 m
 let state = 'menu';        // menu | play | won
 let msgTimer = 0;
-const PATCH_KINDS = ['puddle', 'grass', 'glowcap', 'bell', 'ice'];
-let HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;           // the Library's dead silence: every sound you make carries farther
-const THEME_HINT = { 'The Sunken Tavern': 'Shallow puddles splash when you step in them, even when you creep.', 'The Moonlit Orchard': 'Tall grass hides a crouching player. Scarecrows are not all scenery.', 'The Clockwork Library': 'The library is eerily silent: every sound you make carries 40% farther.', 'The Mushroom Cellar': 'Glowing spores light you up: guards see you from farther in them.', 'The Goblin Market': 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.', 'The Frozen Chapel': 'Patches of ice make you slide.' };
+const PATCH_KINDS = THEME_DEFS.filter(t => t.mechanic.n).map(t => t.mechanic.kind);   // the decal kinds the themes' mechanics place (puddle, grass, glowcap, bell, ice)
+let HUSH = theme.mechanic.hush || 1;           // the Library's dead silence: every sound you make carries farther
+// Mechanic handlers, by the theme's mechanic.kind: what standing on a decal of that kind does to the player (hot path: one lookup a frame, no allocation).
+//   slippery: you slide.  seen: multiplier on how far guards see you.  disc: glossary entry.
+const MECH_PATCH = {
+  grass:   { seen: () => player.crouching ? 0.55 : 0.85, disc: ['item:grass', 'Tall grass'] },
+  glowcap: { seen: () => 1.4, disc: ['item:glow', 'Glowing spores'] },
+  ice:     { slippery: true, disc: ['item:ice', 'Ice'] },
+};
 const stageSeedOf = s => s === 1 ? runSeed : (runSeed ^ Math.imul(s, 0x9e3779b1)) >>> 0;
 let shopFloor = 0, armoryFloor = 0, questPlan = {};
 // This stage's plan, all seeded: its shop floor (not the boss arena; the player is not told which), its armory floor, and which floors carry an optional encounter (js/quests.js).
@@ -119,7 +125,16 @@ function ceilingTexture(base) {
   speckle(g, S, 500, rng);
   return finishTexture(c, 1, 1);
 }
-const PLANK_THEMES = new Set(['The Sunken Tavern', 'The Clockwork Library', 'The Goblin Market', 'The Moonlit Orchard']);
+// Texture generators by the theme schema's tex keys (theme.tex.wall / floor / ceil), each from the theme's base colour.
+const TEX_GENERATORS = {
+  wall:  { stone: c => wallTexture(c) },
+  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true) },
+  ceil:  { beams: c => ceilingTexture(c) },
+};
+// Wall geometry by the theme's wallStyle (more styles may add up to 2 more wall InstancedMeshes).
+const WALL_GEO = { box: () => new THREE.BoxGeometry(TILE, WALL_H, TILE) };
+// Door open animations by the theme's doors.openAnim: t runs 0 to 1.
+const DOOR_ANIM = { slide: (o, t) => { o.mesh.position.y = t * WALL_H; } };
 
 // Free one object's GPU memory. Anything flagged userData.shared (the per-theme textures, creature part geometries, shared merged
 // materials, icons) outlives the floor and is never disposed here.
@@ -164,8 +179,8 @@ function buildFloor() {
     for (let dy = -1; dy <= 1 && !touches; dy++) for (let dx = -1; dx <= 1; dx++) if (!solid(x + dx, y + dy)) { touches = true; break; }
     if (touches) wallPos.push([x, y]);
   }
-  const wallTex = themeTexture('wall', () => wallTexture(theme.wall));
-  const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(TILE, WALL_H, TILE),
+  const wallTex = themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
+  const walls = new THREE.InstancedMesh((WALL_GEO[theme.wallStyle] || WALL_GEO.box)(),
     themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
   const m = new THREE.Matrix4();
   wallPos.forEach(([x, y], i) => { m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE); walls.setMatrixAt(i, m); });
@@ -182,10 +197,10 @@ function buildFloor() {
   hole.moveTo(stairBox.x0, -stairBox.z0); hole.lineTo(stairBox.x0, -stairBox.z1);
   hole.lineTo(stairBox.x1, -stairBox.z1); hole.lineTo(stairBox.x1, -stairBox.z0);
   floorShape.holes.push(hole);
-  const floorTex = themeTexture('floor', () => { const t = floorTexture(theme.floor, PLANK_THEMES.has(theme.name)); t.repeat.set(1 / TILE, 1 / TILE); return t; });
+  const floorTex = themeTexture('floor', () => { const t = TEX_GENERATORS.floor[theme.tex.floor](theme.pal.floor); t.repeat.set(1 / TILE, 1 / TILE); return t; });
   const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), themeTexture('floormat', () => new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 })));
   fl.rotation.x = -Math.PI / 2;
-  const ceilTex = themeTexture('ceil', () => ceilingTexture(theme.ceil));   // one repeat per tile: the plane's UVs below carry the size, so the texture is shared by every floor
+  const ceilTex = themeTexture('ceil', () => TEX_GENERATORS.ceil[theme.tex.ceil](theme.pal.ceil));   // one repeat per tile: the plane's UVs below carry the size, so the texture is shared by every floor
   { const uv = planeGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w, uv.getY(i) * h); }
   const ce = new THREE.Mesh(planeGeo, themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: ceilTex, shininess: 2, specular: 0x050505 })));
   ce.rotation.x = Math.PI / 2; ce.position.set(w * TILE / 2, WALL_H, h * TILE / 2);
@@ -264,8 +279,8 @@ function buildFloor() {
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   scene.add(group);
-  scene.background = new THREE.Color(theme.fog);
-  scene.fog = new THREE.FogExp2(theme.fog, 0.085);
+  scene.background = new THREE.Color(theme.pal.fog);
+  scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density);
 }
 
 // ---- the safe room behind the boss arena (floor.safe, built in js/gen.js layoutBoss). Until the boss dies its door is a slab that looks like
@@ -322,7 +337,7 @@ function checkShopSight() {
 
 let torchPts = [], torchGroups = [];
 const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 7), TORCH_FLAME = new THREE.ConeGeometry(0.1, 0.3, 7);
-const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.light, 0, 14, 1.5); scene.add(l); return l; });
+const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.pal.light, 0, 14, 1.5); scene.add(l); return l; });
 function buildTorches() {
   const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420 });
   const fire = new THREE.MeshBasicMaterial({ color: 0xffa94a });
@@ -333,7 +348,7 @@ function buildTorches() {
     const stick = new THREE.Mesh(TORCH_STICK, iron); stick.position.y = -0.05;                                  // a round bracket and a tapering flame, not boxes
     const flame = new THREE.Mesh(TORCH_FLAME, fire); flame.position.y = 0.26;
     g.add(stick, flame); group.add(g); torchGroups.push(g);
-    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss && !t.low ? 3.8 : 2.2, color: theme.light, str: 1 };
+    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss && !t.low ? 3.8 : 2.2, color: theme.pal.light, str: 1 };
   });
   for (const o of decorObjs) {
     const l = DECOR_LIGHT[o.kind];
@@ -886,11 +901,10 @@ function updateCombat(dt) {
   }
   player.noiseBonus = inv.armorNoise();
   const patch = floor.patches.get(player.tileY * floor.w + player.tileX);       // the theme's gimmick under your feet
-  player.slippery = patch === 'ice';
+  const mech = patch && MECH_PATCH[patch];                                       // the theme mechanic's handler for this decal (puddles and bells act elsewhere)
+  player.slippery = !!(mech && mech.slippery);
   let seenMul = 1;
-  if (patch === 'grass') { seenMul = player.crouching ? 0.55 : 0.85; discover('item:grass', 'Tall grass'); }
-  else if (patch === 'glowcap') { seenMul = 1.4; discover('item:glow', 'Glowing spores'); }
-  else if (patch === 'ice') discover('item:ice', 'Ice');
+  if (mech) { if (mech.seen) seenMul = mech.seen(); discover(mech.disc[0], mech.disc[1]); }
   const hidden = hatUpdate(dt);
   player.stealthMul = hidden ? 0 : (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
@@ -1132,10 +1146,11 @@ function openDoor(o) {
   o.p.opened = true; o.anim = 0;
 }
 function updateDoors(dt) {
+  const anim = DOOR_ANIM[theme.doors.openAnim] || DOOR_ANIM.slide;
   for (const o of propObjs) {
     if (o.p.kind !== 'door' || o.anim === undefined || o.anim >= 1) continue;
     o.anim = Math.min(1, o.anim + dt);
-    o.mesh.position.y = o.anim * WALL_H;
+    anim(o, o.anim);
     if (o.anim >= 1) o.mesh.visible = false;
   }
 }
@@ -1174,7 +1189,7 @@ function updateHud() {
 }
 
 const ambient = new THREE.HemisphereLight(0xfff0dc, 0x2a2018, 0.62);   // warm from above, dark from below: faces get a little shape
-const torch = new THREE.PointLight(theme.light, 0.75, 16, 1.6);   // player lantern, brighter than the ambient so rooms read
+const torch = new THREE.PointLight(theme.pal.light, 0.75, 16, 1.6);   // player lantern, brighter than the ambient so rooms read
 scene.add(ambient);
 camera.add(torch);
 
@@ -1210,7 +1225,7 @@ function arriveBy(dir) {
 }
 function floorBanner(n) {
   el('boss').firstElementChild.textContent = bossNameFor(theme.name);
-  if (n === 1 && THEME_HINT[theme.name]) addLog(THEME_HINT[theme.name], '#9ac8ff');
+  if (n === 1 && theme.mechanic.hint) addLog(theme.mechanic.hint, '#9ac8ff');
   hud.floor.textContent = stage === FINAL_STAGE ? 'Final stage' : `Stage ${stage} / ${STAGES} - Floor ${n} / ${MAX_FLOOR} - ${theme.name}` + (n === MAX_FLOOR ? ' (boss floor)' : '');
 }
 const bossFloorAt = n => stage === FINAL_STAGE || n === MAX_FLOOR;   // the final stage is one boss arena (its floorNum is 1, so the way up leads back to stage 4's safe room)
@@ -1230,7 +1245,7 @@ function generateAndEnter(n, arrive) {
   gameRng = makeRng(((stageSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
   const final = stage === FINAL_STAGE, gn = final ? MAX_FLOOR : n;   // the final stage's one floor is generated as a floor 5 arena
-  floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, depth: effFloor(0) });
+  floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) });
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
   if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; } }   // each theme's boss has its own look
@@ -1387,12 +1402,12 @@ function useStage(s) {
   prisonerRuns[stage] = prisonerRun;
   stage = s; floorCache = stageCaches[s] || (stageCaches[s] = {});
   theme = s === FINAL_STAGE ? FINAL_THEME : stageThemes[s - 1];
-  HUSH = theme.name === 'The Clockwork Library' ? 1.4 : 1;
+  HUSH = theme.mechanic.hush || 1;
   if (s < FINAL_STAGE) planStage(s); else { stageSeed = stageSeedOf(s); questPlan = {}; }
   prisonerRun = prisonerRuns[s] || null;
-  for (const l of torchLights) l.color.setHex(theme.light);
-  torch.color.setHex(theme.light);
-  scene.background = new THREE.Color(theme.fog); scene.fog = new THREE.FogExp2(theme.fog, 0.085);
+  for (const l of torchLights) l.color.setHex(theme.pal.light);
+  torch.color.setHex(theme.pal.light);
+  scene.background = new THREE.Color(theme.pal.fog); scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density);
   hud.theme.textContent = theme.name;
 }
 // Memory: at most 6 floors stay cached. Going down into stage cur keeps only the previous stage's boss floor (its safe room); climbing keeps the stage you left on its floor 1.

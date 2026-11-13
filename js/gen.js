@@ -16,18 +16,52 @@ function makeRng(seed) {
   return next;
 }
 
-// Placeholder look per theme. Props, enemies and gimmicks come in later stages.
-const THEMES = [
-  { name: 'The Sunken Tavern',     wall: '#6b4a2f', floor: '#4a3524', ceil: '#2b1f16', fog: 0x120c08, light: 0xffb060 },
-  { name: 'The Moonlit Orchard',   wall: '#3d5a3a', floor: '#2f4a2a', ceil: '#0e1626', fog: 0x070b14, light: 0xa8c0ff },
-  { name: 'The Clockwork Library', wall: '#5a4636', floor: '#3a2d28', ceil: '#241c1a', fog: 0x0e0a08, light: 0xffd890 },
-  { name: 'The Mushroom Cellar',   wall: '#4a4458', floor: '#2f2a3c', ceil: '#1a1624', fog: 0x0a0812, light: 0x9affc8 },
-  { name: 'The Goblin Market',     wall: '#7a5a3a', floor: '#54402a', ceil: '#3a2418', fog: 0x140c06, light: 0xffa040 },
-  { name: 'The Frozen Chapel',     wall: '#6c7e90', floor: '#4a5868', ceil: '#202a36', fog: 0x0a1018, light: 0xc8e4ff },
+// ---- Theme schema: one object per theme. THEMES, THEME_GIMMICK, THEME_NATIVES and THEME_BOSS below are views of it. ----
+//   pal: colours (wall/floor/ceil base, fog, torch light).  fog.density: FogExp2.  tex: keys into main.js TEX_GENERATORS.
+//   wallStyle: 'box' (one InstancedMesh of boxes; more styles may add up to 2 more meshes).  layout.style: 'rooms' is the original generator (no extra rng calls).
+//   doors: style ('plank' | later 'cave', 'ice', 'spore', 'gate'), keyNames per locked room type, openAnim.  natives/boss: see js/enemytypes.js.
+//   mechanic: kind (the floor decal; no n = no decals), n: how many per floor, hush: noise multiplier, hint: the first-floor log line.
+const KEYS_DEFAULT = { armory: 'Armory Key', vault: 'Vault Key', brewery: 'Brewery Key', lair: 'Lair Key', cell: 'Cell Key' };
+const mkTheme = (name, id, pal, o) => ({
+  name, id, pal, fog: { density: 0.085 }, tex: { wall: 'stone', floor: 'tile', ceil: 'beams' }, wallStyle: 'box', layout: { style: 'rooms' },
+  doors: { style: 'plank', keyNames: KEYS_DEFAULT, openAnim: 'slide' }, props: {}, natives: null, boss: null, mechanic: { kind: null }, audio: null, ...o,
+});
+const THEME_DEFS = [
+  mkTheme('The Sunken Tavern', 'tavern', { wall: '#6b4a2f', floor: '#4a3524', ceil: '#2b1f16', fog: 0x120c08, light: 0xffb060 }, {
+    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    natives: { commons: ['cook', 'bandit', 'rat'], elite: 'bouncer', prefer: { cook: 'messhall', bandit: 'barracks', rat: 'storeroom' } },
+    boss: { name: 'Giant Innkeeper', dress: 'innkeeper' },
+    mechanic: { kind: 'puddle', n: [4, 7], hint: 'Shallow puddles splash when you step in them, even when you creep.' } }),
+  mkTheme('The Moonlit Orchard', 'orchard', { wall: '#3d5a3a', floor: '#2f4a2a', ceil: '#0e1626', fog: 0x070b14, light: 0xa8c0ff }, {
+    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    natives: { commons: ['bandit'], signature: 'scarecrow', elite: 'warden', bonus: { wolf: 1, archer: 1 }, prefer: { bandit: 'barracks' } },
+    boss: { name: 'Harvest King', dress: 'king', skin: 0xb88a3a },
+    mechanic: { kind: 'grass', n: [9, 13], hint: 'Tall grass hides a crouching player. Scarecrows are not all scenery.' } }),
+  mkTheme('The Clockwork Library', 'library', { wall: '#5a4636', floor: '#3a2d28', ceil: '#241c1a', fog: 0x0e0a08, light: 0xffd890 }, {
+    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    natives: { commons: ['book', 'scholar'], signature: 'golem', elite: 'librarian', prefer: { scholar: 'library', book: 'library' } },
+    boss: { name: 'Librarian Golem', dress: 'golem', skin: 0x8a8a90 },
+    mechanic: { kind: 'hush', hush: 1.4, hint: 'The library is eerily silent: every sound you make carries 40% farther.' } }),   // the Library has no decal: its hush is a rule
+  mkTheme('The Mushroom Cellar', 'cellar', { wall: '#4a4458', floor: '#2f2a3c', ceil: '#1a1624', fog: 0x0a0812, light: 0x9affc8 }, {
+    natives: { commons: ['skeleton', 'rat'], signature: 'puffer', elite: 'fungbrute', prefer: { rat: 'storeroom', skeleton: 'storeroom' } },
+    boss: { name: 'Fungal Warden', dress: 'fungus', skin: 0x6a5a8a },
+    mechanic: { kind: 'glowcap', n: [5, 8], hint: 'Glowing spores light you up: guards see you from farther in them.' } }),
+  mkTheme('The Goblin Market', 'market', { wall: '#7a5a3a', floor: '#54402a', ceil: '#3a2418', fog: 0x140c06, light: 0xffa040 }, {
+    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    natives: { commons: ['mguard', 'boar'], signature: 'thief', elite: 'captain', prefer: { mguard: 'barracks', boar: 'storeroom' } },
+    boss: { name: 'Goblin Warlord', dress: 'warlord', skin: 0x7a9a3a },
+    mechanic: { kind: 'bell', n: [3, 5], hint: 'Tripwire bells ring a loud alarm when you step on one. Thieves work the crowd.' } }),
+  mkTheme('The Frozen Chapel', 'chapel', { wall: '#6c7e90', floor: '#4a5868', ceil: '#202a36', fog: 0x0a1018, light: 0xc8e4ff }, {
+    natives: { commons: ['skeleton', 'cultist'], signature: 'wisp', elite: 'iceknight', prefer: { cultist: 'shrine', skeleton: 'shrine' } },
+    boss: { name: 'Frost Giant', dress: 'frost', skin: 0x9ac4e0 },
+    mechanic: { kind: 'ice', n: [5, 8], hint: 'Patches of ice make you slide.' } }),
 ];
+const THEMES = THEME_DEFS;                                  // the stage theme pool (the Final Chamber is not in it)
+const THEME_BY_NAME = {}; for (const t of THEME_DEFS) THEME_BY_NAME[t.name] = t;
 
 // The placeholder final stage's look: a darker, colder chamber (not part of the theme pool; the run never picks it as a stage 1 to 4 theme).
-const FINAL_THEME = { name: 'The Final Chamber', wall: '#3a3040', floor: '#241c2c', ceil: '#0c0a12', fog: 0x050309, light: 0xc080ff };
+const FINAL_THEME = mkTheme('The Final Chamber', 'final', { wall: '#3a3040', floor: '#241c2c', ceil: '#0c0a12', fog: 0x050309, light: 0xc080ff }, {});
+THEME_BY_NAME[FINAL_THEME.name] = FINAL_THEME;
 
 const MAP_W = 45, MAP_H = 45;               // the boss arena's size
 const SAFE_PAD = 12;                        // rock added north of the arena (the map grows to 57 x 57) for the safe room behind the boss's hidden door
@@ -44,13 +78,8 @@ const roomTargetFor = floorNum => [8, 9, 10, 11][Math.min(floorNum, 4) - 1];
 // What each theme does to the floor. kind: the decal that marks it. n: how many per floor.
 //   puddle: moving steps splash (8 m, 4 m crouched).  grass: a crouched player is half as visible.  glowcap: spore light, you are seen 40% farther.
 //   bell: a tripwire that rings a 14 m alarm once.  ice: you slide.  The Library has no decal: all noise carries 40% farther.
-const THEME_GIMMICK = {
-  'The Sunken Tavern':   { kind: 'puddle',  n: [4, 7] },
-  'The Moonlit Orchard': { kind: 'grass',   n: [9, 13] },
-  'The Mushroom Cellar': { kind: 'glowcap', n: [5, 8] },
-  'The Goblin Market':   { kind: 'bell',    n: [3, 5] },
-  'The Frozen Chapel':   { kind: 'ice',     n: [5, 8] },
-};
+const THEME_GIMMICK = {}; for (const t of THEME_DEFS) if (t.mechanic.n) THEME_GIMMICK[t.name] = { kind: t.mechanic.kind, n: t.mechanic.n };   // view of the schema
+const THEME_NATIVES = {}, THEME_BOSS = {}; for (const t of THEME_DEFS) { THEME_NATIVES[t.name] = t.natives; THEME_BOSS[t.name] = t.boss; }   // views (js/enemytypes.js reads them)
 
 // What each room type is furnished with: [kind, min, max] per group.
 //   edge: against a wall. inner: in the room's interior. floor: flat or small decals.
@@ -71,6 +100,9 @@ const ROOM_THEMES = {
   vault:     { edge: [['banner', 1, 2], ['statue', 1, 2]], inner: [], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [0, 0], special: [['vaultchest', 2, 3]] },
   lockedbrew:{ edge: [['cauldron', 1, 1], ['bookshelf', 1, 2], ['barrels', 1, 1]], inner: [], floor: [['rug', 1, 1], ['candles', 1, 2]], props: [0, 0], special: [['potions', 1, 2]] },
 };
+// The key's name and the door's style come from the floor's theme (plank themes keep the classic names).
+const keyNameFor = (type, themeName) => { const t = THEME_BY_NAME[themeName]; return (t && t.doors.keyNames[type]) || LOCKED_ROOMS[type].key; };
+const doorStyleFor = themeName => { const t = THEME_BY_NAME[themeName]; return t ? t.doors.style : 'plank'; };
 const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue']);   // guards path around these: anything with a collision circle bigger than candles
 const DECALS = new Set(['rug', 'bones', 'candles', 'banner']);                                                     // never fill a tile alone
 const LOCKED_ROOMS = {
@@ -241,6 +273,7 @@ function layoutBoss(seed, floorNum) {
 }
 
 function layoutFloor(seed, floorNum, opts) {
+  const layoutStyle = opts.layoutStyle || 'rooms';   // 'rooms' is the original path below; other styles are not built yet (they will branch where the rooms are made, never adding rng calls to 'rooms')
   const rng = makeRng(seed * 7919 + floorNum * 104729);
   const w = mapSizeFor(floorNum), h = w;
   const tiles = new Uint8Array(w * h);
@@ -377,7 +410,7 @@ function layoutFloor(seed, floorNum, opts) {
         const room = mk(x, y, rw, rh);
         room.theme = spec.theme; room.locked = true; room.lock = lock; room.entry = { x: s.ex, y: s.ey }; room.join = { x: hx, y: hy };   // join: the open floor tile outside the corridor
         rooms.push(room);
-        doors.push({ x: dx, y: dy, axis: s.dx !== 0 ? 'x' : 'z', lock, room: spec.name, keyLabel: spec.key });
+        doors.push({ x: dx, y: dy, axis: s.dx !== 0 ? 'x' : 'z', lock, room: spec.name, keyLabel: keyNameFor(type, opts.themeName), style: doorStyleFor(opts.themeName) });
         return room;
       }
     }
@@ -611,7 +644,7 @@ function layoutFloor(seed, floorNum, opts) {
     const room = holder && placeLocked('lair', wanted.length + 1, 6000, avoid);   // lock ids 1..wanted.length are taken by the planned locked rooms, even ones that failed to place
     if (room) {
       holder.kind = 'chest'; if (holder.tier === undefined) holder.tier = pickWeighted([0, 1, 2], chestTierWeights(floorNum).slice(0, 3));
-      holder.extra = [...(holder.extra || []), { type: 'key', lock: room.lock, label: LOCKED_ROOMS.lair.key }]; holder.holdsKey = true;
+      holder.extra = [...(holder.extra || []), { type: 'key', lock: room.lock, label: keyNameFor('lair', opts.themeName) }]; holder.holdsKey = true;
       const lit = [];
       for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++)
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (wallAt(x + dx, y + dy)) lit.push({ x, y, dx, dy });

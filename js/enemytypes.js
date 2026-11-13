@@ -107,14 +107,7 @@ const BOMB = { fuse: 2.5, warn: 0.8, trigger: 1.5, radius: 3.5, dmg: 55, falloff
 // Natives per theme. commons fill most of the population (types with a `pack` size spawn in packs), `signature` is
 // the theme's own oddity (from floor 2, two from floor 4), `elite` shows up on floors 3 and 4, and `bonus` adds
 // extra wolves or archers. `prefer` maps a type to the room theme it likes. Every theme keeps plain goblins.
-const THEME_NATIVES = {
-  'The Sunken Tavern':     { commons: ['cook', 'bandit', 'rat'], elite: 'bouncer', prefer: { cook: 'messhall', bandit: 'barracks', rat: 'storeroom' } },
-  'The Moonlit Orchard':   { commons: ['bandit'], signature: 'scarecrow', elite: 'warden', bonus: { wolf: 1, archer: 1 }, prefer: { bandit: 'barracks' } },
-  'The Clockwork Library': { commons: ['book', 'scholar'], signature: 'golem', elite: 'librarian', prefer: { scholar: 'library', book: 'library' } },
-  'The Mushroom Cellar':   { commons: ['skeleton', 'rat'], signature: 'puffer', elite: 'fungbrute', prefer: { rat: 'storeroom', skeleton: 'storeroom' } },
-  'The Goblin Market':     { commons: ['mguard', 'boar'], signature: 'thief', elite: 'captain', prefer: { mguard: 'barracks', boar: 'storeroom' } },
-  'The Frozen Chapel':     { commons: ['skeleton', 'cultist'], signature: 'wisp', elite: 'iceknight', prefer: { cultist: 'shrine', skeleton: 'shrine' } },
-};
+// (THEME_NATIVES is a view of the theme schema in js/gen.js, THEME_DEFS.)
 // Share of a floor's guards that are natives: low on floor 1 so the basics are learned on plain goblins.
 const NATIVE_SHARE = [0.3, 0.45, 0.6, 0.7, 0.7];
 const MAX_NATIVE_TYPES = 3;                      // commons + signature + elite on one floor
@@ -203,14 +196,7 @@ function linkHandlers(list) {
 
 // Each theme has its own boss: a name, a look (dress), and a skin colour. It is the same fight (the Cave Warlord's
 // numbers), so only the presentation changes.
-const THEME_BOSS = {
-  'The Sunken Tavern':     { name: 'Giant Innkeeper',   dress: 'innkeeper' },
-  'The Moonlit Orchard':   { name: 'Harvest King',      dress: 'king',    skin: 0xb88a3a },
-  'The Clockwork Library': { name: 'Librarian Golem',   dress: 'golem',   skin: 0x8a8a90 },
-  'The Mushroom Cellar':   { name: 'Fungal Warden',     dress: 'fungus',  skin: 0x6a5a8a },
-  'The Goblin Market':     { name: 'Goblin Warlord',    dress: 'warlord', skin: 0x7a9a3a },
-  'The Frozen Chapel':     { name: 'Frost Giant',       dress: 'frost',   skin: 0x9ac4e0 },
-};
+// (THEME_BOSS is a view of the theme schema in js/gen.js.)
 // The placeholder final boss (stage 5): the Cave Warlord's fight with a darker tint, 1.25x bigger, a name tag that says so (js/main.js).
 const FINAL_BOSS = { name: 'The Final Boss', tag: '??? (final boss, placeholder)', dress: 'warlord', skin: 0x4a2a5a };
 const bossNameFor = themeName => themeName === FINAL_THEME.name ? FINAL_BOSS.name : (THEME_BOSS[themeName] || { name: 'Cave Warlord' }).name;

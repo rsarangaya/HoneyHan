@@ -126,7 +126,7 @@ const QUEST_TYPES = {
   prisoner: {
     weight: 1,
     spawn(f) {
-      const q = f.quest, rng = makeRng((q.seed ^ 0x4b3d1) >>> 0), key = { type: 'key', lock: q.lock, label: LOCKED_ROOMS.cell.key };
+      const q = f.quest, rng = makeRng((q.seed ^ 0x4b3d1) >>> 0), key = { type: 'key', lock: q.lock, label: (f.doors.find(d => d.lock === q.lock) || { keyLabel: LOCKED_ROOMS.cell.key }).keyLabel };
       const cands = f.enemies.filter(e => !e.boss && !e.qguard && !CARRY_NO.has(e.type) && !CARRY_SOFT.has(e.type));
       const chest = q.holder && f.props.find(p => p.kind === 'chest' && p.x === q.holder.x && p.y === q.holder.y);
       if (cands.length) { rng.pick(cands).carry = key; q.keyOn = 'guard'; }
