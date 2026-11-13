@@ -20,7 +20,8 @@ run('Wands and Hanahan\'s Rage', async ({ open, check }) => {
     e = setup('lightning'); const second = T.guard(8.5, 'toward', true); second.hp = second.maxHp = 500; second.update = function () { this.sync(0); return null; };
     await cast(() => e.st.has('stun') && second.hp < 500); out.lightning = { damage: 500 - e.hp, stun: e.st.has('stun'), chainDamage: 500 - second.hp, chainStun: second.st.has('stun') };
     // force: thrown away from the player
-    T.reset(); { const room = [...game.floor.rooms].filter(r => !r.locked).sort((a, b) => b.w - a.w)[0], P = game.player; P.x = (room.x + 1.5) * TILE; P.z = (room.cy + 0.5) * TILE; P.yaw = -Math.PI / 2; P.pitch = 0; }
+    T.reset(); { const room = [...game.floor.rooms].filter(r => !r.locked).sort((a, b) => b.w - a.w)[0], P = game.player; let row = room.cy, bd = 1e9; for (let y = room.y; y < room.y + room.h; y++) if ([1, 2, 3, 4, 5, 6].every(k => game.floor.tiles[y * game.floor.w + room.x + k] === 1 && !game.floor.blocked[y * game.floor.w + room.x + k]) && Math.abs(y - room.cy) < bd) { bd = Math.abs(y - room.cy); row = y; }   // (a row with open floor ahead: seed 7 is a Tavern now, its hub has posts and kegs)
+    P.x = (room.x + 1.5) * TILE; P.z = (row + 0.5) * TILE; P.yaw = -Math.PI / 2; P.pitch = 0; }
     e = setup('force', 4, true, true); const x0 = Math.hypot(e.x - game.player.x, e.z - game.player.z);
     await cast(() => 500 - e.hp > 0); await T.sleep(200); out.forcePush = Math.hypot(e.x - game.player.x, e.z - game.player.z) - x0; out.forceDamage = 500 - e.hp;
     // sleep: the target stops noticing you even though you stand right in front of it, and any damage wakes it

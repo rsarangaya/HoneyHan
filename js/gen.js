@@ -31,10 +31,17 @@ const LAYOUTS = {
                typeW: { big: [2, 1, 0, 2, 0.3, 4, 0.5], small: [3, 0.5, 0, 2, 0.3, 4, 0.5] } },   // storerooms and breweries, no mess halls (too small for their pantry): a cellar
   aisles:    { style: 'aisles',    roomMin: 5, roomMax: 8, span: 8,  roomCountMul: 1,    extChance: 0.3, wideChance: 0.3,  loops: 0, loopMax: 16, pillarChance: 0, maxShop: 60, aisleChance: 0.6,
                typeW: { big: [2, 1, 1, 1.5, 4, 1, 1], small: [3, 0.5, 0.3, 2, 3, 1, 1] } },
+  // warren (Sunken Tavern): one big taproom hub (hub: its width and height ranges) in the middle of the map, small cellar rooms round it, short crooked corridors (jitter) and a few loops.
+  // orchard (Moonlit Orchard): big open rectangular rooms laid out in rows of trees (grid: a trunk every 3 tiles across and every 2 down), wide lanes between them.
+  warren:    { style: 'warren',    roomMin: 4, roomMax: 5, span: 5,  roomCountMul: 0.7,  roomExtra: 2, extChance: 0.25, wideChance: 0, loops: 3, loopMax: 22, pillarChance: 0.45, jitter: 0.4, maxShop: 60, hub: [9, 11, 7, 9],
+               typeW: { big: [1, 1, 3, 1, 0.3, 2, 0.3], small: [2, 1, 0.5, 1.5, 0.3, 3, 0.3] } },   // taprooms and cellars: mess halls and storerooms
+  orchard:   { style: 'orchard',   roomMin: 7, roomMax: 10, span: 10, roomCountMul: 0.6, extChance: 0.15, wideChance: 0.8, loops: 2, loopMax: 24, pillarChance: 0.9, grid: [3, 2], maxShop: 140,
+               typeW: { big: [2, 3, 1, 0.5, 0.5, 1.5, 1], small: [3, 1, 0.3, 1, 1, 2, 1.5] } },
   clearings: { style: 'clearings', roomMin: 6, roomMax: 11, span: 11, roomCountMul: 0.6,  extChance: 0.3, wideChance: 0.7,  loops: 3, loopMax: 24, pillarChance: 0.3,  maxShop: 140 },
   halls:     { style: 'halls',     roomMin: 7, roomMax: 9, span: 12, roomCountMul: 0.75, extChance: 0.7, wideChance: 0.15, loops: 1, loopMax: 20, pillarChance: 0.9,  maxShop: 140,
                typeW: { big: [2, 2, 0.5, 0.5, 1.5, 1, 5], small: [2, 0.5, 0.2, 1, 1, 1, 4] } },   // room type weights: shrines (the pews and altar) dominate
 };
+const keysOf = n => ({ armory: n, vault: n, brewery: n, lair: n, cell: n });   // one key name for every locked room type of a theme
 const KEYS_DEFAULT = { armory: 'Armory Key', vault: 'Vault Key', brewery: 'Brewery Key', lair: 'Lair Key', cell: 'Cell Key' };
 const mkTheme = (name, id, pal, o) => ({
   name, id, pal, fog: { density: 0.085 }, tex: { wall: 'stone', floor: 'tile', ceil: 'beams' }, wallStyle: 'box', layout: LAYOUTS.rooms,
@@ -42,15 +49,25 @@ const mkTheme = (name, id, pal, o) => ({
 });
 const THEME_DEFS = [
   mkTheme('The Sunken Tavern', 'tavern', { wall: '#6b4a2f', floor: '#4a3524', ceil: '#2b1f16', fog: 0x120c08, light: 0xffb060 }, {
-    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    fog: { density: 0.095 }, tex: { wall: 'planks', floor: 'wetwood', ceil: 'beams' }, layout: { ...LAYOUTS.warren },
+    doors: { style: 'hatch', keyNames: keysOf('Cask Key'), openAnim: 'barred', noise: 5 },
+    props: { edge: [['keg', 1, 3], ['hearth', 0, 1]], inner: [['longtable', 1, 2]], floor: [['lantern', 1, 2]], locked: [['keg', 1, 2], ['lantern', 1, 1]] },
     natives: { commons: ['cook', 'bandit', 'rat'], elite: 'bouncer', prefer: { cook: 'messhall', bandit: 'barracks', rat: 'storeroom' } },
     boss: { name: 'Giant Innkeeper', dress: 'innkeeper' },
-    mechanic: { kind: 'puddle', n: [4, 7], hint: 'Shallow puddles splash when you step in them, even when you creep.' } }),
+    // Flooded warren: a big taproom, tight cellars, crooked passages. Locked rooms are BARRED HATCHES (barrel-stave doors with iron hoops and a crossbar; the Cask Key). Mechanic WATER: flooded patches
+    // slow you (x slow) and anyone else (enemySlow); a walking step splashes splash m, a sprinting one splashRun m; creeping through is silent.
+    mechanic: { kind: 'puddle', n: [8, 12], hint: 'The cellars are flooded: wading slows you, and walking or running through the water splashes. Creep and it is silent.',
+      TUNE: { slow: 0.75, splash: 6, splashRun: 10, enemySlow: 0.7 } } }),   // slow: your speed x in water, splash/splashRun: noise metres walking/sprinting (crouched: none), enemySlow: a guard's speed x in water
   mkTheme('The Moonlit Orchard', 'orchard', { wall: '#3d5a3a', floor: '#2f4a2a', ceil: '#0e1626', fog: 0x070b14, light: 0xa8c0ff }, {
-    tex: { wall: 'stone', floor: 'planks', ceil: 'beams' },
+    fog: { density: 0.06 }, tex: { wall: 'hedge', floor: 'grass', ceil: 'starry' }, wallStyle: 'rough', layout: { ...LAYOUTS.orchard },
+    doors: { style: 'garden', keyNames: keysOf('Garden Key'), openAnim: 'fold', noise: 4 },
+    props: { noCeil: true, edge: [['hedge', 2, 4]], inner: [['appletree', 2, 4], ['well', 0, 1]], floor: [['fruit', 2, 4], ['fireflies', 2, 3]], locked: [['fireflies', 1, 2], ['fruit', 1, 1]] },
     natives: { commons: ['bandit'], signature: 'scarecrow', elite: 'warden', bonus: { wolf: 1, archer: 1 }, prefer: { bandit: 'barracks' } },
     boss: { name: 'Harvest King', dress: 'king', skin: 0xb88a3a },
-    mechanic: { kind: 'grass', n: [9, 13], hint: 'Tall grass hides a crouching player. Scarecrows are not all scenery.' } }),
+    // Open night orchard: rows of apple trees, hedge walls, a starry sky, pale blue moonlight. Locked rooms are IRON GARDEN GATES (vine-wound; the Garden Key; they fold aside). Mechanic MOONLIGHT: bright
+    // moonlit patches show you (guards see you x moon as far), shade under the trees hides you (x shade). No rustle, no noise rule: pure sight.
+    mechanic: { kind: 'moon', n: [7, 10], also: [{ kind: 'shade', n: [7, 10] }], hint: 'Moonlit patches show you up to guards; the shade under the trees hides you. Scarecrows are not all scenery.',
+      TUNE: { moon: 1.3, shade: 0.6 } } }),   // moon: guards see you x this on a moonlit patch, shade: x this in the shade
   // Clockwork Library: dark wood and brass, bookshelf walls, a parquet floor, warm light. Layout 'aisles': parallel shelf rows with an open aisle between, and shelf blocks that slide on a timer.
   // Locked rooms are CLOCKWORK GATES (brass bars and spinning cogs, the gate slides up; the Gear Key). Mechanic: the hush (a rule, not a decal) and MOVING SHELVES: a 2 tile shelf block slides 2 tiles every
   // shelfEvery seconds. It grinds for shelfSlide seconds first (a shelfRing m noise), blocks sight and movement while it moves (tiles become walls), and shoves anyone in its way out of it.
@@ -146,8 +163,8 @@ const ROOM_THEMES = {
 // The key's name and the door's style come from the floor's theme (plank themes keep the classic names).
 const keyNameFor = (type, themeName) => { const t = THEME_BY_NAME[themeName]; return (t && t.doors.keyNames[type]) || LOCKED_ROOMS[type].key; };
 const doorStyleFor = themeName => { const t = THEME_BY_NAME[themeName]; return t ? t.doors.style : 'plank'; };
-const BLOCKING_DECOR = new Set(['bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue', 'log', 'idol', 'pew', 'brokenaltar', 'winerack', 'mushroom', 'orrery', 'clock', 'scrolltable', 'globe']);   // guards path around these: anything with a collision circle bigger than candles
-const DECALS = new Set(['rug', 'bones', 'candles', 'banner', 'fern', 'glowmoss', 'vines', 'icicles', 'snowdrift', 'shaft', 'stalactites', 'ladder', 'dark']);   // flat or hanging, no collision
+const BLOCKING_DECOR = new Set(['keg', 'longtable', 'appletree', 'hedge', 'well', 'bed', 'bookshelf', 'barrels', 'crates', 'table', 'hearth', 'cauldron', 'altar', 'sacks', 'statue', 'log', 'idol', 'pew', 'brokenaltar', 'winerack', 'mushroom', 'orrery', 'clock', 'scrolltable', 'globe']);   // guards path around these: anything with a collision circle bigger than candles
+const DECALS = new Set(['rug', 'bones', 'candles', 'banner', 'fern', 'glowmoss', 'vines', 'icicles', 'snowdrift', 'shaft', 'stalactites', 'ladder', 'dark', 'lantern', 'fruit', 'fireflies']);   // flat or hanging, no collision
 const WALLDEC = new Set(['banner', 'shaft', 'ladder']);                                                                       // hung on a wall: they share an edge tile and face the room                                                     // never fill a tile alone
 const LOCKED_ROOMS = {
   armory:     { w: 7, h: 6, theme: 'armory',     name: 'armory',  key: 'Armory Key' },
@@ -334,14 +351,15 @@ function layoutFloor(seed, floorNum, opts) {
   const clash = (a, b) => a.x < b.x + b.w + 2 && a.x + a.w + 2 > b.x && a.y < b.y + b.h + 2 && a.y + a.h + 2 > b.y;
   const fits = r => r.x >= 2 && r.y >= 2 && r.x + r.w <= w - 2 && r.y + r.h <= h - 2 && !rooms.some(o => clash(r, o));
   const target = Math.max(1, Math.round((roomTargetFor(floorNum) + rng.int(0, 1)) * L.roomCountMul)) + (opts.armory ? 0 : L.roomExtra || 0);   // (the armory needs a 7 x 6 block of rock, so an armory floor keeps the usual count)
-  const hall = L.style === 'halls', clear = L.style === 'clearings' || L.style === 'caves';   // (eroded corners: clearings and caves)
+  const hall = L.style === 'halls', clear = L.style === 'clearings' || L.style === 'caves';   const tiny = L.style === 'caves' || L.style === 'warren';   // (small chambers: the quest spots below use their whole ring)
+  if (L.hub) { const hw = rng.int(L.hub[0], L.hub[1]), hh = rng.int(L.hub[2], L.hub[3]); rooms.push(mk((w - hw) >> 1, (h - hh) >> 1, hw, hh)); }   // warren: the taproom first, in the middle (room 0: the start)   // (eroded corners: clearings and caves)
   for (let tries = 0, made = 0; tries < 900 && made < target; tries++) {
     const r = mk(rng.int(2, w - L.span - 3), rng.int(2, h - L.span - 3), rng.int(L.roomMin, L.roomMax), rng.int(L.roomMin, L.roomMax));
     if (hall) { const long = rng.int(9, L.span); if (rng() < 0.5) { r.w = long; r.cx = r.x + (r.w >> 1); } else { r.h = long; r.cy = r.y + (r.h >> 1); } }   // a nave: one long side
     if (!fits(r)) continue;
     const group = [r];
     if (rng() < L.extChance) {                   // L or T shape (halls: a 4 x 4 side chapel on a long side)
-      const em = L.style === 'caves' ? 5 : 6, ew = hall ? 4 : rng.int(4, em), eh = hall ? 4 : rng.int(4, em), ov = hall ? 1 : 2;
+      const em = L.style === 'caves' || L.style === 'warren' ? 5 : 6, ew = hall ? 4 : rng.int(4, em), eh = hall ? 4 : rng.int(4, em), ov = hall ? 1 : 2;
       const e = mk(rng() < 0.5 ? r.x + r.w - ov : r.x - ew + ov, r.y + (hall ? rng.int(1, Math.max(1, r.h - 5)) : rng.int(-2, r.h - 2)), ew, eh);
       if (fits(e)) group.push(e);
     }
@@ -432,6 +450,11 @@ function layoutFloor(seed, floorNum, opts) {
       continue;
     }
     if (r.w < 7 || r.h < 7) continue;
+    if (L.grid) {                                // orchard: rows of trunks, one every grid[0] tiles across and grid[1] down, two tiles in from the walls
+      for (let y = r.y + 2; y <= r.y + r.h - 3; y += L.grid[1]) for (let x = r.x + 2; x <= r.x + r.w - 3; x += L.grid[0])
+        if (!nearCentre(x, y) && open8(x, y) && rng() < L.pillarChance) set(x, y, T_WALL);
+      continue;
+    }
     for (let y = r.y + 2; y <= r.y + r.h - 3; y += 2) for (let x = r.x + 2; x <= r.x + r.w - 3; x += 2)
       if (!nearCentre(x, y) && open8(x, y) && rng() < L.pillarChance) set(x, y, T_WALL);   // (clearings: sparse trees)
   }
@@ -682,7 +705,7 @@ function layoutFloor(seed, floorNum, opts) {
     let holder = keyHolders.shift();
     if (!holder && L.style !== 'rooms') {                 // big, sparse rooms may leave no prop to hide a key in: set a chest on a free edge tile of an ordinary room (the floor must stay connected)
       for (const r of rng.shuffle(rooms.filter((q, i) => i > 0 && !q.locked && q.theme !== 'shop'))) {
-        const tiles2 = []; for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y) && (open4(x, y) <= 3 || L.style === 'caves') && (!L.aisleChance || [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !wallAt(x + dx, y + dy) && !blocked[(y + dy) * w + x + dx]))) tiles2.push({ x, y });   // (aisles: it needs a free neighbour, or a shelf strip could wall it in)
+        const tiles2 = []; for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y) && (open4(x, y) <= 3 || tiny) && (!L.aisleChance || [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !wallAt(x + dx, y + dy) && !blocked[(y + dy) * w + x + dx]))) tiles2.push({ x, y });   // (aisles: it needs a free neighbour, or a shelf strip could wall it in)
         for (const c of rng.shuffle(tiles2)) {
           blocked[c.y * w + c.x] = 1;
           if (reachCount() !== reach - 1) { blocked[c.y * w + c.x] = 0; continue; }
@@ -790,7 +813,7 @@ function layoutFloor(seed, floorNum, opts) {
     let altar = rng.shuffle(decor.filter(d => d.kind === 'altar'))[0];
     if (!altar) {                                         // no shrine room on this floor: set an altar in the biggest ordinary room that has a spare inner tile (the floor must stay connected)
       for (const r of rooms.filter((r, i) => i > 0 && !r.locked && r.theme !== 'shop' && r.w * r.h >= 20).sort((a, b) => b.w * b.h - a.w * a.h)) {
-        const spots = [], m0 = L.style === 'caves' ? 0 : 1;   // (a cave chamber has no inner tile outside the centre block: its ring will do)
+        const spots = [], m0 = tiny ? 0 : 1;   // (a cave chamber has no inner tile outside the centre block: its ring will do)
         for (let y = r.y + m0; y < r.y + r.h - m0; y++) for (let x = r.x + m0; x < r.x + r.w - m0; x++) if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !nearCentre(x, y)) spots.push({ x, y });
         for (const c of rng.shuffle(spots)) {
           blocked[c.y * w + c.x] = 1;
@@ -832,7 +855,7 @@ function layoutFloor(seed, floorNum, opts) {
     for (const r of homes) {
       const spots = [];
       for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++)
-        if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !(L.style === 'caves' ? x === r.cx && y === r.cy : nearCentre(x, y)) && !props.some(p => p.x === x && p.y === y)) spots.push({ x, y });   // (a cave chamber is so small that only its exact centre is spared: the recruit is a body, not a blocked tile, so no guard route is closed)
+        if (at(x, y) === T_FLOOR && !blocked[y * w + x] && !used.has(y * w + x) && !(tiny ? x === r.cx && y === r.cy : nearCentre(x, y)) && !props.some(p => p.x === x && p.y === y)) spots.push({ x, y });   // (a cave chamber is so small that only its exact centre is spared: the recruit is a body, not a blocked tile, so no guard route is closed)
       if (spots.length) { quest = { type: 'ally', npc: rng.pick(spots), room: r.theme, seed: seedOf() }; break; }
     }
   } else if (opts.quest === 'prisoner') {

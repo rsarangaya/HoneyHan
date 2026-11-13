@@ -62,7 +62,7 @@ for (let s = 1; s <= N; s++) {
       mapStats[n - 1].open += open; mapStats[n - 1].corr += open - inR; mapStats[n - 1].n++;
       for (const pr of f.props) if (pr.kind === 'chest') { if (!Number.isInteger(pr.tier) || pr.tier < 0 || pr.tier > 4) fail(where, `chest tier ${pr.tier}`); else tierCounts[n - 1][pr.tier]++; }
     }
-    const patches = f.decor.filter(d => ['puddle', 'grass', 'glowcap', 'bell', 'ice', 'brush', 'dark'].includes(d.kind)), also = (G.THEMES.find(t => t.name === themeName) || { mechanic: {} }).mechanic.also || [];   // (the Cellar's second kind: dark pockets)
+    const patches = f.decor.filter(d => ['puddle', 'moon', 'shade', 'glowcap', 'bell', 'ice', 'brush', 'dark'].includes(d.kind)), also = (G.THEMES.find(t => t.name === themeName) || { mechanic: {} }).mechanic.also || [];   // (the Cellar's second kind: dark pockets)
     const gmin = gim && gim.n[0] + also.reduce((a, g) => a + g.n[0], 0), gmax = gim && gim.n[1] + also.reduce((a, g) => a + g.n[1], 0);
     if (gim && !boss && (patches.length < gmin - 2 || patches.length > gmax || patches.some(d => d.kind !== gim.kind && !also.some(g => g.kind === d.kind)))) fail(where, `${patches.length} ${gim.kind} patches on a ${themeName} floor`);
     if (!gim && patches.length) fail(where, 'floor patches in a theme without a gimmick');
@@ -837,9 +837,9 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
 // only through its door and with its key, one key per door in a chest outside the locked rooms, the join tile open, reachable floor, the door's style and key name from the theme,
 // props and guard waypoints reachable, and the style's own look (clearings: big rooms, trees; halls: long naves, colonnades, side chapels).
 {
-  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal'], ['The Mushroom Cellar', 'caves', 'spore', 'Spore Key'], ['The Clockwork Library', 'aisles', 'gate', 'Gear Key']];
+  const STYLES = [['The Overgrown Ruin', 'clearings', 'cave', 'Cave Key'], ['The Frozen Chapel', 'halls', 'ice', 'Frost Seal'], ['The Mushroom Cellar', 'caves', 'spore', 'Spore Key'], ['The Clockwork Library', 'aisles', 'gate', 'Gear Key'], ['The Sunken Tavern', 'warren', 'hatch', 'Cask Key'], ['The Moonlit Orchard', 'orchard', 'garden', 'Garden Key']];
   const QUESTS = [undefined, 'miniboss', 'prisoner', 'shrine', 'wanted', 'thief', 'ally'];
-  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99, caveFloors = 0, caveRooms = 0, darks = 0, rowFloors = 0, shelves = 0, shelfRooms = 0;
+  let floors = 0, locked = 0, tall = 0, pillars = 0, chapels = 0, big = 0, shops = 0, quests = 0, minRooms = 99, caveFloors = 0, caveRooms = 0, darks = 0, rowFloors = 0, shelves = 0, shelfRooms = 0, warrenFloors = 0, warrenRooms = 0, puddles = 0, kegs = 0, orchFloors = 0, trees = 0, moons = 0, shades = 0;
   for (const [themeName, style, doorStyle, keyName] of STYLES) for (let s = 1; s <= Math.max(80, N); s++) for (let fl = 1; fl <= 4; fl++) {
     const seed = (s * 2246822519 + 31) >>> 0, flags = { armory: fl === 1 + (s % 4), shop: s % 3 === 0 && fl === 2, quest: QUESTS[(s + fl) % QUESTS.length] };
     const where = `${style} seed ${seed} floor ${fl}`;
@@ -881,6 +881,28 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
       if (dk < 2 || dk > 6 || gl < 3 || gl > 8) fail(where, `${dk} dark pockets, ${gl} glowcaps`);
       if (f.decor.some(d => d.kind === 'dark' && (f.tiles[at(d.x, d.y)] === G.T_WALL || f.tiles[at(d.x, d.y)] === G.T_DOOR))) fail(where, 'a dark pocket on a wall or a door');
       if (f.movers) fail(where, 'cave floors have no moving shelves');
+    } else if (style === 'warren') {                                               // a taproom hub in the middle (room 0, the start), small cellars round it, flooded patches and lanterns
+      warrenFloors++;
+      const hub = f.rooms[0];
+      if (hub.w < 9 || hub.h < 7 || hub.w > 11 || hub.h > 9) fail(where, `the hub is ${hub.w}x${hub.h}`);
+      if (Math.abs(hub.cx - f.w / 2) > 2 || Math.abs(hub.cy - f.h / 2) > 2) fail(where, 'the hub is not in the middle');
+      if (f.start.x !== hub.cx || f.start.y !== hub.cy) fail(where, 'the start is not in the hub');
+      if (ordinary.slice(1).some(r => r.w > 5 || r.h > 5)) fail(where, 'a warren cellar bigger than 5');
+      warrenRooms += ordinary.length;
+      const pu = f.decor.filter(d => d.kind === 'puddle').length; puddles += pu;
+      if (pu < 6 || pu > 12) fail(where, `${pu} flooded patches`);
+      if (f.decor.some(d => d.kind === 'puddle' && (f.tiles[at(d.x, d.y)] === G.T_WALL || f.tiles[at(d.x, d.y)] === G.T_DOOR))) fail(where, 'a flooded patch on a wall or a door');
+      if (f.decor.some(d => d.kind === 'moon' || d.kind === 'shade')) fail(where, 'moonlight in the Tavern');
+      if (f.decor.some(d => d.kind === 'longtable' || d.kind === 'keg')) kegs++;
+    } else if (style === 'orchard') {                                              // big open rooms with a grid of trunks (walls inside rooms), moon and shade patches, hedges, no ceiling decor
+      orchFloors++;
+      let trunks = 0; for (const r of ordinary) for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) if (f.tiles[at(x, y)] === G.T_WALL) trunks++;
+      trees += trunks;
+      if (ordinary.slice(0, 3).every(r => r.w < 7 && r.h < 7)) fail(where, 'no big room among the first three');
+      const mo = f.decor.filter(d => d.kind === 'moon').length, sh = f.decor.filter(d => d.kind === 'shade').length; moons += mo; shades += sh;
+      if (mo < 5 || mo > 10 || sh < 5 || sh > 10) fail(where, `${mo} moon and ${sh} shade patches`);
+      if (f.decor.some(d => d.kind === 'chandelier' || d.kind === 'beam')) fail(where, 'chandeliers or beams under the open sky');
+      if (f.decor.some(d => d.kind === 'puddle' || d.kind === 'dark')) fail(where, 'another theme\'s patches in the Orchard');
     } else if (style === 'aisles') {                                               // shelf rows (walls inside rooms) and sliding shelves: 4 open tiles in a row inside a large room, nothing on them, nothing cut off in any state
       const inside = f.rooms.filter(r => !r.locked && r.w >= 5 && r.h >= 5 && (() => { let n = 0; for (let y = r.y + 1; y < r.y + r.h - 1; y++) for (let x = r.x + 1; x < r.x + r.w - 1; x++) if (f.tiles[at(x, y)] === G.T_WALL) n++; return n >= 3; })());
       if (inside.length) rowFloors++;
@@ -911,6 +933,8 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
   const meanCave = caveRooms / (caveFloors || 1);
   console.log(`caves: ${caveFloors} floors, ${meanCave.toFixed(1)} ordinary rooms a floor, ${darks} dark pockets; aisles: ${rowFloors} floors with shelf rows, ${shelves} sliding shelves in ${shelfRooms} rooms`);
   if (!big || !tall || !chapels || !pillars || !locked || !shops || !quests) fail('layout styles', 'a style never produced its look, a shop, a locked room or an encounter');
+  console.log(`warren: ${warrenFloors} floors, ${(warrenRooms / (warrenFloors || 1)).toFixed(1)} rooms a floor, ${puddles} flooded patches; orchard: ${orchFloors} floors, ${trees} trunks, ${moons} moon and ${shades} shade patches`);
+  if (!warrenFloors || !puddles || !kegs || !orchFloors || trees < orchFloors * 3 || !moons || !shades) fail('warren/orchard', 'a style never produced its look');
   if (!darks || meanCave < 7) fail('caves', `dark pockets ${darks}, ${meanCave.toFixed(1)} rooms a floor (want 7 or more: 2 more than the usual 8 to 11 would give on a small map)`);
   if (rowFloors < 60 || !shelves || !shelfRooms) fail('aisles', 'no shelf rows or no sliding shelves came out');
 }

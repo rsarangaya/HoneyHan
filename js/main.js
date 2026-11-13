@@ -43,7 +43,9 @@ let HUSH = theme.mechanic.hush || 1;           // the Library's dead silence: ev
 // Mechanic handlers, by the theme's mechanic.kind: what standing on a decal of that kind does to the player (hot path: one lookup a frame, no allocation).
 //   slippery: you slide.  seen: multiplier on how far guards see you.  disc: glossary entry.
 const MECH_PATCH = {
-  grass:   { seen: () => player.crouching ? 0.55 : 0.85, disc: ['item:grass', 'Tall grass'] },
+  puddle:  { slow: true, disc: ['item:puddle', 'Shallow water'] },   // the Tavern's flooded patches: you wade (x TUNE.slow); the splash noise is in the frame loop, guards wade too (js/enemy.js goTo, floor.waterSlow)
+  moon:    { seen: () => theme.mechanic.TUNE.moon, disc: ['item:moon', 'Moonlight'] },       // the Orchard: guards see you farther on a moonlit patch...
+  shade:   { seen: () => theme.mechanic.TUNE.shade, disc: ['item:moon', 'Moonlight'] },     // ...and less far in the shade of the trees
   glowcap: { seen: () => { const t = theme.mechanic.TUNE; return t && t.glow || 1.4; }, disc: ['item:glow', 'Glowing spores'] },
   dark:    { seen: () => theme.mechanic.TUNE.dark, disc: ['item:dark', 'Dark pockets'] },   // the Cellar: guards see you x TUNE.dark here, and your footsteps are quieter (the frame loop)
   ice:     { slippery: true, disc: ['item:ice', 'Ice'] },
@@ -215,6 +217,43 @@ const dampFloorTexture = base => paintTex(base, 'damp', 256, (g, S, rng, col) =>
   for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 1 + rng() * 2, 1 + rng() * 2, 'rgba(140,255,210,0.35)');
   speckle(g, S, 1500, rng);
 });
+// Tavern: plank walls (upright boards between dark timbers, a water stain at the foot), a wet dark plank floor.
+const plankWallTexture = base => paintTex(base, 'plankwall', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.35); g.fillRect(0, 0, S, S);
+  for (let b = 0; b < 8; b++) {
+    g.fillStyle = shade(col, 0.65 + rng() * 0.3); g.fillRect(b * 32 + 1, 0, 30, S);
+    for (let l = 0; l < 5; l++) { g.fillStyle = `rgba(0,0,0,${0.05 + rng() * 0.08})`; g.fillRect(b * 32 + 4 + rng() * 22, rng() * S, 1, 20 + rng() * 50); }
+    g.fillStyle = 'rgba(20,16,12,0.7)'; g.fillRect(b * 32 + 6, 40, 2, 2); g.fillRect(b * 32 + 24, 150, 2, 2);   // nail heads
+  }
+  g.fillStyle = shade(col, 0.4); for (const y of [0, 120]) g.fillRect(0, y, S, 18);                           // two timber beams
+  g.fillStyle = shade(col, 0.5); g.fillRect(0, 0, 14, S);                                                    // a post at the edge
+  const gr = g.createLinearGradient(0, S * 0.65, 0, S); gr.addColorStop(0, 'rgba(30,60,70,0)'); gr.addColorStop(1, 'rgba(30,60,70,0.55)'); g.fillStyle = gr; g.fillRect(0, S * 0.65, S, S * 0.35);   // flood stain
+  speckle(g, S, 1200, rng);
+});
+const wetWoodTexture = base => paintTex(base, 'wetwood', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let p = 0; p < 6; p++) for (let y = -rng() * 60; y < S;) { const len = 70 + rng() * 90; g.fillStyle = shade(col, 0.6 + rng() * 0.3); g.fillRect(p * 42.6 + 1.5, y + 1.5, 39.6, len - 3); y += len; }
+  for (let i = 0; i < 30; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 22, 5 + rng() * 12, 'rgba(60,100,125,0.2)');   // wet sheen
+  speckle(g, S, 1400, rng);
+});
+// Orchard: a clipped hedge for the walls, short grass for the floor, a starry night for the sky.
+const hedgeWallTexture = base => paintTex(base, 'hedge', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 170; i++) blob(g, rng() * S, rng() * S, 5 + rng() * 11, 4 + rng() * 8, shade(col, 0.5 + rng() * 0.7));
+  for (let i = 0; i < 14; i++) blob(g, rng() * S, rng() * S, 1.5, 1.5, 'rgba(220,230,255,0.55)');         // moonlit blossom
+  speckle(g, S, 900, rng);
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0.25)'); gr.addColorStop(0.14, 'rgba(0,0,0,0)'); gr.addColorStop(0.86, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.4)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+});
+const grassFloorTexture = base => paintTex(base, 'grassfloor', 256, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.75); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 50; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 22, 6 + rng() * 14, rng() < 0.5 ? 'rgba(70,120,70,0.18)' : 'rgba(30,50,40,0.2)');
+  g.lineWidth = 1; for (let i = 0; i < 500; i++) { g.strokeStyle = shade(col, 0.8 + rng() * 0.7); const x = rng() * S, y = rng() * S; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rng() - 0.5) * 3, y - 3 - rng() * 4); g.stroke(); }
+});
+const starryTexture = base => paintTex(base, 'starry', 128, (g, S, rng, col) => {
+  g.fillStyle = shade(col, 0.8); g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 5; i++) blob(g, rng() * S, rng() * S, 14 + rng() * 22, 3 + rng() * 5, 'rgba(120,140,190,0.12)');   // thin cloud
+  for (let i = 0; i < 40; i++) { const k = 0.4 + rng() * 0.6; g.fillStyle = `rgba(230,236,255,${k})`; g.fillRect(rng() * S, rng() * S, 1 + (rng() < 0.2), 1 + (rng() < 0.2)); }
+}, 1);
 // Library wall: rows of book spines (a small colour palette) on dark wood shelves with brass edging.
 const shelfWallTexture = base => paintTex(base, 'shelf', 256, (g, S, rng, col) => {
   g.fillStyle = shade(col, 0.35); g.fillRect(0, 0, S, S);
@@ -244,9 +283,9 @@ const parquetTexture = base => paintTex(base, 'parq', 256, (g, S, rng, col) => {
 });
 // Texture generators by the theme schema's tex keys (theme.tex.wall / floor / ceil), each from the theme's base colour.
 const TEX_GENERATORS = {
-  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c), capstone: c => capstoneTexture(c), shelf: c => shelfWallTexture(c) },
-  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c) },
-  ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c) },
+  wall:  { stone: c => wallTexture(c), vine: c => vineWallTexture(c), iceblock: c => iceWallTexture(c), cave: c => caveWallTexture(c), capstone: c => capstoneTexture(c), shelf: c => shelfWallTexture(c), planks: c => plankWallTexture(c), hedge: c => hedgeWallTexture(c) },
+  floor: { tile: c => floorTexture(c, false), planks: c => floorTexture(c, true), moss: c => mossFloorTexture(c), frost: c => frostFloorTexture(c), damp: c => dampFloorTexture(c), parquet: c => parquetTexture(c), wetwood: c => wetWoodTexture(c), grass: c => grassFloorTexture(c) },
+  ceil:  { beams: c => ceilingTexture(c), canopy: c => canopyTexture(c), vault: c => vaultTexture(c), starry: c => starryTexture(c) },
 };
 // Wall geometry by the theme's wallStyle (up to 3 wall InstancedMeshes in all). 'rough' (Jungle): a box whose side faces bulge a little (a hash of each vertex, so shared corners stay closed);
 // every tile is also turned a quarter-turn at random and widened a hair (buildFloor), so a wall does not look stamped.
@@ -267,6 +306,8 @@ const DOOR_ANIM = {
   roll: (o, t) => { const s = 1 - 0.95 * t; o.mesh.scale.y = s; o.mesh.position.y = (1 - s) * WALL_H + t * 0.5; },   // (the last 0.5 m lifts the rolled-up sliver above the ceiling plane, so a culling pass that shows the mesh again cannot reveal it)
   sink: (o, t) => { o.mesh.position.y = -t * (WALL_H + 0.2); },
   wither: (o, t) => { o.mesh.scale.y = Math.max(0.03, 1 - t); },                                                  // spore seal: the fungus mound shrinks away
+  barred: (o, t) => { o.mesh.position.y = t * WALL_H; o.mesh.rotation.z = Math.sin(t * 24) * 0.04 * (1 - t); },                // tavern hatch: the barred door shudders as it heaves up
+  fold: (o, t) => { if (o.leaf) o.leaf.scale.x = Math.max(0.05, 1 - t); },                                                    // garden gate: the iron leaf folds back to its hinge post
   gate: (o, t) => { o.mesh.position.y = t * WALL_H; if (o.cogs) { o.cogs[0].rotation.z = t * 14; o.cogs[1].rotation.z = -t * 17; } },   // clockwork gate: slides up while its cogs spin
 };
 
@@ -329,7 +370,7 @@ function buildFloor() {
     group.add(im); return im;
   };
   let caveList = null;                             // the Jungle's locked rooms are dark caves: their walls (and a dark patch on the floor) use cave rock
-  if (rough && floor.rooms.some(r => r.locked)) {
+  if (theme.doors.style === 'cave' && floor.rooms.some(r => r.locked)) {
     const mask = new Uint8Array(w * h); caveList = [];
     for (const r of floor.rooms) if (r.locked) for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) if (x >= 0 && y >= 0 && x < w && y < h) mask[y * w + x] = 1;
     for (let i = wallPos.length - 1; i >= 0; i--) if (mask[wallPos[i][1] * w + wallPos[i][0]]) caveList.push(wallPos.splice(i, 1)[0]);
@@ -1194,6 +1235,7 @@ function updateCombat(dt) {
   const mech = patch && MECH_PATCH[patch];                                       // the theme mechanic's handler for this decal (puddles and bells act elsewhere)
   const mt = theme.mechanic.TUNE;                                                 // the theme's mechanic numbers (undefined in themes with none)
   if (mech && mech.slippery) player.slipT = mt.carry; else if (player.slipT > 0) player.slipT -= dt;   // ice: the slide carries on for a moment after you leave it
+  if (mech && mech.slow && mt) player.speedMul *= mt.slow;                      // wading through the Tavern's water
   player.slippery = player.slipT > 0; if (mt && mt.slip) player.slipRate = mt.slip;
   if (floor.prints) updatePrints(dt);
   let seenMul = 1;
@@ -1544,6 +1586,7 @@ function generateAndEnter(n, arrive) {
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
   if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; } }   // each theme's boss has its own look
+  floor.waterSlow = theme.mechanic.kind === 'puddle' ? theme.mechanic.TUNE.enemySlow : 0;   // the Tavern's flooded patches slow guards too (js/enemy.js goTo)
   floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
   explored = new Uint8Array(floor.w * floor.h);
@@ -1828,8 +1871,8 @@ function frame(now) {
       events.push({ x: player.x, z: player.z, r: 14 }); rings.push({ x: player.x, z: player.z, r: 14, t: 0 });
       discover('item:bell', 'Tripwire bells'); flash('DING! A tripwire bell rings.');
     }
-    if (player.noiseRadius > 0 && under === 'puddle') {   // shallow water: a moving step splashes, even a crouched one
-      const r = player.crouching ? 4 : 8;
+    if (player.noiseRadius > 0 && under === 'puddle' && !player.crouching) {   // shallow water: a walking step splashes, a sprinting one more; creeping through is silent
+      const r = player.sprinting ? mt.splashRun : mt.splash;
       events.push({ x: player.x, z: player.z, r }); rings.push({ x: player.x, z: player.z, r, t: 0 });
       if (discover('item:puddle', 'Shallow water')) flash('Splash! Shallow water carries sound.');
     }

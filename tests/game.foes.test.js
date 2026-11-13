@@ -92,7 +92,7 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
     for (const r of game.floor.rooms) { for (let y = r.y; y < r.y + r.h && dry === null; y++) for (let x = r.x; x < r.x + r.w && dry === null; x++) { if (game.floor.tiles[y * game.floor.w + x] === 1 && !game.floor.blocked[y * game.floor.w + x] && !game.floor.patches.has(y * game.floor.w + x)) { const t = await trial(x, y); if (t !== null) dry = t; } } if (dry !== null) break; }
     return { wet, dry, puddles: pud.length };
   });
-  check('puddles carry a creeping player\'s steps; dry floor does not', splash.wet === true && splash.dry === false, JSON.stringify(splash));
+  check('a creeping player is silent in the water as on dry floor', splash.wet === false && splash.dry === false, JSON.stringify(splash));
 
   const boss = await page.evaluate(async () => {
     game.startFloor(5); await T.sleep(250);

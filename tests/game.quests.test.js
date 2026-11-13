@@ -537,8 +537,8 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
         if (typeof psCalls === 'number') { const c0 = psCalls; for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r)); out.idleCalls = psCalls - c0; }
         return out;
       }, n);
-      check(`seed ${seed}: floor ${n} has a prisoner; the cell door says it needs the Cell Key; the body is solid, not an enemy, not a target`,
-        info.type === 'prisoner' && /Cell Key/.test(info.doorLabel || '') && info.bodySolid && info.bodyInProps && !info.enemyListHasPrisoner && !info.bodyTargetInfo && !info.bodyLookTarget,
+      check(`seed ${seed}: floor ${n} has a prisoner; the cell door says it needs its theme's key; the body is solid, not an enemy, not a target`,
+        info.type === 'prisoner' && /Cell Key|Cask Key|Garden Key/.test(info.doorLabel || '') && info.bodySolid && info.bodyInProps && !info.enemyListHasPrisoner && !info.bodyTargetInfo && !info.bodyLookTarget,
         JSON.stringify(info));
       check(`seed ${seed}: the Optional line says where the key is`, /a guard carries it|it is in a chest/.test(info.line || ''), info.line);
       if (seed === 113) check('before the cell opens, the frame loop calls the walk step zero times in 20 frames', info.idleCalls === 0, `${info.idleCalls} calls`);

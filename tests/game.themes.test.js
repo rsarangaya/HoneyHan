@@ -156,13 +156,13 @@ run('The five other themes', async ({ open, check }) => {
   page = await open(seeds[ORCH]);
   const grass = await page.evaluate(async () => {
     game.startFloor(1); await T.sleep(150);
-    const k = [...game.floor.patches.entries()].find(([, v]) => v === 'grass'); if (!k) return { none: true };
+    const k = [...game.floor.patches.entries()].find(([, v]) => v === 'shade'); if (!k) return { none: true };
     const P = game.player; P.x = ((k[0] % game.floor.w) + 0.5) * TILE; P.z = (Math.floor(k[0] / game.floor.w) + 0.5) * TILE;
     P.keys[KEYS.crouch] = true; await T.sleep(200); const crouched = P.stealthMul; P.keys[KEYS.crouch] = false; await T.sleep(200); const standing = P.stealthMul;
     P.x += 3 * 4; await T.sleep(150);
     return { crouched, standing };
   });
-  check('tall grass halves how visible a crouching player is', grass.crouched < 0.6 && grass.standing < 1 && grass.standing > grass.crouched, JSON.stringify(grass));
+  check('the shade under the trees hides a player (crouched or not: 0.6)', Math.abs(grass.crouched - 0.6) < 1e-6 && Math.abs(grass.standing - 0.6) < 1e-6, JSON.stringify(grass));
   await page.close();
 
   page = await open(seeds[CELL]);

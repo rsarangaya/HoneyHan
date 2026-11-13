@@ -565,6 +565,7 @@ class Enemy {
   // Walk toward a world point along a BFS path. Returns the straight-line distance left.
   goTo(tx, tz, speed, dt) {
     speed *= this.st.moveMul();                  // slow and cripple
+    const fl = this.floor; if (fl.waterSlow && fl.patches.get(Math.floor(this.z / TILE) * fl.w + Math.floor(this.x / TILE)) === 'puddle') speed *= fl.waterSlow;   // the Tavern's flooded patches slow a guard too
     const T = TILE, key = Math.floor(tx / T) + ',' + Math.floor(tz / T);
     if (key !== this.pk || this.rp <= 0) {
       this.path = findPath(this.floor, Math.floor(this.x / T), Math.floor(this.z / T), Math.floor(tx / T), Math.floor(tz / T));
