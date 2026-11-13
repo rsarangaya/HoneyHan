@@ -8,7 +8,7 @@ const stageThemes = (() => { const t0 = makeRng(runSeed).pick(THEMES); return [t
 let stage = 1, stageSeed = runSeed, theme = stageThemes[0];   // stageSeed is the run seed for stage 1 (so stage 1 generates exactly as before) and a seeded mix of it for the others
 
 const canvas = document.getElementById('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(quality.cur);   // 1.5 at most; js/perf.js lowers it if the frame rate drops
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;   // a filmic curve instead of hard clipping
 const scene = new THREE.Scene();
