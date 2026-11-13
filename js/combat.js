@@ -8,6 +8,8 @@ const TUNE = {
   chaseSpeed: 5.0,                    // alerted guards run faster than a sprinting player
   playerAtkSpd: 1,                    // attack speed stat: x the weapon's spd. Swing time / this
   walkSpeed: 3.0, sprintSpeed: 4.6, crouchSpeed: 1.4,
+  patrolSpeed: 1.1,                   // unaware patrol pace: slower than a crouching player (1.4), so a sneaker can catch up
+  patrolWaitMin: 3, patrolWaitMax: 7, patrolRestChance: 0.25, patrolRestMin: 8, patrolRestMax: 12,   // seconds a guard stands at a waypoint; sometimes a long rest
   bossHp: 220, bossDmgMul: 1.4,       // the boss wears Rare plate, so its real toughness is higher than its HP
   bossWake: 12,                       // metres: the boss stays asleep until you are this close
   bossSpeed: 4.2,                     // a sprinting player (4.6) can outrun it

@@ -18,6 +18,7 @@ function makeRng(seed) {
 
 // ---- Theme schema: one object per theme. THEMES, THEME_GIMMICK, THEME_NATIVES and THEME_BOSS below are views of it. ----
 //   pal: colours (wall/floor/ceil base, fog, torch light).  fog.density: FogExp2.  tex: keys into main.js TEX_GENERATORS.
+//   sky: 'night' | 'day' = no ceiling plane; one unlit sky dome (night: Orchard, day: Jungle) follows the camera instead.
 //   wallStyle: 'box' (one InstancedMesh of boxes; more styles may add up to 2 more meshes).  layout.style: 'rooms' is the original generator (no extra rng calls).
 //   doors: style ('plank' | later 'cave', 'ice', 'spore', 'gate'), keyNames per locked room type, openAnim.  natives/boss: see js/enemytypes.js.
 //   mechanic: kind (the floor decal; no n = no decals), n: how many per floor, hush: noise multiplier, hint: the first-floor log line.
@@ -48,7 +49,7 @@ const keysOf = n => ({ armory: n, vault: n, brewery: n, lair: n, cell: n });   /
 const KEYS_DEFAULT = { armory: 'Armory Key', vault: 'Vault Key', brewery: 'Brewery Key', lair: 'Lair Key', cell: 'Cell Key' };
 const mkTheme = (name, id, pal, o) => ({
   name, id, pal, fog: { density: 0.085 }, tex: { wall: 'stone', floor: 'tile', ceil: 'beams' }, wallStyle: 'box', layout: LAYOUTS.rooms,
-  doors: { style: 'plank', keyNames: KEYS_DEFAULT, openAnim: 'slide' }, props: {}, natives: null, boss: null, mechanic: { kind: null }, audio: null, ...o,
+  doors: { style: 'plank', keyNames: KEYS_DEFAULT, openAnim: 'slide' }, sky: false, props: {}, natives: null, boss: null, mechanic: { kind: null }, audio: null, ...o,
 });
 const THEME_DEFS = [
   mkTheme('The Sunken Tavern', 'tavern', { wall: '#6b4a2f', floor: '#4a3524', ceil: '#2b1f16', fog: 0x120c08, light: 0xffb060 }, {
@@ -62,7 +63,7 @@ const THEME_DEFS = [
     mechanic: { kind: 'puddle', n: [8, 12], hint: 'The cellars are flooded: wading slows you, and walking or running through the water splashes. Creep and it is silent.',
       TUNE: { slow: 0.75, splash: 6, splashRun: 10, enemySlow: 0.7 } } }),   // slow: your speed x in water, splash/splashRun: noise metres walking/sprinting (crouched: none), enemySlow: a guard's speed x in water
   mkTheme('The Moonlit Orchard', 'orchard', { wall: '#3d5a3a', floor: '#2f4a2a', ceil: '#0e1626', fog: 0x070b14, light: 0xa8c0ff }, {
-    fog: { density: 0.06 }, tex: { wall: 'hedge', floor: 'grass', ceil: 'starry' }, wallStyle: 'rough', layout: { ...LAYOUTS.orchard },
+    fog: { density: 0.06 }, tex: { wall: 'hedge', floor: 'grass', ceil: 'starry' }, wallStyle: 'rough', sky: 'night', layout: { ...LAYOUTS.orchard },
     doors: { style: 'garden', keyNames: keysOf('Garden Key'), openAnim: 'fold', noise: 4 },
     props: { noCeil: true, edge: [['hedge', 2, 4]], inner: [['appletree', 2, 4], ['well', 0, 1]], floor: [['fruit', 2, 4], ['fireflies', 2, 3]], locked: [['fireflies', 1, 2], ['fruit', 1, 1]] },
     natives: { commons: ['bandit'], signature: 'scarecrow', elite: 'warden', bonus: { wolf: 1, archer: 1 }, prefer: { bandit: 'barracks' } },
@@ -117,7 +118,7 @@ const THEME_DEFS = [
   // Jungle: vine stone, a canopy ceiling, a moss floor, dappled green-gold light, rough walls. Locked rooms are CAVE MOUTHS (boulders and a vine curtain over a dark hole, rolling up with the Cave Key;
   // the room behind is a dark cave). Mechanic: brush patches hide a player (a stealth bonus only, enemies still see through it) but rustle; enemies standing in brush are drawn faint.
   mkTheme('The Overgrown Ruin', 'jungle', { wall: '#55703f', floor: '#3b4a26', ceil: '#1c3a1a', fog: 0x08140a, light: 0xffe8a0 }, {
-    fog: { density: 0.075 }, tex: { wall: 'vine', floor: 'moss', ceil: 'canopy' }, wallStyle: 'rough', layout: { ...LAYOUTS.clearings },
+    fog: { density: 0.075 }, tex: { wall: 'vine', floor: 'moss', ceil: 'canopy' }, wallStyle: 'rough', sky: 'day', layout: { ...LAYOUTS.clearings },
     doors: { style: 'cave', keyNames: { armory: 'Cave Key', vault: 'Cave Key', brewery: 'Cave Key', lair: 'Cave Key', cell: 'Cave Key' }, openAnim: 'roll' },
     props: { noCeil: true, edge: [['hammock', 0, 1]], inner: [['log', 0, 1], ['idol', 0, 1]], floor: [['fern', 3, 5], ['glowmoss', 0, 2], ['vines', 2, 3]], locked: [['glowmoss', 1, 2], ['bones', 1, 2]] },
     natives: { commons: ['dartgoblin', 'strangler'], signature: 'jaguar', elite: 'tribal', prefer: { dartgoblin: 'library', strangler: 'storeroom' } },

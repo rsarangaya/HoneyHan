@@ -111,6 +111,15 @@ run('The five other themes', async ({ open, check }) => {
     out.alarm = far.aware >= 1 || far.state === 'alerted';
     // tripwire bell: the gimmick exists and stepping on one rings once
     out.bells = [...game.floor.patches.values()].filter(k => k === 'bell').length;
+    // swinging at a bell cuts it: no ring, no noise
+    const bo = decorObjs.find(o => o.kind === 'bell' && game.floor.patches.get(o.p.y * game.floor.w + o.p.x) === 'bell'), key = bo && bo.p.y * game.floor.w + bo.p.x;
+    out.cut = null;
+    if (bo) for (const [dx, dz, yaw] of [[0, 1.5, 0], [0, -1.5, Math.PI], [1.5, 0, -Math.PI / 2], [-1.5, 0, Math.PI / 2]]) {
+      const bx = (bo.p.x + 0.5) * 3, bz = (bo.p.y + 0.5) * 3;
+      game.player.x = bx + dx; game.player.z = bz + dz; game.player.yaw = yaw; pulse = 0;
+      playerHit();
+      if (!game.floor.patches.has(key)) { out.cut = { noise: pulse, hidden: !bo.mesh.visible }; break; }
+    }
     return out;
   });
   check('a market guard takes a quarter damage from the front, full from behind', mark.front > 0 && mark.back > 0 && mark.front < mark.back * 0.5, `front ${mark.front.toFixed(1)}, back ${mark.back.toFixed(1)}`);
@@ -118,6 +127,7 @@ run('The five other themes', async ({ open, check }) => {
   check('a thief steals gold and runs', mark.stole && mark.goldAfter === 100 - mark.thiefHas && mark.thiefHas > 0 && mark.flees, `took ${mark.thiefHas}`);
   check('a thief drops the stolen gold when it dies', mark.dropped);
   check('a captain\'s bellow turns far-off enemies alerted', mark.alarm);
+  check('attacking a tripwire bell cuts it silently', mark.cut && mark.cut.noise === 0 && mark.cut.hidden, JSON.stringify(mark.cut));
   check('the Market floors have tripwire bells', mark.bells > 0, mark.bells + ' bells');
   await page.close();
 
@@ -163,6 +173,31 @@ run('The five other themes', async ({ open, check }) => {
     return { crouched, standing };
   });
   check('the shade under the trees hides a player (crouched or not: 0.6)', Math.abs(grass.crouched - 0.6) < 1e-6 && Math.abs(grass.standing - 0.6) < 1e-6, JSON.stringify(grass));
+  // open sky (Orchard night, Jungle day): no ceiling plane, one unlit sky dome, same draw-call budget, nothing leaks over rebuilds
+  const skyProbe = async pg => pg.evaluate(async () => {
+    const out = { leak: [] };
+    for (let k = 0; k < 3; k++) {
+      game.startFloor(1); await T.sleep(100);
+      const i = game.renderInfo(); out.leak.push(i.geos + '/' + i.tex);
+      let planes = 0, skies = 0, basic = false;
+      game.group.traverse(o => { if (!o.isMesh) return; if (o.geometry.type === 'PlaneGeometry' && o.geometry.parameters.width >= game.floor.w * TILE * 0.9) planes++; if (o.userData.sky) { skies++; basic = o.material.type === 'MeshBasicMaterial' && !o.material.fog && !!o.material.map; } });
+      out.planes = planes; out.skies = skies; out.basic = basic;
+    }
+    const room = [...game.floor.rooms].filter(r => !r.locked).sort((a, b) => b.w * b.h - a.w * a.h)[0], P = game.player;
+    P.x = (room.cx + 0.5) * TILE; P.z = (room.cy + 0.5) * TILE; let worst = 0;
+    for (let a = 0; a < 8; a++) { P.yaw = a * Math.PI / 4; worst = Math.max(worst, game.renderInfo().calls); }
+    out.worst = worst;
+    return out;
+  });
+  const skyOrch = await skyProbe(page);
+  check('an Orchard floor has no ceiling plane and exactly one unlit sky dome', skyOrch.planes === 0 && skyOrch.skies === 1 && skyOrch.basic, JSON.stringify(skyOrch));
+  check('Orchard draw calls stay under 260 in the busiest room', skyOrch.worst < 260, 'worst ' + skyOrch.worst);
+  check('rebuilding Orchard floors keeps geometry and texture counts flat', skyOrch.leak.every(v => v === skyOrch.leak[0]), skyOrch.leak.join(', '));
+  await page.close();
+  page = await open(seeds['The Overgrown Ruin']);
+  const skyJung = await skyProbe(page);
+  check('a Jungle floor has no ceiling plane and exactly one unlit sky dome', skyJung.planes === 0 && skyJung.skies === 1 && skyJung.basic, JSON.stringify(skyJung));
+  check('Jungle draw calls stay under 260 in the busiest room, and its counts stay flat over rebuilds', skyJung.worst < 260 && skyJung.leak.every(v => v === skyJung.leak[0]), 'worst ' + skyJung.worst + ', ' + skyJung.leak.join(', '));
   await page.close();
 
   page = await open(seeds[CELL]);

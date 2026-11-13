@@ -255,6 +255,19 @@ const starryTexture = base => paintTex(base, 'starry', 128, (g, S, rng, col) => 
   for (let i = 0; i < 5; i++) blob(g, rng() * S, rng() * S, 14 + rng() * 22, 3 + rng() * 5, 'rgba(120,140,190,0.12)');   // thin cloud
   for (let i = 0; i < 40; i++) { const k = 0.4 + rng() * 0.6; g.fillStyle = `rgba(230,236,255,${k})`; g.fillRect(rng() * S, rng() * S, 1 + (rng() < 0.2), 1 + (rng() < 0.2)); }
 }, 1);
+// Night sky for open-air themes (theme.sky): a deep gradient, haze at the horizon, stars and a pale moon, painted once on a hemisphere dome (the canvas top is the zenith, the bottom the horizon).
+const skyTexture = (base, kind) => paintTex(base, 'sky' + kind, 512, kind === 'day' ? (g, S, rng) => {   // 'day' (Jungle): a pale green-gold sky seen through gaps in the leaves, with a warm sun glow
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, '#5f9a86'); gr.addColorStop(0.7, '#a9cf9a'); gr.addColorStop(1, '#e6e2a0'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 5; i++) blob(g, rng() * S, S * (0.2 + rng() * 0.5), 50 + rng() * 60, 5 + rng() * 9, 'rgba(255,255,235,0.18)');
+  const mx = S * 0.3, my = S * 0.4, mg = g.createRadialGradient(mx, my, 4, mx, my, 90); mg.addColorStop(0, 'rgba(255,248,200,1)'); mg.addColorStop(0.15, 'rgba(255,240,170,0.7)'); mg.addColorStop(1, 'rgba(255,230,150,0)'); g.fillStyle = mg; g.fillRect(mx - 90, my - 90, 180, 180);
+  for (let i = 0; i < 150; i++) { const y = S * Math.pow(rng(), 0.6); blob(g, rng() * S, y, 6 + rng() * 20, 4 + rng() * 12, `rgba(${14 + (rng() * 20 | 0)},${46 + (rng() * 36 | 0)},${14 + (rng() * 16 | 0)},${0.55 + rng() * 0.4})`); }   // leaf clumps, thickest at the horizon
+} : (g, S, rng, col) => {
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, shade(col, 0.7)); gr.addColorStop(0.7, shade(col, 1.5)); gr.addColorStop(1, shade(col, 2.6)); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 6; i++) blob(g, rng() * S, S * (0.3 + rng() * 0.5), 40 + rng() * 60, 4 + rng() * 8, 'rgba(120,140,190,0.10)');
+  for (let i = 0; i < 260; i++) { const k = 0.35 + rng() * 0.65; g.fillStyle = `rgba(230,236,255,${k})`; g.fillRect(rng() * S, rng() * S * 0.85, 1 + (rng() < 0.15), 1 + (rng() < 0.15)); }
+  const mx = S * 0.3, my = S * 0.42, mg = g.createRadialGradient(mx, my, 6, mx, my, 38); mg.addColorStop(0, 'rgba(210,225,255,0.5)'); mg.addColorStop(1, 'rgba(210,225,255,0)'); g.fillStyle = mg; g.fillRect(mx - 40, my - 40, 80, 80);   // glow
+  blob(g, mx, my, 11, 11, '#eef3ff'); blob(g, mx + 3, my - 2, 3, 3, 'rgba(160,175,210,0.5)');
+});
 // Library wall: rows of book spines (a small colour palette) on dark wood shelves with brass edging.
 const shelfWallTexture = base => paintTex(base, 'shelf', 256, (g, S, rng, col) => {
   g.fillStyle = shade(col, 0.35); g.fillRect(0, 0, S, S);
@@ -441,7 +454,6 @@ function buildFloor() {
     for (const r of floor.rooms) if (r.locked) { const p = new THREE.Mesh(new THREE.PlaneGeometry(r.w * TILE, r.h * TILE), dark); p.rotation.x = -Math.PI / 2; p.position.set((r.x + r.w / 2) * TILE, 0.02, (r.y + r.h / 2) * TILE); p.renderOrder = 1; group.add(p); }
   }
 
-  const planeGeo = new THREE.PlaneGeometry(w * TILE, h * TILE);
   // floor is a shape with a rectangular hole where the stairwell goes down
   const sx = (floor.stairs.x + 0.5) * TILE, sz = (floor.stairs.y + 0.5) * TILE;
   stairBox = { x0: sx - STAIR_HALF_W, x1: sx + STAIR_HALF_W, z0: sz - STAIR_HALF_L, z1: sz + STAIR_HALF_L };
@@ -454,11 +466,18 @@ function buildFloor() {
   const floorTex = themeTexture('floor', () => { const t = TEX_GENERATORS.floor[theme.tex.floor](theme.pal.floor); t.repeat.set(1 / TILE, 1 / TILE); return t; });
   const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), themeTexture('floormat', () => new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 })));
   fl.rotation.x = -Math.PI / 2;
-  const ceilTex = themeTexture('ceil', () => TEX_GENERATORS.ceil[theme.tex.ceil](theme.pal.ceil));   // one repeat per tile: the plane's UVs below carry the size, so the texture is shared by every floor
-  { const uv = planeGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w, uv.getY(i) * h); }
-  const ce = new THREE.Mesh(planeGeo, themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: ceilTex, shininess: 2, specular: 0x050505 })));
-  ce.rotation.x = Math.PI / 2; ce.position.set(w * TILE / 2, WALL_H, h * TILE / 2);
-  group.add(fl, ce);
+  const ceilMat = () => themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: themeTexture('ceil', () => TEX_GENERATORS.ceil[theme.tex.ceil](theme.pal.ceil)), shininess: 2, specular: 0x050505 }));
+  group.add(fl);
+  if (theme.sky) {   // open air: no ceiling plane, one unlit sky dome that follows the camera (frame loop; shared geometry, material and texture, never disposed per floor)
+    const sky = new THREE.Mesh(themeTexture('skygeo', () => new THREE.SphereGeometry(60, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)),
+      themeTexture('skymat', () => new THREE.MeshBasicMaterial({ map: themeTexture('sky', () => skyTexture(theme.pal.ceil, theme.sky)), side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false })));
+    sky.renderOrder = -10; sky.frustumCulled = false; sky.userData.sky = true; group.userData.sky = sky; group.add(sky);
+  } else {
+    const planeGeo = new THREE.PlaneGeometry(w * TILE, h * TILE), uv = planeGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w, uv.getY(i) * h);   // one repeat per tile: the plane's UVs carry the size, so the texture is shared by every floor
+    const ce = new THREE.Mesh(planeGeo, ceilMat());
+    ce.rotation.x = Math.PI / 2; ce.position.set(w * TILE / 2, WALL_H, h * TILE / 2);
+    group.add(ce);
+  }
 
   // stairwell: steps descending along +z into the hole, with side and end walls
   const stairMat = sharedLam(0x9a9284);
@@ -515,7 +534,7 @@ function buildFloor() {
   }
   for (const dr of floor.doors) { const o = makeDoor(dr); group.add(o.mesh); propObjs.push(o); }
   if (floor.shop) buildShop();
-  if (floor.safe) buildSafeRoom(walls.material, ce.material);
+  if (floor.safe) buildSafeRoom(walls.material, ceilMat());
   // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
   cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell' && o.kind !== 'runes').map(o => o.mesh), group);   // (the rune circle and its mist stay separate: their shared materials pulse)
   const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null;   // the Final Chamber's rune circle (centre in metres)
@@ -798,7 +817,7 @@ function startAttack() {
 function playerHit() {
   const w = wstats();
   const t = findMeleeTarget(player, eyeY(), enemies, floor, w.reach);
-  if (!t) { if (!smashChest(w)) loud(2); return; }   // swung at nothing (or at a locked chest)
+  if (!t) { if (!smashChest(w) && !cutBell(w)) loud(2); return; }   // swung at nothing (or at a locked chest)
   if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
   dealHit(t.e, t.zone, w.dmg, w, w.noise);
 }
@@ -1189,6 +1208,19 @@ function updateGas(dt) {
   gasFx.m.scale.setScalar(TRAP.gasRadius * (1 - (1 - k) * (1 - k)) + 0.05); gasFx.m.material.opacity = 0.5 * (1 - k);
 }
 // Smashing a locked chest: each melee swing that hits no enemy but lands on its chest counts (a mace needs fewer). Returns whether one did.
+// Swinging at a tripwire bell cuts it: it never rings and the swing makes no noise.
+function cutBell(w) {
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), reach = w.reach + 0.5;
+  for (const o of decorObjs) {
+    if (o.kind !== "bell" || floor.patches.get(o.p.y * floor.w + o.p.x) !== "bell") continue;
+    const bx = (o.p.x + 0.5) * TILE, bz = (o.p.y + 0.5) * TILE, dx = bx - player.x, dz = bz - player.z, d = Math.hypot(dx, dz);
+    if (d > reach || (dx * fx + dz * fz) / (d || 1) < 0.6 || !hasLOS(floor, player.x, player.z, bx, bz)) continue;
+    floor.patches.delete(o.p.y * floor.w + o.p.x); o.mesh.visible = false;
+    discover("item:bell", "Tripwire bells"); flash("You cut the tripwire. No sound.");
+    return true;
+  }
+  return false;
+}
 function smashChest(w) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), reach = w.reach + 0.9;
   for (const o of propObjs) {
@@ -1273,6 +1305,7 @@ function updateCombat(dt) {
     if (r.hp && inv.hp > 1) inv.hp = Math.max(1, inv.hp - r.hp);   // starving hurts but never kills
     if (r.stage) { flash(HUNGER_MSG[r.stage]); if (r.stage !== 'fed') discover('item:hunger', 'Hunger'); }
   }
+  if (!dev.on && !inSafe && bleed <= 0 && inv.hp < inv.maxHp) inv.hp = Math.min(inv.maxHp, inv.hp + hunger.hpRegen() * dt);   // slow passive healing, slower the hungrier you are, none while bleeding
   if (inv.eatReq) { startEat(inv.eatReq); inv.eatReq = null; }
   if (cb.eat) {
     const ea = cb.eat; ea.t += dt; cb.atk = null; cb.block = false;
@@ -1558,7 +1591,7 @@ function updateDoors(dt) {
     if (o.p.kind !== 'door' || o.anim === undefined || o.anim >= 1) continue;
     o.anim = Math.min(1, o.anim + dt);
     anim(o, o.anim);
-    if (o.anim >= 1) o.mesh.visible = false;
+    if (o.anim >= 1) { o.mesh.visible = false; if (theme.sky && theme.doors.openAnim !== 'fold') o.gone = true; }   // (an open-sky theme has no ceiling plane to hide a lifted door: the culling pass must not show it again)
   }
 }
 
@@ -1663,7 +1696,7 @@ function generateAndEnter(n, arrive) {
   buildFloor();
   if (floor.boss && !final && bossDead[stage]) {            // a stage arena rebuilt after its boss fell (the cache was trimmed): no boss, the safe room door already open
     const bi = enemies.findIndex(e => e.boss); if (bi >= 0) { group.remove(enemies[bi].mesh); enemies.splice(bi, 1); }
-    const s = floor.safe; s.open = true; floor.tiles[s.door.y * floor.w + s.door.x] = T_SAFEDOOR; s.o.anim = 1; s.o.mesh.position.y = WALL_H; s.o.mesh.visible = false;
+    const s = floor.safe; s.open = true; floor.tiles[s.door.y * floor.w + s.door.x] = T_SAFEDOOR; s.o.anim = 1; s.o.mesh.position.y = WALL_H; s.o.mesh.visible = false; s.o.gone = true;
   }
   player.props = propObjs;
   player.mobs = enemies;
@@ -1961,6 +1994,7 @@ function frame(now) {
   }
   camera.position.set(player.x, eyeY(), player.z);
   camera.rotation.set(player.pitch, player.yaw, 0);
+  if (group && group.userData.sky) group.userData.sky.position.copy(camera.position);   // the sky dome rides along with the camera
   if (shake.t > 0) {                               // decaying jolt: a sharp kick that settles over 0.3 s
     shake.t = Math.max(0, shake.t - dt);
     const s = shake.mag * (shake.t / shake.dur) ** 1.5;
@@ -1985,7 +2019,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  get group() { return group; }, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

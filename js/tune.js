@@ -1,10 +1,10 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-25';   // bumped so old saved values don't override the new defaults (last: parry/block stamina restore)
+  const KEY = 'prototype-test-tune-26';   // bumped so old saved values don't override the new defaults (last: patrol pace and waits)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
-    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2]]],
+    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
     ['Stages', TUNE, [['stageHpScale', 0.05], ['stageDmgScale', 0.05], ['stageBossHp', 0.05], ['stageBossDmg', 0.05], ['finalBossHp', 0.1], ['finalBossDmg', 0.1], ['finalBossScale', 0.05], ['stageLootDepth', 0.5]]],
     ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossWindMul', 0.05], ['bossReachMul', 0.05], ['bossAtkSpd', 0.05], ['bossWeaponTier', 1], ['bossLegendary', 0.01]]],
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
@@ -19,7 +19,7 @@ const tunePanel = (() => {
     ['frozen ice and prints', THEME_BY_NAME['The Frozen Chapel'].mechanic.TUNE, [['slip', 0.1], ['carry', 0.1], ['printAge', 1], ['printSusp', 0.05], ['printGap', 0.1], ['printSight', 0.5], ['wind', 0.05]]],
     ['cellar spores and dark', THEME_BY_NAME['The Mushroom Cellar'].mechanic.TUNE, [['glow', 0.05], ['dark', 0.05], ['darkFoot', 0.05], ['cloudDur', 0.5], ['cloudR', 0.5], ['cloudDaze', 0.5], ['puffDur', 0.5], ['puffR', 0.5], ['puffDaze', 0.5]]],
     ['library moving shelves', THEME_BY_NAME['The Clockwork Library'].mechanic.TUNE, [['shelfMin', 1], ['shelfMax', 1], ['shelfEvery', 0.5], ['shelfSlide', 0.1], ['shelfRing', 0.5], ['shelfPush', 0.1]]],
-    ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
+    ['hunger', HUNGER, [['drainPerSec', 0.005], ['sprintMul', 0.1], ['fightMul', 0.1], ['idleMul', 0.1], ['hungryAt', 1], ['weakAt', 1], ['regenHungry', 0.05], ['regenWeak', 0.05], ['regenHp', 0.01], ['hpHungry', 0.05], ['hpWeak', 0.05], ['maxStamWeak', 0.05], ['growlHungry', 0.5], ['growlWeak', 0.5], ['growlEvery', 1], ['starveEvery', 0.5]]],
     ['bomb', BOMB, [['fuse', 0.1], ['warn', 0.1], ['trigger', 0.1], ['radius', 0.1], ['dmg', 1], ['falloff', 0.05], ['noise', 1], ['dropDelay', 0.1], ['chain', 0.1], ['fx', 0.05]]],
     ['lockpick', LOCKPICK, [['time', 0.5], ['noise', 1], ['breakChance', 0.05], ['drop', 0.01], ['corpseDrop', 0.05]]],
     ['locked chest', LOCKED, [['hits', 1], ['maceHits', 1], ['noise', 1], ['potionBreak', 0.05], ['gradeUp', 1]]],

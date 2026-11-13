@@ -277,11 +277,11 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
     const b = new Enemy({ x: q.route[0].x, y: q.route[0].y, route: q.route, seed: q.seed, type: 'wanted', mini: { name: q.name } }, floor);
     const noise = { events: [], emit() {}, shoot() {}, steal() {} }, dt = 1 / 60;
     let turns = 0, last = b.ri, alerted = false;
-    for (let i = 0; i < 60 * 40; i++) { b.update(dt, P, noise); if (b.ri !== last) { turns++; last = b.ri; } if (b.state === 'alerted') alerted = true; }
+    for (let i = 0; i < 60 * 100; i++) { b.update(dt, P, noise); if (b.ri !== last) { turns++; last = b.ri; } if (b.state === 'alerted') alerted = true; }
     out.turns = turns; out.alerted = alerted;
     return out;
   });
-  check('the target patrols: it reaches both route points within 40 s and does not notice a player out of sight', wp.turns >= 2 && !wp.alerted, JSON.stringify(wp));
+  check('the target patrols: it reaches both route points within 100 s and does not notice a player out of sight', wp.turns >= 2 && !wp.alerted, JSON.stringify(wp));
 
   // The defector cannot be hurt: a swing at it does nothing, and an arrow flying into it stops at the body without a hit.
   const wd = await WG.evaluate(() => {

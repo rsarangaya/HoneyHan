@@ -109,7 +109,7 @@ function bakeMeshes(root, skip, ctx) {
 function updateCulling(player, chunks, props, enemies) {
   const px = player.x, pz = player.z, R = PERF.cull, R2 = R * R, RC = (R + PERF.chunk * 0.71) ** 2;
   for (const c of chunks) { const dx = c.x - px, dz = c.z - pz; c.group.visible = dx * dx + dz * dz < RC; }
-  for (const o of props) { if (o.mesh) { const dx = o.x - px, dz = o.z - pz; o.mesh.visible = dx * dx + dz * dz < R2; } }
+  for (const o of props) { if (o.mesh && !o.gone) { const dx = o.x - px, dz = o.z - pz; o.mesh.visible = dx * dx + dz * dz < R2; } }
   for (const e of enemies) { const dx = e.x - px, dz = e.z - pz; e.mesh.visible = dx * dx + dz * dz < R2; }
 }
 

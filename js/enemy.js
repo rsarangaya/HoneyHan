@@ -882,12 +882,12 @@ class Enemy {
         if (this.aware >= 0.35 && this.last) { this.set('suspicious'); break; }
         if (hd) {                                   // a wolf trots after its handler, and just waits if the handler is gone
           if (hd.dead) { this.lookAround(dt * 0.4); break; }
-          if (Math.hypot(hd.x - this.x, hd.z - this.z) > 2.6) this.goTo(hd.x + 1.1, hd.z + 0.8, SPEED.patrol * 1.6, dt); else this.lookAround(dt * 0.4);
+          if (Math.hypot(hd.x - this.x, hd.z - this.z) > 2.6) this.goTo(hd.x + 1.1, hd.z + 0.8, TUNE.patrolSpeed * 1.6, dt); else this.lookAround(dt * 0.4);
           break;
         }
-        if (this.wait > 0) { this.wait -= dt; this.lookAround(dt * 0.4); break; }
+        if (this.wait > 0) { this.wait -= dt; this.lookAround(dt * 0.25); break; }
         const p = this.route[this.ri];
-        if (this.goTo(p.x, p.z, SPEED.patrol, dt) < 0.7) { this.ri = (this.ri + 1) % this.route.length; this.wait = 2; }
+        if (this.goTo(p.x, p.z, TUNE.patrolSpeed, dt) < 0.7) { this.ri = (this.ri + 1) % this.route.length; this.wait = gameRng() < TUNE.patrolRestChance ? TUNE.patrolRestMin + gameRng() * (TUNE.patrolRestMax - TUNE.patrolRestMin) : TUNE.patrolWaitMin + gameRng() * (TUNE.patrolWaitMax - TUNE.patrolWaitMin); }   // a guard stops at each waypoint (seeded random wait, sometimes a long rest)
         break;
       }
       case 'suspicious': {

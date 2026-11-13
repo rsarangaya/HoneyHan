@@ -110,5 +110,23 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
     return { error, dead: b.dead, msg: document.getElementById('msg').textContent, items: body ? body.p.left.length : 0, gold };
   });
   check('the floor-5 boss falls without an error and its body holds gear and gold', fall.error === null && fall.dead && /boss falls/.test(fall.msg) && fall.items >= 3 && fall.gold >= 120, JSON.stringify(fall));
+  // 7. Patrol pace: a guard on patrol walks slower than a crouching player and stands still at each waypoint for at least patrolWaitMin seconds.
+  const pat = await page.evaluate(async () => {
+    game.startFloor(1); await T.sleep(100);
+    const P = game.player, f = game.floor, room = [...f.rooms].filter(r => !r.locked).sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    const route = [{ x: room.x + 1, y: room.y + 1 }, { x: room.x + room.w - 2, y: room.y + room.h - 2 }];
+    const g = new Enemy({ x: route[0].x, y: route[0].y, route, seed: 5, type: 'goblin' }, f);
+    P.x = 1e4; P.z = 1e4;
+    const noise = { events: [], emit() {}, shoot() {}, steal() {} }, dt = 1 / 60;
+    let maxSpeed = 0, still = 0, minStill = Infinity, turns = 0, last = g.ri, px = g.x, pz = g.z, waiting = false;
+    for (let k = 0; k < 60 * 150; k++) {
+      g.update(dt, P, noise);
+      const v = Math.hypot(g.x - px, g.z - pz) / dt; px = g.x; pz = g.z;
+      if (g.ri !== last) { last = g.ri; turns++; waiting = true; still = 0; continue; }
+      if (v > 0.01) { maxSpeed = Math.max(maxSpeed, v); if (waiting) { waiting = false; if (turns > 1) minStill = Math.min(minStill, still * dt); } } else if (waiting) still++;
+    }
+    return { maxSpeed, minStill, turns, alerted: g.state === 'alerted', crouch: TUNE.crouchSpeed, pmin: TUNE.patrolWaitMin };
+  });
+  check('a patrolling guard walks slower than a crouching player and stands still at each waypoint for at least the minimum wait', pat.turns >= 3 && !pat.alerted && pat.maxSpeed < pat.crouch && pat.minStill >= pat.pmin - 0.1, JSON.stringify(pat));
   await page.close();
 });

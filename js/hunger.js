@@ -9,6 +9,8 @@ const HUNGER = {
   growlHungry: 2, growlWeak: 4,           // stomach growl noise radius in metres
   growlEvery: 20,                         // average seconds between growls
   starveEvery: 4,                         // Starving: lose 1 HP this often, never below 1
+  regenHp: 0.08,                          // passive healing: HP per second while fed (about 5 HP a minute, a potion is 40)
+  hpHungry: 0.5, hpWeak: 0.25,            // the hungrier you are, the slower it is (Starving: none)
 };
 
 class Hunger {
@@ -16,6 +18,7 @@ class Hunger {
   get stage() { return this.v <= 0 ? 'starving' : this.v < HUNGER.weakAt ? 'weak' : this.v < HUNGER.hungryAt ? 'hungry' : 'fed'; }
   feed(n) { this.v = Math.min(100, this.v + n); }
   regenMul() { return { fed: 1, hungry: HUNGER.regenHungry, weak: HUNGER.regenWeak, starving: HUNGER.regenWeak }[this.stage]; }
+  hpRegen() { return HUNGER.regenHp * { fed: 1, hungry: HUNGER.hpHungry, weak: HUNGER.hpWeak, starving: 0 }[this.stage]; }   // passive HP per second
   maxStaminaMul() { return this.stage === 'weak' || this.stage === 'starving' ? HUNGER.maxStamWeak : 1; }
   canSprint() { return this.stage !== 'starving'; }
   // act: { sprinting, still, crouching }. rnd: random source for the growl timing.
