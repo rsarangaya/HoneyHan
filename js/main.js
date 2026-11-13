@@ -121,13 +121,36 @@ function ceilingTexture(base) {
 }
 const PLANK_THEMES = new Set(['The Sunken Tavern', 'The Clockwork Library', 'The Goblin Market', 'The Moonlit Orchard']);
 
+// Free one object's GPU memory. Anything flagged userData.shared (the per-theme textures, creature part geometries, shared merged
+// materials, icons) outlives the floor and is never disposed here.
+function freeObject(o) {
+  if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+  const ms = o.material; if (!ms) return;
+  if (Array.isArray(ms)) { for (const m of ms) freeMaterial(m); } else freeMaterial(ms);
+}
+function freeMaterial(m) { if (m.userData.shared) return; if (m.map && !(m.map.userData && m.map.userData.shared)) m.map.dispose(); m.dispose(); }
+// Floor, wall and ceiling textures are painted once per theme and shared by every floor of it. A theme's are freed when no cached
+// floor of it is left (pruneThemeTextures, after a stage change).
+// The wall, floor and ceiling materials are shared the same way (a floor that is rebuilt would otherwise free the shader programs
+// and compile them again on its first frame).
+const themeTex = new Map();
+function themeTexture(kind, make) {
+  const key = theme.name + '|' + kind;
+  let t = themeTex.get(key); if (!t) { t = make(); t.userData = { shared: true }; themeTex.set(key, t); }
+  return t;
+}
+const sharedLams = new Map();   // plain lit materials of the stairs, shared by every floor
+function sharedLam(c) { let m = sharedLams.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); m.userData.shared = true; sharedLams.set(c, m); } return m; }
+function pruneThemeTextures() {
+  const live = new Set([theme.name]);
+  for (const k of Object.keys(stageCaches)) if (Object.keys(stageCaches[k]).length) live.add((+k === FINAL_STAGE ? FINAL_THEME : stageThemes[k - 1]).name);
+  for (const [key, t] of themeTex) if (!live.has(key.split('|')[0])) { t.dispose(); themeTex.delete(key); }   // (a material's map is its own entry, so disposing both is fine)
+}
+
 function buildFloor() {
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
-    group.traverse(o => {
-      if (o.geometry) o.geometry.dispose();
-      for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
-    });
+    group.traverse(freeObject);
   }
   group = new THREE.Group();
   const { w, h, tiles } = floor;
@@ -141,9 +164,9 @@ function buildFloor() {
     for (let dy = -1; dy <= 1 && !touches; dy++) for (let dx = -1; dx <= 1; dx++) if (!solid(x + dx, y + dy)) { touches = true; break; }
     if (touches) wallPos.push([x, y]);
   }
-  const wallTex = wallTexture(theme.wall);
+  const wallTex = themeTexture('wall', () => wallTexture(theme.wall));
   const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(TILE, WALL_H, TILE),
-    new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 }), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
+    themeTexture('wallmat', () => new THREE.MeshPhongMaterial({ map: wallTex, shininess: 5, specular: 0x151515 })), wallPos.length);   // per-pixel lighting: torch light pools smoothly across big faces
   const m = new THREE.Matrix4();
   wallPos.forEach(([x, y], i) => { m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE); walls.setMatrixAt(i, m); });
   walls.frustumCulled = false;                    // an instanced mesh is culled by its first box only, so never cull it
@@ -159,17 +182,18 @@ function buildFloor() {
   hole.moveTo(stairBox.x0, -stairBox.z0); hole.lineTo(stairBox.x0, -stairBox.z1);
   hole.lineTo(stairBox.x1, -stairBox.z1); hole.lineTo(stairBox.x1, -stairBox.z0);
   floorShape.holes.push(hole);
-  const floorTex = floorTexture(theme.floor, PLANK_THEMES.has(theme.name)); floorTex.repeat.set(1 / TILE, 1 / TILE);
-  const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 }));
+  const floorTex = themeTexture('floor', () => { const t = floorTexture(theme.floor, PLANK_THEMES.has(theme.name)); t.repeat.set(1 / TILE, 1 / TILE); return t; });
+  const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), themeTexture('floormat', () => new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 })));
   fl.rotation.x = -Math.PI / 2;
-  const ceilTex = ceilingTexture(theme.ceil); ceilTex.repeat.set(w, h);
-  const ce = new THREE.Mesh(planeGeo, new THREE.MeshPhongMaterial({ map: ceilTex, shininess: 2, specular: 0x050505 }));
+  const ceilTex = themeTexture('ceil', () => ceilingTexture(theme.ceil));   // one repeat per tile: the plane's UVs below carry the size, so the texture is shared by every floor
+  { const uv = planeGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w, uv.getY(i) * h); }
+  const ce = new THREE.Mesh(planeGeo, themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: ceilTex, shininess: 2, specular: 0x050505 })));
   ce.rotation.x = Math.PI / 2; ce.position.set(w * TILE / 2, WALL_H, h * TILE / 2);
   group.add(fl, ce);
 
   // stairwell: steps descending along +z into the hole, with side and end walls
-  const stairMat = new THREE.MeshLambertMaterial({ color: 0x9a9284 });
-  const pitMat = new THREE.MeshLambertMaterial({ color: 0x1a1612 });
+  const stairMat = sharedLam(0x9a9284);
+  const pitMat = sharedLam(0x1a1612);
   const len = STAIR_HALF_L * 2, wid = STAIR_HALF_W * 2, N = 7, rise = STAIR_DEPTH / N;
   for (let i = 0; i < N; i++) {
     const top = -(i + 1) * rise;
@@ -198,7 +222,7 @@ function buildFloor() {
     upBox = { x0: ux - STAIR_HALF_W, x1: ux + STAIR_HALF_W, z0: uz - STAIR_HALF_L, z1: uz + STAIR_HALF_L, dir };
     floor.up = { x: st.x, y: st.y, dir };
     const base = dir > 0 ? upBox.z1 : upBox.z0, steps = 6, ulen = STAIR_HALF_L * 2, uw = STAIR_HALF_W * 2;
-    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x8a8478 }), edgeMat = new THREE.MeshLambertMaterial({ color: 0xa8a294 });
+    const stoneMat = sharedLam(0x8a8478), edgeMat = sharedLam(0xa8a294);
     for (let i = 0; i < steps; i++) {
       const hgt = (i + 1) * UP_RISE / steps, zc = base - dir * ((i + 0.5) * ulen / steps);
       const s = new THREE.Mesh(new THREE.BoxGeometry(uw, hgt, ulen / steps), stoneMat); s.position.set(ux, hgt / 2, zc); group.add(s);
@@ -207,9 +231,9 @@ function buildFloor() {
     for (const side of [-1, 1]) {                                                           // low stone cheeks on both sides
       const ch = new THREE.Mesh(new THREE.BoxGeometry(0.16, UP_RISE + 0.5, ulen), stoneMat); ch.position.set(ux + side * (STAIR_HALF_W + 0.08), (UP_RISE + 0.5) / 2, uz); group.add(ch);
     }
-    const top = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.3, 0.3, 0.3), new THREE.MeshLambertMaterial({ color: 0x15120e })); top.position.set(ux, UP_RISE + 0.6, base - dir * ulen); group.add(top);   // a dark opening at the top
+    const top = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.3, 0.3, 0.3), sharedLam(0x15120e)); top.position.set(ux, UP_RISE + 0.6, base - dir * ulen); group.add(top);   // a dark opening at the top
     upLight = new THREE.PointLight(0xa8c8ff, 0.3, 9); upLight.position.set(ux, 1.8, uz); group.add(upLight);                // a cool light from above
-  }
+  } else group.add(new THREE.PointLight(0xa8c8ff, 0, 9));  // an unlit stand-in: the lit materials' shader depends on the light count, so every floor keeps the same count (no recompile hitch on the first floor with stairs up)
 
   propObjs = floor.props.map(p => { const o = makeProp(p); if (p.mimic) { o.mats.forEach(m => m.dispose()); o.mats = []; o.mesh = new THREE.Group(); } return o; });   // a mimic's chest is drawn by its enemy (below), so its prop is only the thing you search
   propObjs.forEach(o => group.add(o.mesh));
@@ -256,7 +280,7 @@ function buildSafeRoom(wallMat, ceilMat) {
   propObjs.push(s.o);
   const ceil = (tx, ty, tw, th) => {
     const g = new THREE.PlaneGeometry(tw * TILE, th * TILE), uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * tw / floor.w, uv.getY(i) * th / floor.h);   // one texture repeat per tile, like the big ceiling
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * tw, uv.getY(i) * th);   // one texture repeat per tile, like the big ceiling
     const m = new THREE.Mesh(g, ceilMat); m.rotation.x = Math.PI / 2; m.position.set((tx + tw / 2) * TILE, SAFE_CEIL, (ty + th / 2) * TILE); group.add(m);
   };
   s.inside = new Uint8Array(floor.w * floor.h);                                          // the room and its passage (not the door tile, not the arena): the tiles where you are safe
@@ -316,15 +340,23 @@ function buildTorches() {
     if (l) torchPts.push({ lx: o.x + Math.sin(o.yaw) * 0.6, lz: o.z + Math.cos(o.yaw) * 0.6, y: o.ly ?? l.y, color: l.color, str: l.str * (o.ls || 1) });
   }
 }
+const nearT = new Array(4).fill(null), nearD = new Float64Array(4);   // the nearest lights, nearest first (reused: no per-call arrays or sort)
 function updateTorches(now) {
-  const near = torchPts.map(t => ({ t, d: (t.lx - player.x) ** 2 + (t.lz - player.z) ** 2 })).sort((a, b) => a.d - b.d);
-  torchLights.forEach((l, i) => {
-    const n = near[i];
-    if (!n) { l.intensity = 0; return; }
-    l.position.set(n.t.lx, n.t.y, n.t.lz);
-    l.color.setHex(n.t.color);
-    l.intensity = n.t.str * (0.95 + Math.sin(now / 110 + i * 2 + n.t.lx) * 0.12 + Math.sin(now / 37 + n.t.lz) * 0.06);
-  });
+  let cnt = 0;
+  for (let i = 0; i < torchPts.length; i++) {
+    const t = torchPts[i], d = (t.lx - player.x) ** 2 + (t.lz - player.z) ** 2;
+    if (cnt === 4 && d >= nearD[3]) continue;
+    let j = cnt < 4 ? cnt++ : 3;                       // insertion into the sorted top 4
+    while (j > 0 && nearD[j - 1] > d) { nearD[j] = nearD[j - 1]; nearT[j] = nearT[j - 1]; j--; }
+    nearD[j] = d; nearT[j] = t;
+  }
+  for (let i = 0; i < 4; i++) {
+    const l = torchLights[i], t = i < cnt ? nearT[i] : null;
+    if (!t) { l.intensity = 0; continue; }
+    l.position.set(t.lx, t.y, t.lz);
+    l.color.setHex(t.color);
+    l.intensity = t.str * (0.95 + Math.sin(now / 110 + i * 2 + t.lx) * 0.12 + Math.sin(now / 37 + t.lz) * 0.06);
+  }
 }
 
 const dropTell = o => { if (o.tell && o.tell.parent) o.tell.parent.remove(o.tell); };   // a padlock or tripwire goes when its job is done (they are not part of any merged chunk)
@@ -1109,16 +1141,20 @@ function updateDoors(dt) {
 }
 
 let hudKey = '';
+const HUNGER_COLOR = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' };
+const styleSeen = new Map();   // 'id.prop' -> the last value written, so an unchanged value costs no DOM write
+function setStyle(id, prop, v) { const k = id + '.' + prop; if (styleSeen.get(k) === v) return; styleSeen.set(k, v); el(id).style[prop] = v; }
 function updateHud() {
-  const boss = enemies.find(e => e.boss);
+  let boss = null; for (let i = 0; i < enemies.length; i++) if (enemies[i].boss) { boss = enemies[i]; break; }
   if (boss && boss.justWoke) { boss.justWoke = false; flash('The boss wakes!'); }
-  el('boss').style.display = boss && !boss.dormant && !boss.dead ? 'block' : 'none';
-  if (boss) el('bossFill').style.width = Math.max(0, boss.hp / boss.maxHp * 100) + '%';
-  el('hpFill').style.width = (inv.hp / inv.maxHp * 100) + '%';
-  el('stamFill').style.width = (cb.stamina / STAMINA_MAX * 100) + '%';
-  el('stamFill').style.background = cb.canSprint ? '#4cc36a' : '#c9a23a';
-  el('hungerFill').style.width = hunger.v + '%';
-  el('hungerFill').style.background = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' }[hunger.stage];
+  setStyle('boss', 'display', boss && !boss.dormant && !boss.dead ? 'block' : 'none');
+  if (boss) setStyle('bossFill', 'width', Math.max(0, boss.hp / boss.maxHp * 100) + '%');
+  setStyle('hpFill', 'width', (inv.hp / inv.maxHp * 100) + '%');
+  setStyle('stamFill', 'width', (cb.stamina / STAMINA_MAX * 100) + '%');
+  setStyle('stamFill', 'background', cb.canSprint ? '#4cc36a' : '#c9a23a');
+  setStyle('hungerFill', 'width', hunger.v + '%');
+  setStyle('hungerFill', 'background', HUNGER_COLOR[hunger.stage]);
+  if (frameCount % 3 !== 0) return;                    // the text part builds strings: 20 times a second is plenty
   const slots = inv.quick.map((_, i) => {
     const it = inv.quickItem(i);
     const name = !it ? '' : it.type === 'potion' || it.type === 'food' ? `${itemName(it)} x${it.n}` : it.type === 'wand' || it.type === 'rage' ? `${itemName(it)} (${it.charges})` : it.base === 'spear' ? `${itemName(it)} (${isLimp(it) ? 'LIMP' : it.charges})` : itemName(it);
@@ -1145,12 +1181,7 @@ camera.add(torch);
 // The armory (a locked room) is on one floor of each stage, picked from the seed (planStage).
 let respawnT = Infinity, baseGuards = 0;
 
-function disposeGroup(g) {   // free a floor's GPU memory: geometry, materials and their textures
-  g.traverse(o => {
-    if (o.geometry) o.geometry.dispose();
-    for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
-  });
-}
+function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU memory: geometry, materials and their textures
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
@@ -1387,6 +1418,7 @@ function changeStage(s, dir) {
   flash(s === FINAL_STAGE ? 'The final stage. Whatever waits here has no name yet.' : dir === 'up' ? `You climb back up to stage ${s}: ${theme.name}, the safe room.` : `Stage ${s} of ${STAGES}: ${theme.name}. ${floor.boss ? '' : 'Find the stairs.'}`);
   allyArrive();
   hunger.fight = 0;
+  pruneThemeTextures();                                // free the textures of themes with no floor left
 }
 // The stairs in the safe room lead to the next stage; after the last stage (the final boss) the run is over.
 function enterNextStage() { if (stage < FINAL_STAGE) changeStage(stage + 1, 'down'); else finishRun(); }
@@ -1396,7 +1428,7 @@ function startStage(s) {
   s = Math.max(1, Math.min(FINAL_STAGE, s | 0));
   for (const k of Object.keys(stageCaches)) { disposeCache(stageCaches[k]); delete stageCaches[k]; }
   allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
-  useStage(s); startFloor(1);
+  useStage(s); startFloor(1); pruneThemeTextures();
 }
 function finishRun() {
   state = 'won';

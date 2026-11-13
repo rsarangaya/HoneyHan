@@ -57,28 +57,30 @@ class Player {
   blocked(floor, x, z) {
     const r = this.radius;
     if (Player.wallHit(floor, x, z, r, this.mob)) return true;
-    for (const p of this.props) if (p.r > 0 && (x - p.x) ** 2 + (z - p.z) ** 2 < (r + p.r) ** 2) return true;
+    const props = this.props;
+    for (let i = 0; i < props.length; i++) { const p = props[i]; if (p.r > 0 && (x - p.x) ** 2 + (z - p.z) ** 2 < (r + p.r) ** 2) return true; }
     return false;
-  }
-
-  * solidsAround() {
-    yield* this.props;
-    for (const e of this.mobs) if (!e.dead) yield e;
   }
 
   // Props are circles. Walking into one pushes you out along its surface instead of stopping you dead,
   // so you slide round barrels, urns and statues rather than catching on them. Tiny clutter (candles) is ignored.
+  // Runs 120 times a second: plain loops over props then living mobs, no generator or array allocations.
   slideOffProps(floor) {
-    for (let pass = 0; pass < 2; pass++) for (const p of this.solidsAround()) {
-      if (p.r <= SMALL_PROP) continue;
-      const dx = this.x - p.x, dz = this.z - p.z, min = this.radius + p.r, d2 = dx * dx + dz * dz;
-      if (d2 >= min * min || d2 < 1e-8) continue;
-      const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
-      const px = p.x + nx * min, pz = p.z + nz * min;
-      if (!Player.wallHit(floor, px, pz, this.radius)) { this.x = px; this.z = pz; }
-      const into = this.vx * nx + this.vz * nz;                 // drop the part of the velocity that pushes into it
-      if (into < 0) { this.vx -= into * nx; this.vz -= into * nz; }
+    const props = this.props, mobs = this.mobs;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < props.length; i++) this.slideOff(floor, props[i]);
+      for (let i = 0; i < mobs.length; i++) if (!mobs[i].dead) this.slideOff(floor, mobs[i]);
     }
+  }
+  slideOff(floor, p) {
+    if (p.r <= SMALL_PROP) return;
+    const dx = this.x - p.x, dz = this.z - p.z, min = this.radius + p.r, d2 = dx * dx + dz * dz;
+    if (d2 >= min * min || d2 < 1e-8) return;
+    const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
+    const px = p.x + nx * min, pz = p.z + nz * min;
+    if (!Player.wallHit(floor, px, pz, this.radius)) { this.x = px; this.z = pz; }
+    const into = this.vx * nx + this.vz * nz;                 // drop the part of the velocity that pushes into it
+    if (into < 0) { this.vx -= into * nx; this.vz -= into * nz; }
   }
 
   // Advance by real elapsed seconds, in fixed steps so movement is frame-rate independent.

@@ -15,8 +15,8 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     for (let a = 0; a < 8; a++) { P.yaw = a * Math.PI / 4; worst = Math.max(worst, game.renderInfo().calls); }
     return { out, worst };
   });
-  check('draw calls stay under 400 at the start of every floor', calls.out.every(r => r.calls < 400), calls.out.map(r => `f${r.n}: ${r.calls}`).join(', '));
-  check('and under 500 in the middle of the busiest room, looking every way', calls.worst < 500, 'worst ' + calls.worst);
+  check('draw calls stay under 220 at the start of every floor', calls.out.every(r => r.calls < 220), calls.out.map(r => `f${r.n}: ${r.calls}`).join(', '));
+  check('and under 260 in the middle of the busiest room, looking every way', calls.worst < 260, 'worst ' + calls.worst);
   check('triangle counts stay modest (under 150k)', calls.out.every(r => r.tris < 150000), calls.out.map(r => r.tris).join(', '));
 
   // 2. Furniture is merged: far fewer meshes than decor pieces, and the merged geometry is not lost.
@@ -42,7 +42,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     return out;
   });
   const biggest = Math.max(...Object.entries(bake).filter(([k]) => typeof bake[k] === 'number').map(([, v]) => v));
-  check('a creature is a few dozen meshes, not sixty or more', biggest < 42, JSON.stringify(bake));
+  check('a creature is about ten meshes (one per animated group and surface kind), not sixty', biggest < 16, JSON.stringify(bake));
   check('baked creatures still animate and flash when hit', bake.armMoves && bake.flashed);
 
   // 4. Culling: things past the fog are not drawn, and come back when you walk up.
@@ -75,7 +75,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     }
     return out;
   });
-  check('game logic stays under 8 ms a frame with every enemy alerted', logic.every(r => r.ms < 8), logic.map(r => `floor ${r.floor}: ${r.enemies} enemies, ${r.ms.toFixed(2)} ms`).join('; '));
+  check('game logic stays under 3 ms a frame with every enemy alerted', logic.every(r => r.ms < 3), logic.map(r => `floor ${r.floor}: ${r.enemies} enemies, ${r.ms.toFixed(2)} ms`).join('; '));
 
   // 6. Props are round: barrels are lathes with hoops, chests have domed lids, and the five chest grades look different.
   const props = await page.evaluate(() => {

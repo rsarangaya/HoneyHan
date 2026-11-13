@@ -18,6 +18,8 @@ const ATTACK_POSES = {
   legs: [[-0.5, 0, -0.7, 0, 0.2],  [-0.85, 0, 1.4, 0, 0.3]],
   shoot: [[0, 0, 1.5, 1.5, 0],     [0, 0, 1.5, 1.5, 0]],       // archers and shamans: both arms out in front
 };
+const TARGET_POSE = [0, 0, 0, 0, 0];
+const setPose = (t, a, b, c, d, e) => { t[0] = a; t[1] = b; t[2] = c; t[3] = d; t[4] = e; };
 const ATTACK_RANGE = 1.4;            // hp, damage, windup and cooldown live in TUNE (combat.js)
 let gameRng = makeRng(1);   // gameplay RNG, re-seeded per floor in main.js (separate from the generator's, so floors are unchanged)
 const pickZone = w => { const r = gameRng() * (w[0] + w[1] + w[2]); return r < w[0] ? 'head' : r < w[0] + w[1] ? 'body' : 'legs'; };
@@ -38,23 +40,30 @@ function hasLOS(floor, x0, z0, x1, z1) {
 }
 
 // 4-way BFS over open tiles (the stairwell tile is off limits). Returns tiles after the start tile.
+const DIR_X = [1, -1, 0, 0], DIR_Y = [0, 0, 1, -1];
+let PATH_PREV = null, PATH_Q = null;   // BFS scratch, reused between calls (re-made only when the floor size changes)
+const pathBlocked = (floor, x, y) => {   // the stairwell and the stairs up are off limits
+  const st = floor.stairs, up = floor.up;
+  return wallAt(floor, x, y) || (x === st.x && y === st.y) || (up && x === up.x && y === up.y) || floor.blocked[y * floor.w + x] === 1;
+};
 function findPath(floor, sx, sy, tx, ty) {
-  const { w, h } = floor, st = floor.stairs;
-  const up = floor.up, blocked = (x, y) => wallAt(floor, x, y) || (x === st.x && y === st.y) || (up && x === up.x && y === up.y) || floor.blocked[y * w + x] === 1;   // the stairwell and the stairs up are off limits
-  if (blocked(tx, ty)) {   // target is inside furniture or the stairwell: aim for an open tile beside it instead
-    const side = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => !blocked(tx + dx, ty + dy));
-    if (!side) return [];
-    tx += side[0]; ty += side[1];
+  const { w, h } = floor;
+  if (pathBlocked(floor, tx, ty)) {   // target is inside furniture or the stairwell: aim for an open tile beside it instead
+    let k = 0; while (k < 4 && pathBlocked(floor, tx + DIR_X[k], ty + DIR_Y[k])) k++;
+    if (k === 4) return [];
+    tx += DIR_X[k]; ty += DIR_Y[k];
   }
-  const prev = new Int32Array(w * h).fill(-1);
-  const q = [sy * w + sx]; prev[q[0]] = q[0];
-  for (let qi = 0; qi < q.length; qi++) {
-    const i = q[qi], x = i % w, y = (i / w) | 0;
+  if (!PATH_PREV || PATH_PREV.length !== w * h) { PATH_PREV = new Int32Array(w * h); PATH_Q = new Int32Array(w * h); }
+  const prev = PATH_PREV, q = PATH_Q;
+  prev.fill(-1);
+  let qs = 0, qe = 0; q[qe++] = sy * w + sx; prev[q[0]] = q[0];
+  while (qs < qe) {
+    const i = q[qs++], x = i % w, y = (i / w) | 0;
     if (x === tx && y === ty) break;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx, ny = y + dy;
-      if (blocked(nx, ny) || prev[ny * w + nx] >= 0) continue;
-      prev[ny * w + nx] = i; q.push(ny * w + nx);
+    for (let k = 0; k < 4; k++) {
+      const nx = x + DIR_X[k], ny = y + DIR_Y[k];
+      if (pathBlocked(floor, nx, ny) || prev[ny * w + nx] >= 0) continue;
+      prev[ny * w + nx] = i; q[qe++] = ny * w + nx;
     }
   }
   if (prev[ty * w + tx] < 0) return [];
@@ -100,19 +109,29 @@ let ICONS = null;
 // Rounded body parts (the goblin rig used to be all boxes): a tapered cylinder for limbs, an ellipsoid for heads and
 // hands, and an elliptical cylinder for a torso. Armor and clothing stay boxy, like plates and cloth.
 const ROUND_SEGS = 12;
-function cylPart(rTop, rBot, h, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, ROUND_SEGS), mat); p.position.set(x, y, z); parent.add(p); return p; }
-function ellPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, ROUND_SEGS, 9), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
-function torsoPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.44, 1, 14), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
+// Primitive geometries and the plain lit materials are cached and shared by every creature: parts are only read by bakeMeshes
+// (the baked meshes own their own buffers), so the cache is never disposed with a floor (userData.shared, see freeObject in main.js).
+const GEO_CACHE = new Map(), LAM_CACHE = new Map();
+const cachedGeo = (key, make) => { let g = GEO_CACHE.get(key); if (!g) { g = make(); g.userData.shared = true; GEO_CACHE.set(key, g); } return g; };
+const boxGeo = (w, h, d) => cachedGeo('b' + w + ',' + h + ',' + d, () => new THREE.BoxGeometry(w, h, d));
+const lamMat = c => { const k = c.isColor ? c.getHex() : c; let m = LAM_CACHE.get(k); if (!m) LAM_CACHE.set(k, m = new THREE.MeshLambertMaterial({ color: c })); return m; };   // build-time colour source only, never drawn
+function cylPart(rTop, rBot, h, mat, x, y, z, parent) { const p = new THREE.Mesh(cachedGeo('c' + rTop + ',' + rBot + ',' + h, () => new THREE.CylinderGeometry(rTop, rBot, h, ROUND_SEGS)), mat); p.position.set(x, y, z); parent.add(p); return p; }
+function ellPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(cachedGeo('s', () => new THREE.SphereGeometry(0.5, ROUND_SEGS, 9)), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
+function torsoPart(w, h, d, mat, x, y, z, parent) { const p = new THREE.Mesh(cachedGeo('t', () => new THREE.CylinderGeometry(0.5, 0.44, 1, 14)), mat); p.scale.set(w, h, d); p.position.set(x, y, z); parent.add(p); return p; }
 let SHADOW_GEO = null, SHADOW_MAT = null, SPARK_GEO = null, TOOTH_GEO = null;   // a soft dark disc under each creature, so it sits on the floor instead of floating
 
+const NO_SKIP = new Set(), LIVE = [];   // separateBodies scratch list
+let sepFloor = null;
+const sepFree = (x, z) => !Player.prototype.blocked.call(collider, sepFloor, x, z);
 const collider = { radius: 0.4, props: [], mob: true };   // borrows Player.blocked for wall collision
 
 // Bodies are circles: push overlapping living guards apart (half each) and push guards out of the
 // player. A guard pinned against a wall pushes the player instead. Runs once a frame after the guards move.
 function separateBodies(enemies, player, floor) {
   collider.props = floor.solids;
-  const free = (x, z) => !Player.prototype.blocked.call(collider, floor, x, z);
-  const live = enemies.filter(e => !e.dead);
+  sepFloor = floor;
+  const live = LIVE; live.length = 0;
+  for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead) live.push(enemies[i]);
   for (let pass = 0; pass < 2; pass++) {
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
       const a = live[i], b = live[j];
@@ -124,8 +143,8 @@ function separateBodies(enemies, player, floor) {
       const sa = a.st.has('stuck'), sb = b.st.has('stuck');                                  // a glued enemy is immovable: the other gives way
       if (sa && sb) continue;
       const push = (min - Math.min(d, min)) / (sa || sb ? 1 : 2);
-      if (!sa && free(a.x - dx * push, a.z - dz * push)) { a.x -= dx * push; a.z -= dz * push; }
-      if (!sb && free(b.x + dx * push, b.z + dz * push)) { b.x += dx * push; b.z += dz * push; }
+      if (!sa && sepFree(a.x - dx * push, a.z - dz * push)) { a.x -= dx * push; a.z -= dz * push; }
+      if (!sb && sepFree(b.x + dx * push, b.z + dz * push)) { b.x += dx * push; b.z += dz * push; }
     }
     for (const e of live) {
       let dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
@@ -134,7 +153,7 @@ function separateBodies(enemies, player, floor) {
       if (d < 1e-4) { dx = -Math.sin(player.yaw); dz = -Math.cos(player.yaw); d = 0; }   // dead centre: step the guard out in front
       else { dx /= d; dz /= d; }
       const push = min - d;
-      if (!e.st.has('stuck') && free(e.x + dx * push, e.z + dz * push)) { e.x += dx * push; e.z += dz * push; }
+      if (!e.st.has('stuck') && sepFree(e.x + dx * push, e.z + dz * push)) { e.x += dx * push; e.z += dz * push; }
       else if (!Player.wallHit(floor, player.x - dx * push, player.z - dz * push, player.radius)) { player.x -= dx * push; player.z -= dz * push; }
     }
   }
@@ -183,12 +202,12 @@ class Enemy {
   }
 
   build() {
-    if (!ICONS) ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a') };
+    if (!ICONS) { ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a') }; for (const k in ICONS) ICONS[k].userData = { shared: true }; }
     // Every guard rolls its own look from its seed: skin and cloth colours, size, headgear
     // (iron helmet, hood or bare with a tuft), a vest, shoulder pads, a sack, and a club or cleaver.
     const rg = makeRng(this.seed || 1);
     const pal = arr => arr[Math.floor(rg() * arr.length)];
-    const lam = c => new THREE.MeshLambertMaterial({ color: c });
+    const lam = lamMat;
     const skin = lam(this.spec.skin || this.T.skin || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
     const dark = lam(new THREE.Color(skin.color).multiplyScalar(0.65).getHex());     // hands, ear tips, warts, brow
     const cloth = lam(pal([0x6a3f2a, 0x5a3a46, 0x3a4a5a, 0x5a5230]));
@@ -222,7 +241,7 @@ class Enemy {
     else if (this.T.model === 'mimic') this.buildMimic(m);
     else if (this.quad) this.buildQuad(m, lam);
     else {
-    const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(boxGeo(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.legs = [-1, 1].map(s => {
       const g = new THREE.Group(); g.position.set(s * 0.15, 0.7, 0);
       cylPart(0.115, 0.095, 0.7, skin, 0, -0.35, 0, g);
@@ -351,7 +370,7 @@ class Enemy {
       part(0.6, 0.09, 0.38, lam(0x3a6aa8), 0, 0.42, 0); part(0.44, 0.07, 0.44, lam(0xe8e4d8), 0, 1.02, 0);                           // a blue sash across the chest and a white head bandage (so it never passes for a guard)
     } else if (this.type === 'bomber') {
       ellPart(0.3, 0.3, 0.3, black, 0, -0.8, -0.12, this.arms[0]); cylPart(0.03, 0.03, 0.07, metal, 0, -0.63, -0.12, this.arms[0]); cylPart(0.014, 0.014, 0.12, leather, 0, -0.58, -0.12, this.arms[0]);   // a round black bomb in the off hand with a fuse
-      const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = new THREE.SphereGeometry(0.055, 6, 5)), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
+      const sp = this.spark = new THREE.Mesh(SPARK_GEO || (SPARK_GEO = cachedGeo('spark', () => new THREE.SphereGeometry(0.055, 6, 5))), new THREE.MeshBasicMaterial({ color: 0xffa030 })); sp.position.set(0, -0.5, -0.12); this.arms[0].add(sp); this.keep = [sp];   // the spark flickers, so it stays a mesh of its own
       part(0.62, 0.07, 0.4, leather, 0, 0.5, 0); for (const x of [-0.18, 0, 0.18]) ellPart(0.1, 0.1, 0.1, black, x, 0.44, -0.2, up);                                                  // a bandolier of spare bombs
       part(0.4, 0.14, 0.4, lam(0x2a2a2a), 0, 1.06, 0); for (const s of [-1, 1]) part(0.12, 0.08, 0.04, lam(0xa0d8e8), s * 0.085, 0.95, -0.2);                                       // goggles on a leather cap
     } else if (this.type === 'captain') {
@@ -377,17 +396,18 @@ class Enemy {
       else if (d === 'frost') { for (const x of [-0.18, -0.06, 0.06, 0.18]) part(0.06, 0.3, 0.06, lam(0xd8f0ff), x, 1.26, 0); for (const s of [-1, 1]) part(0.1, 0.35, 0.1, lam(0xd8f0ff), s * 0.4, 0.95, 0); }
     }
     }
-    if (!SHADOW_GEO) { SHADOW_GEO = new THREE.CircleGeometry(1, 20); SHADOW_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }); }
+    if (!SHADOW_GEO) { SHADOW_GEO = cachedGeo('shadow', () => new THREE.CircleGeometry(1, 20)); SHADOW_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }); SHADOW_MAT.userData.shared = true; }
     this.shadow = new THREE.Mesh(SHADOW_GEO, SHADOW_MAT);
     this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
     this.shadow.renderOrder = 1; m.add(this.shadow);
     // Merge the parts inside each animated group (torso and head, each arm, each leg): about 60 meshes become about 25
     // per creature, and the pose code still moves the same groups.
-    const flashMats = this.mats;
-    if (!this.T.mimic) {   // a mimic is a handful of animated meshes: never baked or merged
-      if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), flashMats); for (const w of this.wings || []) bakeMeshes(w, new Set(), flashMats); }
-      else { bakeMeshes(this.upper, new Set(this.arms), flashMats); for (const a of this.arms) bakeMeshes(a, new Set(this.keep || []), flashMats); }
-      for (const l of this.legs) bakeMeshes(l, new Set(), flashMats);
+    if (!this.T.mimic) {
+      const ctx = { flash: null };   // one lit material for the whole creature: vertex colours carry the paint, its emissive carries the hit flash   // a mimic is a handful of animated meshes: never baked or merged
+      if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), ctx); for (const w of this.wings || []) bakeMeshes(w, NO_SKIP, ctx); }
+      else { bakeMeshes(this.upper, new Set(this.arms), ctx); for (const a of this.arms) bakeMeshes(a, this.keep ? new Set(this.keep) : NO_SKIP, ctx); }
+      for (const l of this.legs) bakeMeshes(l, NO_SKIP, ctx);
+      this.mats = ctx.flash ? [ctx.flash] : [];   // the flash material (a wisp, all glow, has none)
     }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
@@ -413,7 +433,7 @@ class Enemy {
     const T = this.T, fur = lam(T.fur), belly = lam(new THREE.Color(T.fur).multiplyScalar(1.35).getHex()), dark = lam(0x1c1612);
     const bone = lam(0xf0ead0), pink = lam(0xc99a9a), eye = new THREE.MeshBasicMaterial({ color: this.type === 'wolf' ? 0xffd060 : 0xff3030 });
     this.mats = [fur, belly, dark, pink];
-    const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(boxGeo(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     const body = this.body = new THREE.Group(); body.position.y = 0.5; m.add(body);
     ellPart(0.46, 0.4, 1.0, fur, 0, 0.15, 0, body);                              // torso
     box(0.3, 0.1, 0.8, belly, 0, -0.02, 0, body);                                // pale belly
@@ -444,7 +464,7 @@ class Enemy {
     this.lid = o.lid; this.mats = o.mats; this.baseEm = o.mats.map(x => x.emissive.getHex());
     const pink = new THREE.MeshLambertMaterial({ color: 0xc8506a, emissive: 0x3a0a14 }), white = new THREE.MeshLambertMaterial({ color: 0xf0ead0 });
     this.mats.push(pink); this.baseEm.push(0x3a0a14);
-    const tg = TOOTH_GEO || (TOOTH_GEO = new THREE.BoxGeometry(0.06, 0.12, 0.04));
+    const tg = TOOTH_GEO || (TOOTH_GEO = cachedGeo('tooth', () => new THREE.BoxGeometry(0.06, 0.12, 0.04)));
     const tongue = this.tongue = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.03, 0.07), pink); tongue.position.set(0, 0.49, 0.31); inner.add(tongue);   // the faint tongue edge at the seam: the tell
     const teeth = this.teeth = new THREE.Group(); teeth.visible = false; inner.add(teeth);
     this.upTeeth = [];
@@ -495,7 +515,7 @@ class Enemy {
     const glow = new THREE.MeshBasicMaterial({ color: c });
     this.mats = [lam(T.fur)];
     const body = this.body = new THREE.Group(); body.position.y = T.hover; m.add(body);
-    const box = (w, h, d, mat, x, y, z, parent = body) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    const box = (w, h, d, mat, x, y, z, parent = body) => { const p = new THREE.Mesh(boxGeo(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
     this.wings = [];
     if (this.type === 'book') {
       const cover = lam(0x6a3a1a), pages = lam(0xe8dcc0);
@@ -517,7 +537,7 @@ class Enemy {
     if (this.T.mimic) return this.poseMimic(dt);
     if (this.T.hover) {                                                                                         // hover and flap
       this.body.position.y = this.T.hover + Math.sin(this.walkT * 0.25 + this.seed) * 0.08 + Math.sin(performance.now() / 400 + this.seed) * 0.06;
-      if (this.wings) this.wings.forEach((w, i) => { w.rotation.z = (i ? -1 : 1) * Math.sin(performance.now() / 70 + this.seed) * 0.6; });
+      if (this.wings) { const fl = Math.sin(performance.now() / 70 + this.seed) * 0.6; for (let i = 0; i < this.wings.length; i++) this.wings[i].rotation.z = (i ? -1 : 1) * fl; }
     }
     const sw = Math.sin(this.walkT * 0.9) * 0.75, l = this.legs;
     l[0].rotation.x = sw; l[1].rotation.x = -sw; l[2].rotation.x = -sw; l[3].rotation.x = sw;
@@ -946,18 +966,19 @@ class Enemy {
     // Target pose: [upper x, upper y, right arm x, left arm x, dip].
     // Alerted guards hold the club forward; a staggered one rocks back; an attack goes
     // raise (zone readable) -> strike (fast) -> recover, using ATTACK_POSES.
-    let target = [0, 0, this.state === 'alerted' ? 0.7 : sw * 0.8, -sw * 0.8, 0];
-    if (this.dormant && this.T.ambush) target = [0, 0, 1.57, 1.57, 0];                // a scarecrow stands with its arms out
+    const target = TARGET_POSE;   // a shared scratch array, filled each call (no per-frame arrays)
     let snap = false;
-    if (this.stun > 0) target = [0.35, 0, -0.3, -0.3, 0];
+    if (this.dormant && this.T.ambush) setPose(target, 0, 0, 1.57, 1.57, 0);                // a scarecrow stands with its arms out
+    else setPose(target, 0, 0, this.state === 'alerted' ? 0.7 : sw * 0.8, -sw * 0.8, 0);
+    if (this.stun > 0) setPose(target, 0.35, 0, -0.3, -0.3, 0);
     else if (this.winding) {
-      const [A, B] = ATTACK_POSES[this.zone], w = this.windT_;
+      const A = ATTACK_POSES[this.zone][0], B = ATTACK_POSES[this.zone][1], w = this.windT_;
       if (this.windT < w) {
         const k = easeInOut(Math.min(1, this.windT / (w * 0.75)));
-        target = A.map(v => v * k);
+        for (let i = 0; i < 5; i++) target[i] = A[i] * k;
       } else {
         const s = 1 - Math.pow(1 - Math.min(1, (this.windT - w) / STRIKE_T), 2);
-        target = A.map((v, i) => v + (B[i] - v) * s);
+        for (let i = 0; i < 5; i++) target[i] = A[i] + (B[i] - A[i]) * s;
         snap = true;
       }
     }
@@ -989,7 +1010,7 @@ class Enemy {
       this.icon.material.opacity = alerted ? 1 : 0.35 + 0.65 * this.aware;
       this.icon.scale.setScalar((alerted ? 0.9 : 0.5 + 0.3 * this.aware) * (this.quad ? 1 / this.scaleK : 1));
     }
-    this.cone.material.color.setHex(this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30);
+    if (this.cone.visible) this.cone.material.color.setHex(this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30);
   }
 }
 

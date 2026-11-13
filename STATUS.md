@@ -173,6 +173,14 @@ Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tes
 - `stage` 1..4 (themes: stage 1 is the seed's usual theme, stages 2 to 4 are three other seeded themes) and 5 (one boss arena, "The Final Boss" placeholder, killing it shows "Run complete"). `floorNum` is the floor within the stage. Safe-room stairs lead to the next stage; floor 1 of stages 2+ has stairs up to the previous stage's safe room. Per stage: shop, armory, encounter plan and prisoner state. Numbers in `TUNE` (stage*, finalBoss*) and the tuning panel (key bumped to -20; Stage up/down buttons). Cache bounded to 6 floors (`trimCaches`).
 - Open: balance of the stage scaling is a guess; the final boss is a placeholder.
 
+### Performance pass 2 (2026-11-12)
+Measured on 3 seeds across stages 1-5 (software rendering, so compare before and after, not absolute fps). Playtesters reported lag.
+- Creatures: one shared flash material per creature plus a geometry and material cache by enemy type, about 20 meshes per enemy down to 8-9. Worst-view draw calls 267 / 338 / 291 down to 177 / 238 / 171.
+- Floor build: wall, floor and ceiling textures and materials cached per theme (freed only when no cached floor uses the theme). Floor build about 100 ms down to about 54 ms; rig build 17 ms down to 5-6 ms per floor.
+- Floor-change hitch: a zero-intensity point light on floors without up-stairs keeps the light count constant, so the lit shader no longer recompiles (it was a 450-520 ms freeze at stage 1 floor 2). Average gap at a floor change about 300 ms down to about 100 ms, worst about 190 ms.
+- Garbage: BFS, `blocked` in `js/player.js`, torch top-4 pick and HUD writes no longer allocate or write every frame; fight garbage 6.3 down to 4.0 MB/s. The HUD text now refreshes every third frame.
+- Open: `slideOffProps` still makes about 1.2 MB/s of garbage (small CPU cost); the GPU cost of the 4 torch lights was not measurable here. `tests/game.perf.test.js` now fails above 220 calls at floor start and 260 in the worst view.
+
 ### Build round 5 (2026-11-12): traps, encounters, safe room, stages
 Not play-tested by a real person. Each feature is covered by the test file named.
 - **Locked and trapped chests, lockpick** (`CHEST_ODDS` in `js/gen.js`, `LOCKPICK` / `LOCKED` / `TRAP` in `js/loot.js`, `springTrap` / `smashChest` in `js/main.js`, tells in `js/props.js`). 12% of ordinary chests are locked from floor 1, 10% trapped from floor 2 (dart, gas or alarm, never both). Tells: padlock on a locked chest, tripwire on a trapped one. Hold E to pick a lock: 3 s, 1 m noise, 30% the pick breaks. Lockpicks drop 6% from barrels and rubble, 25% from bandit and thief bodies, and sell in the shop. Gas is a pooled cloud. Tests: `tests/game.traps.test.js`, `tests/gen.test.js`.
