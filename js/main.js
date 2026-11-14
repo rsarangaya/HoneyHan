@@ -625,7 +625,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
-  const fb = enemies.find(e => e.final); if (fb) nameTag(fb, FINAL_BOSS.tag, '#c060ff');                // the placeholder final boss says what it is
+  for (const b of enemies) if (b.boss) nameTag(b, b.def.tag || b.def.name, b.def.color);                // every boss has its name over its head (the placeholder final boss says what it is)
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   floor.prints = theme.mechanic.prints && !floor.boss ? buildPrints() : null;
@@ -1088,11 +1088,14 @@ Enemy.burst = e => {
 
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
 function spawnEnemyShot(s) {
-  const gravity = s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
+  const bk = BOSS_SHOT[s.kind], pm = bk ? bossFxAcquire(s.kind) : null;              // a boss's shot flies in a pooled mesh (js/boss.js); none free: no shot
+  if (bk && !pm) return;
+  const gravity = bk ? bk.g : s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
   const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
   const jitter = () => (gameRng() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
-  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, mesh: s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind]) };
-  a.mesh.position.set(a.x, a.y, a.z); group.add(a.mesh); arrows.push(a);
+  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, pool: !!pm, dmg: s.dmg || 1, mv: s.mv || null, mesh: pm || (s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind])) };
+  if (s.fan) { const c = Math.cos(s.fan), n = Math.sin(s.fan), vx = a.vx; a.vx = vx * c - a.vz * n; a.vz = vx * n + a.vz * c; }   // a fan of shots: turn the velocity about the vertical axis
+  a.mesh.position.set(a.x, a.y, a.z); if (!pm) group.add(a.mesh); arrows.push(a);
 }
 // An enemy shot (arrow, hex, thorn, curse, dart) that reached the player's ally first: arrows hurt by zone, the others apply their status.
 function allyShotHit(a, ev) {
@@ -1122,6 +1125,7 @@ function enemyShotHit(a) {
     return;
   }
   const zone = a.y > player.eye - 0.4 ? 'head' : a.y > 0.65 ? 'body' : 'legs';       // where it landed, by your height
+  if (a.mv) { a.from.hitMul = a.dmg; a.from.mv = a.mv; }                             // a boss's shot: the move's damage, blockable like an arrow
   resolveEnemyAttack(a.from, zone, true);
 }
 
@@ -1152,6 +1156,7 @@ function stickArrow(a, hitEnemy) {
   if (!hitEnemy && a.px !== undefined) { a.x = a.px; a.z = a.pz; }                     // lie in front of the wall, not inside it
   a.y = 0.05; a.mesh.position.set(a.x, 0.05, a.z); a.mesh.rotation.set(0, Math.atan2(a.dirx || 0, a.dirz || 1), 0);
 }
+const dropArrowMesh = a => { if (a.pool) bossFxRelease(a.mesh); else group.remove(a.mesh); };   // a boss shot's mesh goes back to its pool
 function updateArrows(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
@@ -1165,7 +1170,7 @@ function updateArrows(dt) {
       if (a.kind === 'arrow') a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
       if (ev && ev.type === 'player') enemyShotHit(a);
       else if (ev && ev.type === 'ally') allyShotHit(a, ev);
-      if (ev || a.life <= 0) { group.remove(a.mesh); arrows.splice(i, 1); }
+      if (ev || a.life <= 0) { dropArrowMesh(a); arrows.splice(i, 1); }
       continue;
     }
     if (a.kind === 'wand') {                                                       // a wand bolt: no drop, no recovery, hits anything alive
@@ -1353,6 +1358,8 @@ function resolveEnemyAttack(e, zone, ranged = false) {
   const facing = (dx * fx + dz * fz) / d > 0.2;
   const full = TUNE.enemyDmg * e.dmgMul * (e.hitMul || 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));
   e.hitMul = 1;   // armor in that zone's slot cuts it
+  const mv = e.mv;                                                                  // a boss's move in play (js/boss.js)
+  if (mv && mv.ground && !ranged) { groundHit(e, mv, zone, full, facing, w, -dx / d, -dz / d); return; }   // circles, floor lines, shockwaves: a block only softens them
   const bs = blockStats();
   if (cb.block && facing && !w.ranged) {
     const lowG = bs.low && !ranged;                                          // low guard: covers legs only
@@ -1363,7 +1370,7 @@ function resolveEnemyAttack(e, zone, ranged = false) {
       if (cb.stamina >= c || dev.on) { spend(c); mark('LOW BLOCK', '#cfe'); loud(5); cb.atk = null; damage(full * SHIELD.legsTake); return; }
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
-    else if (cb.blockT <= bs.parryWin) {
+    else if (cb.blockT <= bs.parryWin && !(mv && mv.parry === false)) {   // (a boss move with parry: false is only blocked)
       if (!ranged) { e.stun = 1.0; e.winding = false; e.atkCd = 0.6; }            // parrying a blow staggers the attacker, an arrow just stops
       cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.parryRestore);   // a parry gives stamina back
       mark(ranged ? 'ARROW BLOCKED' : 'PARRY', '#7fe8ff'); loud(5); return;
@@ -1375,6 +1382,45 @@ function resolveEnemyAttack(e, zone, ranged = false) {
   cb.atk = null;
   damage(full);
   hitStatuses(e, zone);
+  if (mv && mv.status) moveStatus(mv);
+  if (mv && mv.knock && !ranged) applyKnock(-dx, -dz, mv.knock);
+}
+// A boss's ground move (red telegraph) landing on you. No parry, no stagger. Blocking (facing it, stamina paid as a normal block) lets only mv.blockTake of the damage
+// through (0.5; a shield takes less: x SHIELD.legsTake) and skips the status; the knockback (mv.knock metres, away from the boss) happens either way.
+function groundHit(e, mv, zone, full, facing, w, nx, nz) {
+  const bs = blockStats();
+  let take = 1;
+  if (cb.block && facing && !w.ranged && bs.cost > 0) {
+    if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); cb.stamina = Math.min(STAMINA_MAX, cb.stamina + bs.cost * TUNE.blockRefund); take = (mv.blockTake === undefined ? 0.5 : mv.blockTake) * (bs.legs ? SHIELD.legsTake : 1); mark('BRACED: it still hurts', '#cfe'); loud(5); }
+    else { cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); }
+  }
+  if (take === 1) cb.atk = null;
+  damage(full * take);
+  if (take === 1) { hitStatuses(e, zone); if (mv.status) moveStatus(mv); }
+  if (mv.knock) applyKnock(nx, nz, mv.knock);
+}
+function moveStatus(mv) { if (pst.apply(mv.status, mv.statusDur)) { discover('status:' + mv.status, STATUS[mv.status].name); addLog(STATUS[mv.status].name + '!', STATUS[mv.status].color); } }
+// Knockback: a short eased slide (about a quarter second) of `metres` along (dx, dz), stepped through the player's own collision (walls and props), so it never carries you
+// through a wall: a blocked step slides along the wall or ends the push. One shared state, no allocation.
+const knock = { dx: 0, dz: 0, m: 0, t: 0, dur: 0.25, done: 0 };
+function applyKnock(dx, dz, metres) {
+  const d = Math.hypot(dx, dz); if (d < 1e-6 || !(metres > 0) || inSafe) return;
+  knock.dx = dx / d; knock.dz = dz / d; knock.m = metres; knock.t = 0; knock.done = 0; knock.dur = 0.2 + 0.03 * metres;
+}
+function stepKnock(dt) {
+  if (knock.m <= 0) return;
+  knock.t = Math.min(knock.dur, knock.t + dt);
+  const u = knock.t / knock.dur;
+  let rem = knock.m * (1 - (1 - u) * (1 - u)) - knock.done;                          // ease out
+  while (rem > 1e-4) {
+    const s = Math.min(rem, 0.2), mx = knock.dx * s, mz = knock.dz * s;
+    let moved = false;
+    if (!player.blocked(floor, player.x + mx, player.z)) { player.x += mx; moved = true; }
+    if (!player.blocked(floor, player.x, player.z + mz)) { player.z += mz; moved = true; }
+    if (!moved) { knock.m = 0; return; }
+    knock.done += s; rem -= s;
+  }
+  if (u >= 1) knock.m = 0;
 }
 // What a landed hit does besides damage: leg hits slow (the boss cripples), head hits daze, a dagger bleeds.
 function hitStatuses(e, zone) {
@@ -1404,6 +1450,7 @@ function finishEat() {
 // In the safe room (floor.safe, north of its door tile): nothing can hurt you, nothing drains, attacks do nothing. One flag, set once a frame.
 let inSafe = false, safeMsgT = 0;
 function updateCombat(dt) {
+  stepKnock(dt);
   inSafe = floor.safe !== undefined && floor.safe.open && floor.safe.inside[player.tileY * floor.w + player.tileX] === 1;
   // gear and potions feed the player and the guards' senses
   player.speedMul = (dev.on ? 5 : 1) * (inv.buffs.swift > 0 ? 1.35 : 1) * pst.moveMul();
@@ -1710,8 +1757,16 @@ let hudKey = '';
 const HUNGER_COLOR = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' };
 const styleSeen = new Map();   // 'id.prop' -> the last value written, so an unchanged value costs no DOM write
 function setStyle(id, prop, v) { const k = id + '.' + prop; if (styleSeen.get(k) === v) return; styleSeen.set(k, v); el(id).style[prop] = v; }
+let hudBossDef = null;
+function bossHud(def) {                                 // the boss bar's name and one notch per phase (rebuilt only when the boss's def changes)
+  hudBossDef = def; const bar = el('bossBar');
+  el('boss').firstElementChild.textContent = def.name;
+  while (bar.children.length > 1) bar.lastElementChild.remove();
+  for (const p of def.phases) { const n = document.createElement('div'); n.className = 'bnotch'; n.style.left = p.at * 100 + '%'; bar.appendChild(n); }
+}
 function updateHud() {
   let boss = null; for (let i = 0; i < enemies.length; i++) if (enemies[i].boss) { boss = enemies[i]; break; }
+  if (boss && boss.def && boss.def !== hudBossDef) bossHud(boss.def);
   if (boss && boss.justWoke) { boss.justWoke = false; flash('The boss wakes!'); }
   setStyle('boss', 'display', boss && !boss.dormant && !boss.dead ? 'block' : 'none');
   if (boss) setStyle('bossFill', 'width', Math.max(0, boss.hp / boss.maxHp * 100) + '%');
@@ -1751,7 +1806,7 @@ function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU mem
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
-  arrows.forEach(a => group.remove(a.mesh)); arrows.length = 0;
+  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide();
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
 }
@@ -1799,7 +1854,7 @@ function generateAndEnter(n, arrive) {
   floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) });
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
-  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; } }   // each theme's boss has its own look
+  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; b.bossId = final ? 'final' : theme.id; } }   // each theme's boss has its own look
   floor.waterSlow = theme.mechanic.kind === 'puddle' ? theme.mechanic.TUNE.enemySlow : 0;   // the Tavern's flooded patches slow guards too (js/enemy.js goTo)
   floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
@@ -1860,6 +1915,20 @@ function updateRespawn(dt) {
   const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (gameRng() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, gameRng) }, floor);
   e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
 }
+
+// A boss's summon (js/boss.js bossSummon): one enemy of `type` beside the boss, already alerted. false when there is no open spot.
+Enemy.summon = (boss, type) => {
+  for (let k = 0; k < 6; k++) {
+    const a = gameRng() * Math.PI * 2, x = boss.x + Math.cos(a) * 2.4, z = boss.z + Math.sin(a) * 2.4;
+    if (Player.wallHit(floor, x, z, 0.5)) continue;
+    const tx = Math.floor(x / TILE), ty = Math.floor(z / TILE);
+    const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: (gameRng() * 4294967296) >>> 0, type }, floor);
+    e.x = x; e.z = z; e.minion = boss; e.last = { x: player.x, z: player.z }; e.set('alerted');
+    e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e); e.sync(0);
+    return true;
+  }
+  return false;
+};
 
 // Event log, bottom left: newest line at the bottom, older lines fade as they age.
 const LOG_MAX = 8;

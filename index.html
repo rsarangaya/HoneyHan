@@ -28,8 +28,9 @@
   #hpFill { height: 100%; background: #c0392b; }
   #dev { top: 12px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #111; background: #e8c860; padding: 3px 10px; border-radius: 3px; display: none; }
   #boss { top: 44px; left: 50%; transform: translateX(-50%); width: 360px; text-align: center; font-size: 13px; letter-spacing: .08em; display: none; }
-  #bossBar { height: 9px; margin-top: 3px; background: #0008; border: 1px solid #fff6; }
+  #bossBar { position: relative; height: 9px; margin-top: 3px; background: #0008; border: 1px solid #fff6; }
   #bossFill { height: 100%; width: 100%; background: #a8281f; }
+  .bnotch { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fffa; }
   #flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(transparent 40%, #c00a 100%); opacity: 0; transition: opacity .35s; }
   #stam { width: 200px; height: 5px; margin: -2px auto 6px; background: #0008; border: 1px solid #fff5; }
   #stamFill { height: 100%; background: #4cc36a; }
@@ -110,6 +111,8 @@
 <script src="js/props.js"></script>
 <script src="js/enemytypes.js"></script>
 <script src="js/enemy.js"></script>
+<script src="js/boss.js"></script>
+<script src="js/bossmodels.js"></script>
 <script src="js/combat.js"></script>
 <script src="js/ranged.js"></script>
 <script src="js/wands.js"></script>

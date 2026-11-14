@@ -209,4 +209,4 @@ function linkHandlers(list) {
 // (THEME_BOSS is a view of the theme schema in js/gen.js.)
 // The placeholder final boss (stage 5): the Cave Warlord's fight with a darker tint, 1.25x bigger, a name tag that says so (js/main.js).
 const FINAL_BOSS = { name: 'The Final Boss', tag: '??? (final boss, placeholder)', dress: 'warlord', skin: 0x4a2a5a };
-const bossNameFor = themeName => themeName === FINAL_THEME.name ? FINAL_BOSS.name : (THEME_BOSS[themeName] || { name: 'Cave Warlord' }).name;
+const bossNameFor = themeName => { const d = typeof bossDefByTheme === 'function' && bossDefByTheme(themeName); return d ? d.name : themeName === FINAL_THEME.name ? FINAL_BOSS.name : (THEME_BOSS[themeName] || { name: 'Cave Warlord' }).name; };   // js/boss.js BOSS_DEFS first (the final arena's def is 'final')

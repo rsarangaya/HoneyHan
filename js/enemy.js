@@ -183,6 +183,8 @@ class Enemy {
     this.quad = this.T.model === 'quad' || this.T.model === 'float' || this.T.model === 'mimic';   // floating things aim and animate like animals
     this.handlerRef = null;             // a wolf's goblin handler (linkHandlers in enemytypes.js)
     this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
+    this.def = this.boss ? bossDefOf(spec) : null; this.bs = this.def ? bossState(this.def) : null;   // js/boss.js: its data and state machine
+    this.mv = null; this.alt = 0; this.minion = null;   // mv: the boss move in play (read by resolveEnemyAttack); alt: height above the floor (a flying boss); minion: the boss that summoned it
     this.dormant = this.boss || !!this.T.ambush || this.T.mimic;   // the boss and scarecrows wait, as scenery, until you come close
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
     this.route = spec.route.map(p => ({ x: (p.x + 0.5) * TILE, z: (p.y + 0.5) * TILE }));
@@ -210,7 +212,7 @@ class Enemy {
     this.final = !!spec.final;
     this.dmgScale = (1 + TUNE.floorDmgScale * fl) * (1 + TUNE.stageDmgScale * sg);
     this.bossDmg = this.final ? TUNE.finalBossDmg : 1 + TUNE.stageBossDmg * sg;
-    this.hp = this.maxHp = this.boss ? TUNE.bossHp * (this.final ? TUNE.finalBossHp : 1 + TUNE.stageBossHp * sg) : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl) * (1 + TUNE.stageHpScale * sg); this.stun = 0; this.hitT = 0;
+    this.hp = this.maxHp = this.boss ? TUNE.bossHp * this.def.hpMul * (this.final ? TUNE.finalBossHp : 1 + TUNE.stageBossHp * sg) : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl) * (1 + TUNE.stageHpScale * sg); this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
     this.dead = false; this.deadT = 0;
     this.build();
@@ -250,7 +252,7 @@ class Enemy {
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
-    m.scale.setScalar(this.boss ? BOSS_SCALE * (this.final ? TUNE.finalBossScale : 1) : this.T.scale || 0.92 + rg() * 0.2);
+    m.scale.setScalar(this.boss ? this.def.scale || BOSS_SCALE * (this.final ? TUNE.finalBossScale : 1) : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
     if (this.T.model === 'float') this.buildFloat(m, lam);
     else if (this.T.model === 'mimic') this.buildMimic(m);
@@ -619,14 +621,16 @@ class Enemy {
   }
 
   get elite() { return this.boss || !!this.T.elite; }
-  get r() { return this.boss ? 0.65 : this.T.r; }   // body radius: guards keep this far apart and out of the player
+  get r() { return this.boss ? this.def && this.def.r || 0.65 : this.T.r; }   // (a test can flag a plain guard as a boss after the fact: no def then)   // body radius: guards keep this far apart and out of the player
 
   get atkSpd() { return TUNE.enemyAtkSpd * this.spdRoll; }
-  get windT_() { if (this.windOvr) return this.windOvr; if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
+  get windT_() { if (this.windOvr) return this.windOvr; if (this.mv && this.mv.wind > 0) return this.mv.wind * this.bs.windMul; if (this.T.ranged) return this.cast === 'heal' ? this.T.ranged.healWind : this.T.ranged.wind; return TUNE.windup / Math.sqrt(this.atkSpd) * (this.boss ? TUNE.bossWindMul : this.T.windMul); }   // wind-up shrinks slower than the cooldown so the zone stays readable; the boss telegraphs longer
   get reach() { return TUNE.enemyReach * (this.boss ? TUNE.bossReachMul : this.T.reach); }
-  get chase() { return this.boss ? TUNE.bossSpeed : TUNE.chaseSpeed * this.T.speed; }
-  get dmgMul() { return this.boss ? TUNE.bossDmgMul * this.bossDmg : this.T.dmgMul * this.dmgScale; }
+  get chase() { return this.boss ? TUNE.bossSpeed * (this.def ? this.def.speedMul * this.bs.spd : 1) : TUNE.chaseSpeed * this.T.speed; }
+  get dmgMul() { return this.boss ? TUNE.bossDmgMul * this.bossDmg * (this.def ? this.def.dmgMul : 1) : this.T.dmgMul * this.dmgScale; }
   get cooldown() { return TUNE.enemyCooldown / this.atkSpd * this.T.cdMul; }
+
+  updateBoss(dt, player, noise, dist, los) { return bossUpdate(this, dt, player, noise, dist, los); }
 
   lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }
 
@@ -635,6 +639,7 @@ class Enemy {
   die() {
     if (this.tag) this.tag.visible = false;                                                           // a mini-boss's name tag goes with it
     this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
+    if (this.bs) { this.alt = 0; this.mv = null; bossTeleHide(); }                                 // its ground marks go with it
     if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
     if (this.T.bomb) { if (this.spark) this.spark.visible = false; if (!this.exploded && Enemy.dropBomb) Enemy.dropBomb(this); }   // killed first: the bomb falls and goes off on the floor
   }
@@ -891,7 +896,7 @@ class Enemy {
     if (this.state !== 'alerted' && this.aware >= 1) this.set('alerted');
     if (this.state === 'alerted' && !this.shouted) { this.shouted = true; noise.emit(this.x, this.z, SHOUT_R * this.T.shout, this); }   // calls nearby guards
     if (this.state !== 'alerted') this.shouted = false;
-    if (this.stun > 0) { this.stun -= dt; this.winding = false; this.sync(dt); return null; }
+    if (this.stun > 0) { this.stun -= dt; this.winding = false; if (this.bs) bossStagger(this); this.sync(dt); return null; }
 
     if (this.foe) {                                                              // fighting the player's ally (set from js/quests.js on its think tick)
       const fo = this.foe;
@@ -921,6 +926,7 @@ class Enemy {
         break;
       }
       case 'alerted': {
+        if (this.bs) { attack = this.updateBoss(dt, player, noise, dist, los); break; }                 // the boss state machine (js/boss.js)
         if (this.T.fleer) { this.updateFleer(dt, player); break; }
         if (this.T.ranged) { this.updateRanged(dt, player, noise, dist, los, dx, dz); break; }
         if (this.T.bomb) { this.updateBomber(dt, dist, los); break; }
@@ -997,7 +1003,9 @@ class Enemy {
 
   sync(dt) {
     const m = this.mesh;
-    m.position.set(this.x, 0, this.z); m.rotation.y = this.yaw;
+    m.position.set(this.x, this.alt, this.z); m.rotation.y = this.yaw;
+    if (this.alt || this.altPrev) { this.shadow.position.y = (0.015 - this.alt) / this.scaleK; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25 * (1 + this.alt * 0.1)); }   // a flying boss: the shadow stays on the floor and spreads with height
+    this.altPrev = this.alt;
     this.shadow.visible = !this.dead && !this.T.mimic;                   // a chest casts no disc: that would give a mimic away
     if (this.dead && this.T.mimic) { this.lid.rotation.x = -1.0; if (!this.teeth.visible) this.showTeeth(); return; }   // the mimic stays put, lid hanging open
     if (this.dead) {   // tip over backward, then stay down

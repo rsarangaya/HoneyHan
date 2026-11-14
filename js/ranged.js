@@ -20,6 +20,7 @@ const SHIELD = {
 // Which hit zone an arrow at height y (metres) is in for this enemy, or null if it flies over or under it.
 function zoneAtHeight(y, e) {
   if (e.quad) return quadZone(y, e);
+  if (e.boss && e.def && e.def.bands) return bossZone(y, e);   // non-biped bosses: zones by metre bands, lifted by e.alt (js/boss.js)
   const yy = y / (e.boss ? e.scaleK : e.T.scale || 1);
   return yy > 2.05 || yy < 0 ? null : yy > 1.4 ? 'head' : yy > 0.7 ? 'body' : 'legs';
 }

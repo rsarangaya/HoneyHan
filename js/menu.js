@@ -103,13 +103,10 @@ const pauseMenu = (() => {
       card('enemy:shaman', 'Goblin Shaman', '#b060ff', ['A hooded caster with a glowing staff. Sees poorly and hears well, so a silent kill from behind is best.', 'Hurls a slow bolt that Slows or Dazes you. A block does not stop a hex, but it is slow enough to dodge.', 'Heals a badly hurt goblin in its sight, so kill it first. Sometimes carries a potion or a wand.']),
       card('enemy:brute', 'Brute', '#8a7a5a', ['A huge goblin with 3x health that hits twice as hard, slowly and with a long warning. Ordinary hits do not stagger it and a sneak attack is capped, but a parry still staggers it.', 'Sprinting outpaces it. Usually drops Rare or better equipment.']),
       card('enemy:bouncer', 'Bouncer', '#7d8672', ['Big, slow and hits hard, with a long warning. 2x the health.', 'Ordinary hits do not stagger it and a dagger cannot kill it in one stab (a sneak attack is capped). A parry still staggers it.', 'Always drops a piece of equipment (Uncommon or better) and some gold.']),
-      ...stageThemes.map((t, i) => card('enemy:boss:' + bossNameFor(t.name), bossNameFor(t.name), '#c0503a', [
-        `Boss of floor 5 of stage ${i + 1} (${t.name}). ${Math.round(TUNE.bossHp * (1 + TUNE.stageBossHp * i))} HP in heavy plate, and it hits much harder than a guard.`,
-        'Sleeps in the middle of the arena until you get close. Cannot be sneak-killed and is not staggered by normal hits.',
-        'A parry still staggers it, and a sprinting player can outrun it.',
-        'Drops an Epic piece of equipment (with a small chance of Legendary), more equipment and gold. The stairs stay sealed until it falls. The safe room behind it leads to the next stage.'])),
+      ...stageThemes.map((t, i) => { const d = bossDefByTheme(t.name), n = bossNameFor(t.name); return card('enemy:boss:' + n, n, '#c0503a', bossCardLines(d, Math.round(TUNE.bossHp * d.hpMul * (1 + TUNE.stageBossHp * i))).map(l => l.replace('Boss of floor 5.', `Boss of floor 5 of stage ${i + 1} (${t.name}).`))); }),   // from BOSS_DEFS (js/boss.js)
       card('enemy:boss:' + FINAL_BOSS.name, FINAL_BOSS.name, '#a060e0', [
-        `Placeholder final boss of stage 5. ${Math.round(TUNE.bossHp * TUNE.finalBossHp)} HP, bigger than the stage bosses and hits ${TUNE.finalBossDmg}x as hard as the first one. The real fight is not designed yet.`,
+        `Placeholder final boss of stage 5. ${Math.round(TUNE.bossHp * BOSS_DEFS.final.hpMul * TUNE.finalBossHp)} HP, bigger than the stage bosses and hits ${TUNE.finalBossDmg}x as hard as the first one. The real fight is not designed yet.`,
+        'Moves: ' + BOSS_DEFS.final.moves.map(bossMoveText).join('; ') + '.',
         'Killing it ends the run.']),
     ];
     const extra = Object.entries(ENEMY_TYPES).filter(([k, v]) => v.info).map(([k, v]) => card('enemy:' + k, v.name, '#c8c8c8', v.info));   // the other themes' natives

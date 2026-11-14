@@ -86,7 +86,7 @@ function findMeleeTarget(player, eyeY, enemies, floor, reach) {
     if (d >= bestD) continue;                                  // cannot beat the current pick (a null near one is tracked below)
     if (!hasLOS(floor, player.x, player.z, e.x, e.z)) continue;
     const y = eyeY + tp * d;
-    const zone = e.quad ? quadZone(y, e, d, player.pitch) : aimZone(eyeY, player.pitch, d, e.boss ? e.scaleK : e.T.scale || 1);
+    const zone = e.quad ? quadZone(y, e, d, player.pitch) : e.boss && e.def && e.def.bands ? bossZone(y, e, d) : aimZone(eyeY, player.pitch, d, e.boss ? e.scaleK : e.T.scale || 1);
     if (zone) { best = e; bestD = d; bestZ = zone; }
     else if (d < nearD) { near = e; nearD = d; }
   }
