@@ -8,6 +8,7 @@ const TUNE = {
   chaseSpeed: 5.0,                    // alerted guards run faster than a sprinting player
   playerAtkSpd: 1,                    // attack speed stat: x the weapon's spd. Swing time / this
   walkSpeed: 3.0, sprintSpeed: 4.6, crouchSpeed: 1.4,
+  enemyTurn: 12, enemyTurnAlert: 9,    // rad/s a guard turns to face where it walks / to face its target while alerted (wind-up and charge telegraphs stay slower on purpose)
   patrolSpeed: 1.1,                   // unaware patrol pace: slower than a crouching player (1.4), so a sneaker can catch up
   patrolWaitMin: 3, patrolWaitMax: 7, patrolRestChance: 0.25, patrolRestMin: 8, patrolRestMax: 12,   // seconds a guard stands at a waypoint; sometimes a long rest
   bossHp: 220, bossDmgMul: 1.4,       // the boss wears Rare plate, so its real toughness is higher than its HP
@@ -48,24 +49,49 @@ function aimZone(eyeY, pitch, dist, scale = 1) {
   return y > 1.4 ? 'head' : y > 0.7 ? 'body' : 'legs';
 }
 
-// Closest living enemy in the swing cone, or null. Walls block the swing.
+// Hitbox tuning for low and floating enemies (quad, float, mimic). Melee tolerance grows with distance because a level swing
+// from eye height (1.6 m) passes over a wolf or rat; arrows are tighter. Biped bands are untouched.
+const HIT = {
+  meleeTop: 0.25, meleeTopPerM: 0.65, meleeBottom: -0.3,   // a swing hits up to height + top + perM x distance, down to bottom
+  rangedTop: 0.15, rangedBottom: -0.05,                    // arrows and bolts
+  legsFrac: 0.4,                                           // below this share of its height is the legs
+  legsPitchDeg: 25,                                        // aiming down this steeply is always a leg hit
+  floatBelow: 0.3, floatAbove: 0.5,                        // floating types: band is hover - below .. hover + height x above
+  reachRadius: 0.5,                                        // share of the target's radius that counts toward melee reach
+};
+
+// Hit zone at height y for a low or floating enemy, or null (over or under it). d = melee distance (omit for arrows),
+// pitch = the swinger's pitch (melee only). Pure: no globals besides HIT.
+function quadZone(y, e, d, pitch) {
+  const h = e.T.height, melee = d !== undefined, hover = e.T.model === 'float' ? e.T.hover || 0 : 0;
+  if (hover) {
+    if (y < hover - HIT.floatBelow || y > hover + h * HIT.floatAbove + (melee ? HIT.meleeTopPerM * d : 0)) return null;
+    return y >= hover ? 'body' : 'legs';
+  }
+  const top = h + (melee ? HIT.meleeTop + HIT.meleeTopPerM * d : HIT.rangedTop), bottom = melee ? HIT.meleeBottom : HIT.rangedBottom;
+  if (y > top || y < bottom) return null;
+  if (melee && pitch !== undefined && pitch <= -HIT.legsPitchDeg * Math.PI / 180) return 'legs';
+  return y < h * HIT.legsFrac ? 'legs' : 'body';
+}
+
+// Best living enemy in the swing cone, or null. Walls block the swing. Nearest candidate whose zone is not null wins;
+// if none qualifies the nearest one is returned with zone null (aim off).
 function findMeleeTarget(player, eyeY, enemies, floor, reach) {
-  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
-  let best = null, bestD = 1e9;
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), tp = Math.tan(player.pitch);
+  let best = null, bestD = 1e9, bestZ = null, near = null, nearD = 1e9;
   for (const e of enemies) {
     if (e.dead) continue;
     const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz);
-    if (d > reach + 0.3 || (d > 0.8 && (dx * fx + dz * fz) / d < 0.82)) continue;
+    if (d - (e.r || 0) * HIT.reachRadius > reach + 0.3 || (d > 0.8 && (dx * fx + dz * fz) / d < 0.82)) continue;
+    if (d >= bestD) continue;                                  // cannot beat the current pick (a null near one is tracked below)
     if (!hasLOS(floor, player.x, player.z, e.x, e.z)) continue;
-    if (d < bestD) { best = e; bestD = d; }
+    const y = eyeY + tp * d;
+    const zone = e.quad ? quadZone(y, e, d, player.pitch) : aimZone(eyeY, player.pitch, d, e.boss ? e.scaleK : e.T.scale || 1);
+    if (zone) { best = e; bestD = d; bestZ = zone; }
+    else if (d < nearD) { near = e; nearD = d; }
   }
-  if (!best) return null;
-  let zone;
-  if (best.quad) {                                  // rats and wolves are low: any aim at their height lands, low aim is a leg hit
-    const y = eyeY + Math.tan(player.pitch) * bestD, h = best.T.height;
-    zone = y > h || y < -0.1 ? null : y < h * 0.4 ? 'legs' : 'body';
-  } else zone = aimZone(eyeY, player.pitch, bestD, best.boss ? best.scaleK : best.T.scale || 1);
-  return zone ? { e: best, zone, dist: bestD } : { e: best, zone: null, dist: bestD };
+  if (best) return { e: best, zone: bestZ, dist: bestD };
+  return near ? { e: near, zone: null, dist: nearD } : null;
 }
 
 // Ian's Hog's pole: beige skin with branching reddish-purple veins (paler and greyer when limp). Cached per state.

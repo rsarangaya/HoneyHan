@@ -71,3 +71,13 @@ function discoverEnemiesInView() {
 }
 
 const session = { started: false };   // true once the player has clicked past the welcome screen
+// Assist settings (Easy difficulty): Easy only unlocks two see-through aids, it changes nothing else. Saved in localStorage; ?easy=1 / ?easy=0 overrides Easy for tests.
+const assist = (() => {
+  const K = 'honeyhan-assist', q = new URLSearchParams(location.search);
+  const a = { easy: false, vision: true, hearing: true };   // easy: the difficulty; vision / hearing: the two toggles (default on)
+  try { const o = JSON.parse(localStorage.getItem(K) || '{}'); a.easy = !!o.easy; if (o.vision === false) a.vision = false; if (o.hearing === false) a.hearing = false; } catch (e) {}
+  if (q.has('easy')) a.easy = q.get('easy') === '1';
+  a.save = () => { try { localStorage.setItem(K, JSON.stringify({ easy: a.easy, vision: a.vision, hearing: a.hearing })); } catch (e) {} };
+  Object.defineProperties(a, { showVision: { get() { return a.easy && a.vision; } }, showHearing: { get() { return a.easy && a.hearing; } } });
+  return a;
+})();

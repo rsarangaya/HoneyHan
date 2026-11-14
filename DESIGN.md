@@ -97,6 +97,9 @@ Since the theme is fixed for the run, the boss belongs to that theme and the are
 - Ranged sneak: a bow shot at an unaware enemy is a headshot. It makes noise on impact unless using a silent arrow (rare item).
 - Arrows are a found resource (see 5.4 and 6). Because they deal less damage than melee, ranged is a tool for opening, kiting and softening, not the main way to kill.
 
+### Easy assists and the noise symbol (built 2026-11-14)
+All modes show a small sound-wave symbol under the hunger bar: dark when you make no real noise (still or crouch-creeping), one to three lit arcs as you walk, sprint or fight. Easy (assists) difficulty, chosen on the welcome screen or in the pause menu Options tab, changes nothing about damage or enemy senses; it only unlocks two toggles: enemy vision zones (a floor fan per living enemy within 25 m, yellow/orange/red by awareness, sized to the real range) and a hearing ring (how far a normal walking step is heard).
+
 ## 5. Combat
 
 ### 5.1 Controls
@@ -115,7 +118,8 @@ Since the theme is fixed for the run, the boss belongs to that theme and the are
 The zone is where the swing or arrow actually lands (crosshair position; melee uses a cone with vertical bias). Start with the simple cone, not directional swings. Total damage cap of about x2 including all bonuses (as in Test1).
 
 ### 5.3 Blocking (Option B, decided)
-- RMB blocks head and body attacks. Leg sweeps go under the block; answer by backing off or stepping over.
+- RMB blocks head and body attacks. Leg sweeps go under a high guard; answer by backing off, stepping over, or guarding low.
+- Low guard: blocking with the view tipped down 25 degrees or more (LOWGUARD in main.js) covers the legs instead of head and body, with the same parry window and cost. Head/body hits then land (HIGH HIT). A shield covers both. Arrows ignore it.
 - Early window (about 0.2 s) is a parry that staggers the attacker. Later it is a normal block that costs stamina.
 - Shields widen coverage (partial cover vs low sweeps) and allow a bash.
 - Block cost scales with the enemy weapon.

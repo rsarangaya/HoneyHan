@@ -1,11 +1,13 @@
 # Status
 
 Project: HoneyHan (formerly Prototype Test), a first-person stealth roguelike dungeon crawler.
-Last updated: 2026-11-13 (branch `impatience`: round walls for the Orchard, Jungle and Cellar; the theme overhaul is complete)
+Last updated: 2026-11-14 (branch `impatience`: smoother guard movement and turning, bows drop like other weapons)
 
 Read `DESIGN.md` for the full design. At the end of each work block, update this file (done / next / open issues) and bump the date.
 
 ## Done
+- Easy assists and noise symbol (2026-11-14): `assist` in `js/controls.js` (Easy vs Normal, saved in localStorage `honeyhan-assist`, `?easy=1/0` override), chosen on the welcome screen and in a new Options tab of the pause menu. Easy changes nothing else; it only unlocks two toggles (default on): enemy vision fans (`Enemy.sync`: living enemies within 25 m, scaled to the real range incl. type vis, stealth, posture, daze, mesh scale; yellow/orange/red) and a hearing ring (`hearRing` in `js/main.js`, one MeshBasic ring, walking radius incl. hush and brush/dark/crowd patches, one extra draw call). The noise symbol (all modes, `#noise` under the hunger bar) lights 0 to 3 arcs from the real noise radius (<3 m dark, <9 one, <16 two, else three, held 0.4 s). Test `tests/game.assist.test.js`. Deferred: sprint and crouch rings, theme sight multipliers on the fans.
+- Torches and low guard (2026-11-14): torches now hang on the real wall surface (`wallSurface` in `js/main.js` ray-tests the round wall geometry; box faces are flush) with a plate, an arm and a flame leaning 30 degrees out; spots with no surface at any height get a floor post, spots next to a door or tall decor are skipped (`tests/game.torches.test.js`). Low guard: blocking while looking down 25+ degrees covers the legs instead of head and body (`LOWGUARD` in `js/main.js`; shield still covers both; arrows unaffected).
 - Design doc written: `DESIGN.md` (concept, floors and themes, stealth and noise, combat, weapons, statuses, wands, architecture, build order, risks).
 - Reference projects reviewed (read only, not changed), both in `C:\Users\rsarangaya\OneDrive - JSSI\Documents\ClaudeCodeCloudTest`:
   - `Test1`: Muay Thai FPS (Three.js, no build step). Source for movement, viewmodel, Fighter rig, `combat.js` tables, stamina.
@@ -215,6 +217,12 @@ How to add a theme: (1) add a `LAYOUTS` style if it needs its own rooms (a new `
 - Cost: draw calls +1 on the Orchard (shrub + tree meshes), 0 elsewhere. Wall triangles per floor: Orchard 32k to 72k, Jungle 33k to 63k, Cellar 38k to 47k (boxes were 1k to 3k); worst whole-frame floor start 110k (Orchard floor 2), under the 150k budget. Test: `tests/game.walls.test.js`.
 - Deferred: trunk-width collision (tiles stay square), distance LOD for wall blobs if a floor gets denser, a brighter Cellar rock.
 
+## Guard movement and bow drops (2026-11-14)
+- Guards walk natural lines: `goTo` (`js/enemy.js`) keeps the 4-way BFS but every 0.12 s skips to the furthest of the next 5 path nodes with a clear straight line (`clearLine`: the guard collider with 0.05 m spare, walls, doors, safe-room door, furniture, blocked tiles), so staircases become diagonals. Stuck detection and re-pathing are unchanged.
+- Turn rates: `TUNE.enemyTurn` 12 rad/s (walking, backing away) and `TUNE.enemyTurnAlert` 9 rad/s (facing a target while alerted), in the tuning panel (storage key `-27`). Wind-up (4), charge (6), cower and ranged aiming (5) stay slow on purpose.
+- Bows: a guard's carried-weapon drop is a bow of the same tier 1 time in 4 (dagger/sword/mace/bow about 25% each); an archer drops a bow (60%) or arrows (40%) within its 70% drop chance. Chest arrow rates and the shop (already uniform over four bases) are unchanged.
+- Tests: `tests/game.walk.test.js` (diagonal, no wall clipping, goals reached, turn rate); weapon shares in `tests/enemytypes.test.js`.
+
 ## Decisions made
 - Name: HoneyHan (formerly "Prototype Test").
 - Scope for now: floors 1 to 5, first boss on floor 5. Run length is up to the player.
@@ -247,6 +255,9 @@ How to add a theme: (1) add a `LAYOUTS` style if it needs its own rooms (a new `
 2. Design the real final boss and stage 5 (placeholder now, see `finalBoss*` in `TUNE`).
 3. Per-theme boss mechanics. Bosses are renamed Cave Warlords now (one fight, renamed and tinted per theme), so each theme still needs its own mechanic.
 4. Tuning from play: stage scaling (`stage*`), loot depth, encounter odds, the mimic and bomb goblin numbers, lockpick timing, plus the open list from the `impatience` branch (hunger supply, shop prices, wands and Rage, the bow against melee).
+
+### Hitbox pass for low enemies (2026-11-14)
+Melee and arrow hit zones for rats, wolves, jaguars, mimics and floaters were reworked in `js/combat.js` (`HIT` table, pure `quadZone`, shared with `zoneAtHeight` in `js/ranged.js`): vertical tolerance grows with distance (a level standing swing hits a wolf at reach and a rat at 1.5 m), aiming down 25 degrees or more is a leg hit, floaters use a band around their hover height, the nearest candidate with a valid zone is hit (a rat no longer shields a goblin behind it) and the target's radius counts half toward reach. Biped zones are unchanged. Tests: `tests/hitbox.test.js`. Numbers are guesses, to tune by play.
 
 ## Open issues
 - Guard blocking time (`cb.blockT`) runs on real frame time, but guards run on time capped at 0.05 s per frame, so below about 20 fps the parry window gets harder to hit. Only matters on very slow machines.

@@ -90,7 +90,7 @@ run('Enemy types and hunger', async ({ open, check }) => {
       return { ...out, zones: [...out.zones].join(',') };
     });
     check('rats attack legs and body, never the head', !/head/.test(rat.zones), rat.zones);
-    check('aiming at head height misses a rat, aiming low hits', !rat.highAim && !!rat.lowAim, `${rat.highAim}/${rat.lowAim}`);
+    check('a level swing and a low swing both hit a rat (hitbox tolerance)', !!rat.highAim && !!rat.lowAim, `${rat.highAim}/${rat.lowAim}`);
     check('one sword hit kills a rat', rat.dead);
 
     // 16. On a Sunken Tavern run the generator mixes natives in, wolves have handlers, and everything runs for a while.

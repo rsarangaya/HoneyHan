@@ -3,7 +3,7 @@ const fs = require('fs'), path = require('path'), vm = require('vm');
 const T = 3;
 const ctx = vm.createContext({ console, Math, TILE: T, WALL_H: 3.6, BOSS_SCALE: 1.6, THREE: {},
   wallAt: (f, tx, ty) => tx < 0 || ty < 0 || tx >= f.w || ty >= f.h || f.tiles[ty * f.w + tx] === 0 });
-vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/ranged.js'), 'utf8'), ctx, { filename: 'js/ranged.js' });
+for (const f of ['combat', 'ranged']) vm.runInContext(fs.readFileSync(path.join(__dirname, `../js/${f}.js`), 'utf8'), ctx, { filename: `js/${f}.js` });   // zoneAtHeight uses quadZone from combat.js
 const { BOW, SHIELD, zoneAtHeight, stepArrow } = vm.runInContext('({ BOW, SHIELD, zoneAtHeight, stepArrow })', ctx);
 let fails = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? '  (' + detail + ')' : ''}`); if (!ok) fails++; };

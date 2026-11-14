@@ -91,6 +91,20 @@ function floodDist(floor, sx, sy, out) {
   }
 }
 
+// Can a body walk the straight line (x0,z0)-(x1,z1)? Samples the guard's own collider (walls, closed doors, the safe-room door,
+// furniture and stairwell solids) every 0.4 m with a little spare radius, plus the path-blocked tiles. Allocation free.
+function clearLine(floor, x0, z0, x1, z1) {
+  const dx = x1 - x0, dz = z1 - z0, n = Math.ceil(Math.hypot(dx, dz) / 0.4), r0 = collider.radius;
+  collider.radius = r0 + 0.05; collider.props = floor.solids;
+  let ok = true;
+  for (let i = 1; i <= n && ok; i++) {
+    const x = x0 + dx * i / n, z = z0 + dz * i / n;
+    if (Player.prototype.blocked.call(collider, floor, x, z) || pathBlocked(floor, Math.floor(x / TILE), Math.floor(z / TILE))) ok = false;
+  }
+  collider.radius = r0;
+  return ok;
+}
+
 const turnToward = (a, b, max) => {
   let d = Math.atan2(Math.sin(b - a), Math.cos(b - a));
   return a + Math.max(-max, Math.min(max, d));
@@ -175,7 +189,7 @@ class Enemy {
     this.ri = 1;
     this.yaw = (spec.seed % 628) / 100;
     this.state = 'unaware'; this.aware = 0;
-    this.last = null; this.path = []; this.pk = ''; this.rp = 0;
+    this.last = null; this.path = []; this.pk = ''; this.rp = 0; this.smT = 0;
     this.wait = 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
@@ -421,7 +435,7 @@ class Enemy {
     this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
     m.add(this.icon);
 
-    // flat fan showing the vision cone, only visible in dev mode
+    // flat fan showing the vision cone, drawn at VIS_RANGE and scaled to the real range each frame; shown in dev mode, and in Easy mode (assist.showVision) for living guards within 25 m
     const segs = 18, verts = [0, 0.04, 0];
     for (let i = 0; i <= segs; i++) {
       const a = (-FOV_HALF + 2 * FOV_HALF * i / segs) * Math.PI / 180;
@@ -430,7 +444,7 @@ class Enemy {
     const idx = []; for (let i = 1; i <= segs; i++) idx.push(0, i, i + 1);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3)); geo.setIndex(idx);
-    this.cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    this.cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
     this.cone.visible = false;
     m.add(this.cone);
   }
@@ -574,6 +588,13 @@ class Enemy {
     this.rp -= dt;
     let gx = tx, gz = tz;
     if (this.path.length) {
+      if ((this.smT -= dt) <= 0) {   // path smoothing: skip ahead to the furthest of the next 5 nodes in a clear straight line, so 4-way staircases become diagonals
+        this.smT = 0.12;
+        for (let k = Math.min(5, this.path.length) - 1; k > 0; k--) {
+          const n = this.path[k];
+          if (clearLine(this.floor, this.x, this.z, (n.x + 0.5) * T, (n.y + 0.5) * T)) { for (let j = 0; j < k; j++) this.path.shift(); break; }
+        }
+      }
       gx = (this.path[0].x + 0.5) * T; gz = (this.path[0].y + 0.5) * T;
       if (Math.hypot(gx - this.x, gz - this.z) < 0.4) { this.path.shift(); return Math.hypot(tx - this.x, tz - this.z); }
     }
@@ -592,7 +613,7 @@ class Enemy {
     if (!Player.prototype.blocked.call(collider, this.floor, nx, this.z)) this.x = nx;
     if (!Player.prototype.blocked.call(collider, this.floor, this.x, nz)) this.z = nz;
     if (step > 0.005 && Math.hypot(this.x - ox, this.z - oz) < step * 0.3) this.stuckT += dt; else this.stuckT = Math.max(0, this.stuckT - dt * 2);
-    this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
+    this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurn * dt);
     this.walkT += step * 5;
     return Math.hypot(tx - this.x, tz - this.z);
   }
@@ -738,10 +759,10 @@ class Enemy {
     }
     if (this.seen && los && dist < R.min) {                                  // too close: back away, still facing you
       this.goTo(this.x - dx / dist * 4, this.z - dz / dist * 4, this.chase, dt);
-      this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 9 * dt);
+      this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurn * dt);
     } else if (!this.seen || !los || dist > R.max) {
       if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
-    } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
+    } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
     if (!this.seen) this.lostT += dt * 0.5;
     if (this.seen && los && dist <= R.max && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.cast = null; this.zone = 'shoot'; }
     if (this.lostT > 3) { this.aware = 0.6; this.set('searching'); }
@@ -799,7 +820,7 @@ class Enemy {
         }
       }
     } else {
-      if (dist > this.reach * 0.8) this.goTo(t.x, t.z, this.chase, dt); else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
+      if (dist > this.reach * 0.8) this.goTo(t.x, t.z, this.chase, dt); else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
       if (dist < this.reach && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(this.T.zones); }
     }
     this.sync(dt); return null;
@@ -937,7 +958,7 @@ class Enemy {
         }
         if (dist > 1.0 || !this.seen) {
           if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
-        } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), 7 * dt);
+        } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
         if (!this.seen) this.lostT += dt * 0.5;
         if (dist < this.reach && los && this.atkCd <= 0) { this.winding = true; this.windT = 0; this.zone = pickZone(this.T.zones); }
         if (this.lostT > 3) { this.aware = 0.6; this.set('searching'); }
@@ -1036,9 +1057,21 @@ class Enemy {
       this.icon.material.opacity = alerted ? 1 : 0.35 + 0.65 * this.aware;
       this.icon.scale.setScalar((alerted ? 0.9 : 0.5 + 0.3 * this.aware) * (this.quad ? 1 / this.scaleK : 1));
     }
-    if (this.cone.visible) this.cone.material.color.setHex(this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30);
+    // vision fan: dev mode shows every one, Easy mode (assist.showVision) only living ones within 25 m (the fan is a child of the mesh, so culling spares the rest)
+    const cone = this.cone, pl = Enemy.target;
+    let want = false;
+    if (!this.dead) want = Enemy.devCones || (assist.showVision && pl && (pl.x - this.x) * (pl.x - this.x) + (pl.z - this.z) * (pl.z - this.z) < 625);
+    if (want !== cone.visible) cone.visible = want;
+    if (want) {
+      const col = this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30;
+      if (col !== this.coneCol) { this.coneCol = col; cone.material.color.setHex(col); }
+      const k = pl ? (pl.crouching ? 0.55 : pl.sprinting ? 1.25 : 1) * pl.stealthMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1) / this.scaleK : 1;   // the same range update() sees you at (the mesh is scaled, the fan is its child)
+      if (k !== this.coneK) { this.coneK = k; cone.scale.set(k, 1, k); }
+    }
   }
 }
 
+Enemy.devCones = false;   // dev mode: show every vision fan (main.js setDev)
+Enemy.target = null;      // the player, for the Easy-mode vision fans (main.js)
 Enemy.all = [];   // the current floor's enemies (set by main.js), for rage targeting
 Enemy.ally = null;   // the player's live ally, if any (js/quests.js): Rage may pick it as a target

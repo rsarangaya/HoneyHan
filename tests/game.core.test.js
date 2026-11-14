@@ -174,5 +174,23 @@ run('Core gameplay: floors, stairs, collision, combat basics, statuses', async (
     check('a healing potion stops bleeding', hurt.cured);
 
 
+    // 11. Low guard: blocking with the view tipped down covers the legs (not head/body); level, legs go under the block.
+    const lowg = await page.evaluate(async () => {
+      const run = async (zone, pitch) => {
+        T.reset(); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 }); game.inv.hp = 1e9; game.player.pitch = pitch;
+        const e = T.guard(1.3, 'toward', true); const hp0 = game.inv.hp; let landed = false, struck = false;
+        const upd = e.update; e.update = function (...a) { game.player.pitch = pitch; if (this.winding) { this.zone = zone; game.cb.want = true; if (game.cb.block) game.cb.blockT = 1; } const r = upd.apply(this, a); if (r) struck = true; return r; };
+        await T.until(() => game.inv.hp < hp0 || struck, 8000); await T.sleep(100);
+        return game.inv.hp < hp0;
+      };
+      const o = {};
+      o.lowLegs = await run('legs', -0.8); o.levelLegs = await run('legs', 0); o.lowBody = await run('body', -0.8); o.levelBody = await run('body', 0);
+      return o;
+    });
+    check('low guard blocks a leg hit', !lowg.lowLegs);
+    check('level guard lets a leg hit land', lowg.levelLegs);
+    check('low guard lets a body hit land', lowg.lowBody);
+    check('level guard blocks a body hit', !lowg.levelBody);
+
     await page.close();
 });

@@ -39,6 +39,9 @@ const pauseMenu = (() => {
 
   function itemCards() {
     const out = [];
+    const open = (name, color, lines) => `<div class="card"><div class="nm" style="color:${color}">${name}</div><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul></div>`;   // always known
+    out.push(open('Noise symbol', '#e8d878', ['The small sound-wave symbol under the hunger bar shows whether enemies can hear you: dark when silent (standing still or creeping crouched), then one, two or three lit arcs as you walk, sprint or fight.', 'It follows the real noise: heavy armor, the Library hush and loud actions raise it. Crouch and stand still to go dark.']));
+    out.push(open('Easy assists', '#7ad8ff', ['Choose Easy (assists) on the welcome screen or in the Options tab. It changes nothing about damage or enemy senses; it only unlocks two toggles.', 'Show enemy vision zones: a coloured fan on the floor in front of each living enemy within 25 m (yellow unaware, orange suspicious, red alerted), as far as it really sees you right now.', 'Show hearing range: a blue ring round you, how far a normal walking step is heard. Crouching and creeping carry much less; sprinting more.']));
     out.push(card('item:gold', 'Gold', '#e8c860', ['Money. Spend it at the goblin merchant, who sets up shop on one floor from 1 to 4. He also buys your spare gear.']));
     out.push(card('item:arrows', 'Arrows', '#c8c8c8', ['Ammo for the bow. One per shot, up to 25 in the quiver. Arrows that miss often lie where they landed: walk over one to pick it up again.']));
     out.push(card('item:key', 'Keys', '#e8c860', ['Open a locked room (armory, vault or brewery) on the same floor. Each key hides in a chest. Hold the interact key at the door.']));
@@ -89,13 +92,13 @@ const pauseMenu = (() => {
         `${TUNE.enemyHp} HP. Patrols between rooms and carries a random weapon (dagger, sword or mace) and sometimes armor.`,
         'Sees in a cone ahead of it (shorter if you crouch, longer if you sprint) and hears footsteps, fights and chests.',
         'Unaware, suspicious, alerted or searching: the icon over its head shows which.',
-        'Its swing shows where it will hit (overhead is the head, sideways is the body, low is the legs). Block head and body hits. Leg sweeps go under a block.',
+        'Its swing shows where it will hit (overhead is the head, sideways is the body, low is the legs). Block head and body hits. Leg sweeps go under a block unless you guard low: hold block while looking down (about 25 degrees) and the block covers the legs instead of head and body.',
         'Hit it from behind while it has not noticed you for a sneak attack. A dagger kills it outright.',
         'Has a chance to drop one item when it dies.']),
       card('enemy:cook', 'Goblin Cook', '#e6e2d2', ['Works the kitchens and mess halls with a chipped cleaver. No armor.', 'Drops food and the odd potion (food comes with the hunger system).', 'Otherwise fights like a guard.']),
       card('enemy:bandit', 'Drunk Bandit', '#b05a4a', ['Sways, sees poorly and hears worse, so it is an easy sneak kill.', 'Carries a dagger (its body hits make you bleed) and usually some gold.', 'If it spots you or gets hurt it bellows, and that carries about 15 m.']),
-      card('enemy:rat', 'Giant Rat', '#9a8a70', ['Small and fast and always in a pack of three, usually in a storeroom. Dies in one hit but bites at your legs (slow).', 'Aim low: it is only as tall as your knee. Drops next to nothing.']),
-      card('enemy:wolf', 'Tamed Wolf', '#9aa0aa', ['A goblin keeps it as a pet and it trots after that goblin. Faster than a sprint, bites fast with a short warning, goes for your legs and body.', 'Smells you: crouching and walls do not hide you from it, only standing still does.', 'If its handler is alerted the wolf is let off the leash. Kill the handler quietly and it just waits. A leg hit makes it limp.']),
+      card('enemy:rat', 'Giant Rat', '#9a8a70', ['Small and fast and always in a pack of three, usually in a storeroom. Dies in one hit but bites at your legs (slow).', 'Aim low: it is only as tall as your knee. Hold block while looking down to guard your legs from its bite. Drops next to nothing.']),
+      card('enemy:wolf', 'Tamed Wolf', '#9aa0aa', ['A goblin keeps it as a pet and it trots after that goblin. Faster than a sprint, bites fast with a short warning, goes for your legs and body (guard low: block while looking down).', 'Smells you: crouching and walls do not hide you from it, only standing still does.', 'If its handler is alerted the wolf is let off the leash. Kill the handler quietly and it just waits. A leg hit makes it limp.']),
       card('enemy:archer', 'Goblin Archer', '#8fbf5a', ['Shoots from a distance and backs away if you close in. A green hood and a bow.', 'It draws for a moment with the bow raised: that is your cue to move, block or break line of sight. Arrows can be blocked with a sword or shield (a parry just stops them) and can hit the head, body or legs (a leg hit slows you).', 'Drops arrows. Weak up close, so rush it or shoot it first.']),
       card('enemy:shaman', 'Goblin Shaman', '#b060ff', ['A hooded caster with a glowing staff. Sees poorly and hears well, so a silent kill from behind is best.', 'Hurls a slow bolt that Slows or Dazes you. A block does not stop a hex, but it is slow enough to dodge.', 'Heals a badly hurt goblin in its sight, so kill it first. Sometimes carries a potion or a wand.']),
       card('enemy:brute', 'Brute', '#8a7a5a', ['A huge goblin with 3x health that hits twice as hard, slowly and with a long warning. Ordinary hits do not stagger it and a sneak attack is capped, but a parry still staggers it.', 'Sprinting outpaces it. Usually drops Rare or better equipment.']),
@@ -126,6 +129,15 @@ const pauseMenu = (() => {
       <div class="row"><span class="dim">Pause menu</span><span class="dim">Esc</span></div>
       <p><button data-act="reset">Reset all to defaults</button></p>`;
   }
+  // Easy changes nothing but unlocking two see-through aids; they show only while Easy is on, and each is remembered.
+  function optionsHtml() {
+    const row = (act, label, on, txt) => `<div class="row"><span>${label}</span><button data-act="${act}" class="${on ? 'listen' : ''}">${txt}</button></div>`;
+    return `<div class="note">Easy only unlocks two aids. Damage, enemy senses and everything else stay the same. You can switch any time.</div>
+      ${row('diffN', 'Normal', !assist.easy, assist.easy ? 'Choose' : 'Chosen')}${row('diffE', 'Easy (assists)', assist.easy, assist.easy ? 'Chosen' : 'Choose')}
+      ${assist.easy ? row('aVis', 'Show enemy vision zones', assist.vision, assist.vision ? 'On' : 'Off') + row('aHear', 'Show hearing range (walking, not crouched)', assist.hearing, assist.hearing ? 'On' : 'Off') : '<div class="row dim"><span>Enemy vision zones and hearing range: Easy only</span></div>'}`;
+  }
+  function diffLabel() { const b = document.getElementById('welcomeDiff'); if (b) b.textContent = 'Difficulty: ' + (assist.easy ? 'Easy (assists)' : 'Normal'); }
+  function setDiff(easy) { assist.easy = easy; assist.save(); diffLabel(); }
   function glossaryHtml() {
     const sections = { items: 'Items', equipment: 'Equipment', enemies: 'Enemies', statuses: 'Statuses' };
     const tabs = Object.entries(sections).map(([k, v]) => `<button data-g="${k}" class="${gtab === k ? 'on' : ''}">${v}</button>`).join(' ');
@@ -142,9 +154,9 @@ const pauseMenu = (() => {
   function render() {
     root.innerHTML = `<div class="win">
       <div class="head"><b>${session.started ? 'Paused' : 'HoneyHan'}</b><span class="dim">Work in progress. Feedback welcome!</span></div>
-      <div class="tabs"><button data-tab="controls" class="${tab === 'controls' ? 'on' : ''}">Controls</button><button data-tab="glossary" class="${tab === 'glossary' ? 'on' : ''}">Glossary</button></div>
-      <div class="body">${tab === 'controls' ? controlsHtml() : glossaryHtml()}</div>
-      <div class="foot"><span class="dim">${tab === 'controls' ? 'Changes save automatically.' : 'Entries unlock as you find items and meet enemies, and stay between runs.'}</span><button data-act="resume">${session.started ? 'Resume' : 'Back'}</button></div>
+      <div class="tabs"><button data-tab="controls" class="${tab === 'controls' ? 'on' : ''}">Controls</button><button data-tab="options" class="${tab === 'options' ? 'on' : ''}">Options</button><button data-tab="glossary" class="${tab === 'glossary' ? 'on' : ''}">Glossary</button></div>
+      <div class="body">${tab === 'controls' ? controlsHtml() : tab === 'options' ? optionsHtml() : glossaryHtml()}</div>
+      <div class="foot"><span class="dim">${tab === 'controls' || tab === 'options' ? 'Changes save automatically.' : 'Entries unlock as you find items and meet enemies, and stay between runs.'}</span><button data-act="resume">${session.started ? 'Resume' : 'Back'}</button></div>
     </div>`;
   }
 
@@ -179,6 +191,10 @@ const pauseMenu = (() => {
     else if (t.dataset.bind) { listening = t.dataset.bind; note = ''; }
     else if (t.dataset.act === 'reset') { Object.assign(KEYS, DEFAULT_KEYS); saveKeys(); note = 'Controls reset.'; }
     else if (t.dataset.act === 'resume') return close();
+    else if (t.dataset.act === 'diffN') setDiff(false);
+    else if (t.dataset.act === 'diffE') setDiff(true);
+    else if (t.dataset.act === 'aVis') { assist.vision = !assist.vision; assist.save(); }
+    else if (t.dataset.act === 'aHear') { assist.hearing = !assist.hearing; assist.save(); }
     render();
   });
 
@@ -205,6 +221,8 @@ const pauseMenu = (() => {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', e => { e.stopPropagation(); open(which); });   // do not start the game
   }
+  const wd = document.getElementById('welcomeDiff');         // the welcome screen's difficulty button: Normal / Easy (assists)
+  if (wd) { wd.addEventListener('click', e => { e.stopPropagation(); setDiff(!assist.easy); }); diffLabel(); }
   discoverItem(inv.equip.weapon, true);                      // the starting sword is already known
   return { open, close, render };
 })();

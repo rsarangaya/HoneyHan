@@ -28,6 +28,7 @@ const hud = {
 const mctx = hud.mini.getContext('2d');
 
 const player = new Player();
+Enemy.target = player;   // for the Easy-mode vision fans (js/enemy.js)
 let cullChunks = [];        // the merged furniture and torches of the current floor, for distance culling (js/perf.js)
 let floor = null, floorNum = 1, group = null, stairsLight = null, explored = null, stairBox = null, upBox = null, upLight = null;
 const stageCaches = { 1: {} };   // stage -> the floors you have left there, kept exactly as they were (guards, opened chests, bodies, explored map); bounded by trimCaches
@@ -407,7 +408,26 @@ const WALL_GEO = {
   }),
 };
 // per kind of round wall: y scale range (the Jungle's trees are irregular; shrubs vary a little; rock reaches the ceiling), whether the wall texture is painted on it
+// A round wall tile's per-tile look from a hash of its coordinates (never the rng): a = turn, b = height, c = tint (all 0..1), k = width scale.
+function tileHash(x, y) {
+  const hh = Math.imul(x, 73856093) ^ Math.imul(y, 19349663), a = (hh >>> 0) % 997 / 997;
+  return { a, b: (hh >>> 4) % 991 / 991, c: (hh >>> 9) % 983 / 983, k: 0.95 + a * 0.1 };
+}
 const ROUND_WALL = { shrub: { y0: 0.85, y1: 1.1, map: true }, appletree: { y0: 0.9, y1: 1.1, map: false }, tree: { y0: 0.75, y1: 1.1, map: false }, rock: { y0: 1, y1: 1, map: true } };
+// What kind of wall each wall tile got this floor (tile index -> 'box' | 'shrub' | 'appletree' | 'tree' | 'rock'), filled by wallMesh.
+let wallKinds = new Map();
+const _rcast = new THREE.Raycaster(), _rmesh = new THREE.Mesh(undefined, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })), _rO = new THREE.Vector3(), _rD = new THREE.Vector3(), _rq = new THREE.Quaternion(), _rY = new THREE.Vector3(0, 1, 0), _rS = new THREE.Vector3();
+// How far from the centre of wall tile (tx, ty) its real surface is, looking toward the open neighbour (dx, dy) (a unit step) at height y, in metres; null when nothing is there at that height.
+// A box is flush at half a tile. A round wall is hit with a horizontal ray against its actual (turned, scaled) blob geometry: deterministic, no rng.
+function wallSurface(tx, ty, dx, dy, y) {
+  const kind = wallKinds.get(ty * floor.w + tx); if (!kind) return null;
+  if (kind === 'box') return TILE / 2;
+  const R = ROUND_WALL[kind], th = tileHash(tx, ty), cx = (tx + 0.5) * TILE, cz = (ty + 0.5) * TILE;
+  _rmesh.geometry = WALL_GEO[kind](); _rmesh.position.set(cx, 0, cz); _rmesh.quaternion.setFromAxisAngle(_rY, th.a * 6.283); _rmesh.scale.set(th.k, R.y0 + th.b * (R.y1 - R.y0), th.k); _rmesh.updateMatrixWorld(true);
+  _rcast.set(_rO.set(cx + dx * TILE, y, cz + dy * TILE), _rD.set(-dx, 0, -dy)); _rcast.far = TILE * 1.2;
+  const hit = _rcast.intersectObject(_rmesh, false);
+  return hit.length ? TILE - hit[0].distance : null;
+}
 // Door open animations by the theme's doors.openAnim: t runs 0 to 1. slide: up out of the way. roll (cave mouth): the curtain and boulders roll up to the lintel. sink (ice seal): the slab drops through the floor.
 const DOOR_ANIM = {
   slide: (o, t) => { o.mesh.position.y = t * WALL_H; },
@@ -447,6 +467,7 @@ function pruneThemeTextures() {
 }
 
 function buildFloor() {
+  wallKinds = new Map();
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -471,8 +492,9 @@ function buildFloor() {
   const wallMesh = (list, mat, kind, extra = 0) => {     // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws. extra: spare instances at the end (the Library's sliding shelves)
     const im = new THREE.InstancedMesh((WALL_GEO[kind] || WALL_GEO.box)(), mat, list.length + extra), R = ROUND_WALL[kind];
     list.forEach(([x, y], i) => {
+      wallKinds.set(y * floor.w + x, kind || 'box');
       if (R) {                                      // a hash of the tile (never the rng): turn, size, height and tint, so the wall does not look stamped
-        const hh = Math.imul(x, 73856093) ^ Math.imul(y, 19349663), a = (hh >>> 0) % 997 / 997, b = (hh >>> 4) % 991 / 991, c = (hh >>> 9) % 983 / 983, k = 0.95 + a * 0.1;
+        const { a, b, c, k } = tileHash(x, y);
         wq.setFromAxisAngle(yAxis, a * 6.283); m.compose(wp.set((x + 0.5) * TILE, 0, (y + 0.5) * TILE), wq, ws.set(k, R.y0 + b * (R.y1 - R.y0), k)); im.setColorAt(i, tint.setRGB(0.86 + c * 0.2, 0.86 + b * 0.2, 0.86 + a * 0.16));
       } else m.setPosition((x + 0.5) * TILE, WALL_H / 2, (y + 0.5) * TILE);
       im.setMatrixAt(i, m);
@@ -783,20 +805,51 @@ function checkShopSight() {
 }
 
 let torchPts = [], torchGroups = [];
-const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 7), TORCH_FLAME = new THREE.ConeGeometry(0.1, 0.3, 7);
+const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6).translate(0, 0.2, 0), TORCH_FLAME = new THREE.ConeGeometry(0.1, 0.3, 6);
+const TORCH_PLATE = new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8).rotateX(Math.PI / 2), TORCH_ARM = new THREE.CylinderGeometry(0.025, 0.025, 0.22, 5).rotateX(Math.PI / 2);   // wall bracket: a plate on the surface and an arm out to the torch
+const TORCH_POST = new THREE.CylinderGeometry(0.04, 0.06, 1.5, 6).translate(0, 0.75, 0), TORCH_FOOT = new THREE.CylinderGeometry(0.2, 0.22, 0.08, 8).translate(0, 0.04, 0), TORCH_BOWL = new THREE.CylinderGeometry(0.1, 0.06, 0.12, 6).translate(0, 1.56, 0);
+const TORCH = { lean: 0.5, embed: 0.05, heights: [0, -0.4, -0.8, -1.2], minSurf: 0.2, postOut: 1.1, tall: new Set(['banner', 'hearth', 'statue', 'rpillar', 'awning', 'counter', 'crowd']) };   // lean: rad the flame tilts out from the wall; heights: tried below the usual mount height when nothing is there
 const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.pal.light, 0, 14, 1.5); scene.add(l); return l; });
+// A torch spot is dropped when tall decor stands at its wall or a door is beside it.
+function torchBlocked(t) {
+  const x = (t.x + 0.5) * TILE + t.dx * 1.0, z = (t.y + 0.5) * TILE + t.dy * 1.0;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (floor.tiles[(t.y + dy) * floor.w + t.x + dx] === T_DOOR) return true;
+  for (const o of decorObjs) if (TORCH.tall.has(o.kind) && Math.hypot(o.x - x, o.z - z) < 1.0) return true;
+  return false;
+}
+// Each torch hangs on the real surface of its wall (a box face, or a hedge, trunk or boulder found by wallSurface) with a plate and arm, the flame leaning out from it; where no surface is within reach at any
+// height it stands on a post from the floor. floor.torchMounts lists what was built ({ kind, x, y, z, nx, nz, surf }) for the tests.
 function buildTorches() {
   const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420 });
   const fire = new THREE.MeshBasicMaterial({ color: 0xffa94a });
-  torchGroups = [];
-  torchPts = floor.torches.map(t => {
-    const x = (t.x + 0.5) * TILE + t.dx * 1.42, z = (t.y + 0.5) * TILE + t.dy * 1.42;
-    const g = new THREE.Group(); g.position.set(x, floor.boss && !t.low ? 3.6 : 2.0, z);       // higher on the tall arena walls (not in the low safe room)
-    const stick = new THREE.Mesh(TORCH_STICK, iron); stick.position.y = -0.05;                                  // a round bracket and a tapering flame, not boxes
-    const flame = new THREE.Mesh(TORCH_FLAME, fire); flame.position.y = 0.26;
-    g.add(stick, flame); group.add(g); torchGroups.push(g);
-    return { lx: x - t.dx * 0.6, lz: z - t.dy * 0.6, y: floor.boss && !t.low ? 3.8 : 2.2, color: theme.pal.light, str: 1 };
-  });
+  torchGroups = []; torchPts = []; floor.torchMounts = [];
+  for (const t of floor.torches) {
+    if (torchBlocked(t)) continue;
+    const base = floor.boss && !t.low ? 3.6 : 2.0, ox = -t.dx, oz = -t.dy, wcx = (t.x + t.dx + 0.5) * TILE, wcz = (t.y + t.dy + 0.5) * TILE;   // (ox, oz): out of the wall
+    let surf = null, y = base;
+    for (const dh of TORCH.heights) { const v = wallSurface(t.x + t.dx, t.y + t.dy, ox, oz, base + dh); if (v !== null && v >= TORCH.minSurf) { surf = v; y = base + dh; break; } }
+    const g = new THREE.Group(), flame = new THREE.Mesh(TORCH_FLAME, fire);
+    let lx, lz, ly;
+    if (surf !== null) {
+      const d = surf - TORCH.embed, x = wcx + ox * d, z = wcz + oz * d;
+      g.position.set(x, y, z); g.rotation.y = Math.atan2(ox, oz);                                                     // local +z points out of the wall
+      const plate = new THREE.Mesh(TORCH_PLATE, iron); plate.position.set(0, -0.2, 0.05);
+      const arm = new THREE.Mesh(TORCH_ARM, iron); arm.position.set(0, -0.2, 0.16);
+      const head = new THREE.Group(); head.position.set(0, -0.2, 0.27); head.rotation.x = TORCH.lean;                    // tilts about the axis along the wall, so the flame leans out
+      const stick = new THREE.Mesh(TORCH_STICK, iron); flame.position.y = 0.55; head.add(stick, flame);
+      g.add(plate, arm, head);
+      lx = x + ox * 0.7; lz = z + oz * 0.7; ly = y + 0.2;
+      floor.torchMounts.push({ kind: 'wall', x, y, z, nx: ox, nz: oz, surf, wx: wcx, wz: wcz });
+    } else {
+      const x = (t.x + 0.5) * TILE + t.dx * TORCH.postOut, z = (t.y + 0.5) * TILE + t.dy * TORCH.postOut;
+      g.position.set(x, 0, z);
+      flame.position.y = 1.78; g.add(new THREE.Mesh(TORCH_POST, iron), new THREE.Mesh(TORCH_FOOT, iron), new THREE.Mesh(TORCH_BOWL, iron), flame);
+      lx = x; lz = z; ly = 1.9;
+      floor.torchMounts.push({ kind: 'post', x, y: 0, z, nx: ox, nz: oz, surf: null, wx: wcx, wz: wcz });
+    }
+    group.add(g); torchGroups.push(g);
+    torchPts.push({ lx, lz, y: ly, color: theme.pal.light, str: 1 });
+  }
   for (const o of decorObjs) {
     const l = DECOR_LIGHT[o.kind];
     if (l) torchPts.push({ lx: o.x + Math.sin(o.yaw) * 0.6, lz: o.z + Math.cos(o.yaw) * 0.6, y: o.ly ?? l.y, color: l.color, str: l.str * (o.ls || 1) });
@@ -835,7 +888,7 @@ let propObjs = [], decorObjs = [], enemies = [], search = null;
 // ---- dev mode: 5x speed, god mode, vision cones, enemy dots, N skips a floor, M reveals the map ----
 const dev = { on: false };
 function setDev(on) {
-  dev.on = on;
+  dev.on = on; Enemy.devCones = on;
   enemies.forEach(e => { e.cone.visible = on && !e.dead; });
   el('dev').style.display = on ? 'block' : 'none';
   if (typeof tunePanel !== 'undefined') tunePanel.show(on);
@@ -872,7 +925,7 @@ function playerHit() {
   const w = wstats();
   const t = findMeleeTarget(player, eyeY(), enemies, floor, w.reach);
   if (!t) { if (!smashChest(w) && !cutBell(w)) loud(2); return; }   // swung at nothing (or at a locked chest)
-  if (!t.zone) { loud(2); mark('aim off', '#aaa'); return; }
+  if (!t.zone) { loud(2); return; }   // (no on-screen 'aim off' text)
   dealHit(t.e, t.zone, w.dmg, w, w.noise);
 }
 
@@ -926,9 +979,11 @@ function hogKill() {
 
 // ---- shield: blocks properly (even with a dagger), covers leg sweeps, and bashes ----
 const shield = () => inv.equip.offhand && !wstats().ranged ? inv.equip.offhand : null;   // stowed while the bow is out
+// Low guard: a plain block with the head tipped down (pitch is negative looking down) covers the legs instead of the head and body.
+const LOWGUARD = { pitch: -0.44 };   // rad, about 25 degrees down
 function blockStats() {
   const w = wstats(), sh = shield();
-  if (!sh) return { parryWin: w.parryWin, cost: w.blockCost, legs: false };
+  if (!sh) return { parryWin: w.parryWin, cost: w.blockCost, legs: false, low: player.pitch <= LOWGUARD.pitch };
   return { parryWin: Math.max(w.parryWin, SHIELD.parryWin), cost: SHIELD.cost / TIERS[sh.tier].mul, legs: true };
 }
 function bash() {
@@ -1300,8 +1355,10 @@ function resolveEnemyAttack(e, zone, ranged = false) {
   e.hitMul = 1;   // armor in that zone's slot cuts it
   const bs = blockStats();
   if (cb.block && facing && !w.ranged) {
-    if (zone === 'legs' && !bs.legs) mark('LEG SWEEP', '#ff6a4a');           // goes under a plain block
-    else if (zone === 'legs') {                                              // a shield covers most of a low sweep
+    const lowG = bs.low && !ranged;                                          // low guard: covers legs only
+    if (lowG && zone !== 'legs') mark('HIGH HIT: guard is low', '#ff6a4a');
+    else if (!lowG && zone === 'legs' && !bs.legs) mark('LEG SWEEP: look down to guard low', '#ff6a4a');   // goes under a high guard
+    else if (zone === 'legs' && bs.legs) {                                              // a shield covers most of a low sweep
       const c = bs.cost * SHIELD.legsCost;
       if (cb.stamina >= c || dev.on) { spend(c); mark('LOW BLOCK', '#cfe'); loud(5); cb.atk = null; damage(full * SHIELD.legsTake); return; }
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
@@ -2002,6 +2059,30 @@ addEventListener('contextmenu', e => e.preventDefault());
 
 startFloor(1);
 if (params.has('dev')) setDev(true);
+// ---- noise symbol (all modes) and the Easy-mode hearing ring ----
+// The HUD symbol lights 0 to 3 arcs from how far your sound carries right now (steps, sprinting, fights, pulses); a level holds 0.4 s so a one-frame clang stays visible.
+const noiseEl = el('noise'); let noiseLvl = 0, noiseHold = 0;
+function updateNoiseHud(r, dt) {
+  const l = r < 3 ? 0 : r < 9 ? 1 : r < 16 ? 2 : 3;   // crouch-creeping (1.5 m) counts as silent; walking 6 m, sprinting 13 m
+  noiseHold -= dt;
+  if (l >= noiseLvl || noiseHold <= 0) { if (l >= noiseLvl) noiseHold = 0.4; noiseLvl = l; }
+  if (noiseEl.dataset.l !== '' + noiseLvl) noiseEl.dataset.l = noiseLvl;
+}
+// One flat ring on the floor round you: how far a normal walking step (not crouched) is heard. Shown only in Easy with the toggle on.
+const hearRing = (() => {
+  const g = new THREE.RingGeometry(0.97, 1, 64); g.rotateX(-Math.PI / 2); g.userData.shared = true;
+  const m = new THREE.MeshBasicMaterial({ color: 0x4ac0ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }); m.userData.shared = true;
+  const r = new THREE.Mesh(g, m); r.visible = false; r.frustumCulled = false; r.renderOrder = 5; r.position.y = 0.07; scene.add(r); return r;
+})();
+let hearR = 0;
+function updateAssist(under, mt) {
+  if (!assist.showHearing) { if (hearRing.visible) hearRing.visible = false; return; }
+  hearR = (6 + player.noiseBonus + (under === 'brush' ? mt.rustle : 0)) * HUSH * (under === 'dark' ? mt.darkFoot : 1) * (under === 'crowd' ? mt.din : 1);   // the same maths as the walking noise event below, minus the crouch wind
+  if (!hearRing.visible) hearRing.visible = true;
+  hearRing.position.x = player.x; hearRing.position.z = player.z;
+  if (hearRing.scale.x !== hearR) hearRing.scale.set(hearR, 1, hearR);
+}
+
 let last = performance.now(), frameNo = 0, dazeOn = false, frameCount = 0;
 const perfStats = { logic: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
 function frame(now) {
@@ -2033,6 +2114,7 @@ function frame(now) {
       events.push({ x: player.x, z: player.z, r }); rings.push({ x: player.x, z: player.z, r, t: 0 });
       if (discover('item:puddle', 'Shallow water')) flash('Splash! Shallow water carries sound.');
     }
+    updateNoiseHud(Math.max(player.noiseRadius, pulse) * hush, dt); updateAssist(under, mt);
     pulse = 0;
     const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold, prints: floor.prints, pt: mt, t: gameT };
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
@@ -2066,6 +2148,7 @@ function frame(now) {
   if (frameCount % 3 === 0) { if (state === 'play' && theme.mechanic.kind === 'brush') updateBrush(); drawMinimap(3); }                      // and the minimap three times a second per 9 frames, not every frame
   updateHud();
   perfStats.logic = perfStats.logic * 0.95 + (performance.now() - tl0) * 0.05;
+  if (hearRing.visible && state !== 'play') hearRing.visible = false;
   if (!params.has('norender')) { renderer.render(scene, camera); if (state === 'play') adaptQuality(dt, r => { renderer.setPixelRatio(r); resize(); }); }   // ?norender=1: tests skip the (software) drawing and keep all the game logic
   requestAnimationFrame(frame);
 }
@@ -2073,7 +2156,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  get group() { return group; }, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

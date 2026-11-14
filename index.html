@@ -35,6 +35,11 @@
   #stamFill { height: 100%; background: #4cc36a; }
   #hunger { width: 200px; height: 4px; margin: -3px auto 6px; background: #0008; border: 1px solid #fff5; }
   #hungerFill { height: 100%; width: 100%; background: #d9a441; }
+  #noise { display: block; width: 24px; height: 16px; margin: -2px auto 4px; color: #888; }
+  #noise .d, #noise .a { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; opacity: .2; }
+  #noise .d { fill: currentColor; stroke: none; }
+  #noise[data-l="1"] { color: #e8d878; } #noise[data-l="2"] { color: #f0a030; } #noise[data-l="3"] { color: #ff5a3a; }
+  #noise[data-l="1"] .d, #noise[data-l="1"] .a1, #noise[data-l="2"] .d, #noise[data-l="2"] .a1, #noise[data-l="2"] .a2, #noise[data-l="3"] .d, #noise[data-l="3"] .a { opacity: 1; }
   #hitmark { top: 40%; left: 0; right: 0; text-align: center; font-size: 18px; font-weight: 700; letter-spacing: .06em; opacity: 0; transition: opacity .3s; }
   #overlay { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
   #overlay h1 { margin: 0 0 8px; }
@@ -74,6 +79,7 @@
   <div id="hp"><div id="hpFill"></div></div>
   <div id="stam"><div id="stamFill"></div></div>
   <div id="hunger" title="Hunger"><div id="hungerFill"></div></div>
+  <svg id="noise" data-l="0" viewBox="0 0 24 16" title="Noise: enemies can hear you"><title>Noise: enemies can hear you</title><circle class="d" cx="5" cy="8" r="2.2"/><path class="a a1" d="M9 5.5Q11 8 9 10.5"/><path class="a a2" d="M13 3.5Q16.5 8 13 12.5"/><path class="a a3" d="M17 1.5Q22 8 17 14.5"/></svg>
   <div id="slots"></div>
   <div id="line"></div>
 </div>
@@ -90,7 +96,7 @@
   <p>Find the stairs on each floor. Four floors, then the boss arena on floor 5.</p>
   <p><b>Give me feedback please, ty muah!</b></p>
   <p class="small">Press Esc in game for the controls (you can change them) and the glossary.</p>
-  <p><button id="welcomeControls" class="wbtn">Controls</button> <button id="welcomeGlossary" class="wbtn">Glossary</button></p>
+  <p><button id="welcomeControls" class="wbtn">Controls</button> <button id="welcomeGlossary" class="wbtn">Glossary</button> <button id="welcomeDiff" class="wbtn" title="Easy only adds two see-through aids (enemy vision zones, hearing range). Nothing else changes.">Difficulty: Normal</button></p>
   <p>Click anywhere else to start.</p>
 </div></div>
 <script src="lib/three.min.js"></script>

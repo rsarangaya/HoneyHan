@@ -92,7 +92,7 @@ for (let i = 1; i <= 400; i++) {
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'rat').length) ratDrops++;
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'bandit').some(d => d.type === 'gold')) banditGold++;
   if (L.rollLoot('corpse', 2, rng(i), 0, [], 'cook').some(d => d.type === 'food')) cookFood++;
-  if (L.rollLoot('corpse', 2, rng(i), 0, [], 'archer').some(d => d.type === 'arrows')) archerArrows++;
+  if (L.rollLoot('corpse', 2, rng(i), 0, [{ type: 'weapon', base: 'mace', tier: 1 }], 'archer').some(d => d.type === 'arrows' || d.type === 'weapon')) archerArrows++;
   if (L.rollLoot('corpse', 4, rng(i), 0, [], 'brute').some(d => ['weapon', 'armor', 'shield'].includes(d.type))) bruteGear++;
   wolfDrops += L.rollLoot('corpse', 2, rng(i), 0, [], 'wolf').length;
   const b = L.rollLoot('corpse', 3, rng(i), 0, [], 'bouncer'); if (b.some(d => ['weapon', 'armor', 'shield'].includes(d.type)) && b.some(d => d.type === 'gold')) bouncerItems++;
@@ -101,7 +101,19 @@ n++;
 if (ratDrops > 160) fail('rat loot', `${ratDrops}/400 rats dropped something`);
 if (banditGold < 300) fail('bandit loot', `${banditGold}/400 bandits had gold`);
 if (cookFood < 270) fail('cook loot', `${cookFood}/400 cooks carried food`);
-if (archerArrows < 240) fail('archer loot', `${archerArrows}/400 archers carried arrows`);
+if (archerArrows < 240) fail('archer loot', `${archerArrows}/400 archers carried arrows or a bow`);
+// bows drop as often as the other weapons: guards carry dagger/sword/mace, a quarter of weapon drops turn into a bow; archers drop a bow of their tier
+const wb = { dagger: 0, sword: 0, mace: 0, bow: 0 }; let archerBows = 0, archerTier = true;
+for (let i = 1; i <= 6000; i++) {
+  const base = ['dagger', 'sword', 'mace'][i % 3];
+  for (const d of L.rollLoot('corpse', 2, rng(i), 0, [{ type: 'weapon', base, tier: 1 }], 'goblin')) if (d.type === 'weapon') { wb[d.base]++; if (d.tier !== 1) archerTier = false; }
+}
+for (let i = 1; i <= 2000; i++) for (const d of L.rollLoot('corpse', 2, rng(i), 0, [{ type: 'weapon', base: 'mace', tier: 2 }], 'archer')) if (d.type === 'weapon' && d.base === 'bow') { archerBows++; if (d.tier !== 2) archerTier = false; }
+n++;
+const wTotal = wb.dagger + wb.sword + wb.mace + wb.bow;
+for (const k of Object.keys(wb)) { const sh = wb[k] / wTotal; if (sh < 0.18 || sh > 0.32) fail('weapon drops', `${k} share ${(sh * 100).toFixed(1)}% of ${wTotal}`); }
+if (!archerTier || archerBows < 600) fail('archer bow', `${archerBows}/2000 archers dropped a bow, tier ok ${archerTier}`);
+console.log(`weapon drop shares: ${Object.keys(wb).map(k => k + ' ' + (wb[k] / wTotal * 100).toFixed(1) + '%').join(', ')}; archer bows ${archerBows}/2000`);
 if (bruteGear < 160 || bruteGear > 320) fail('brute loot', `${bruteGear}/400 brutes dropped gear`);
 if (wolfDrops) fail('wolf loot', 'wolves should drop nothing');
 if (bouncerItems !== 400) fail('bouncer loot', `${bouncerItems}/400 had equipment and gold`);
