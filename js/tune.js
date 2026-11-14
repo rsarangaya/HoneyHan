@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-30';   // bumped so old saved values don't override the new defaults (last: the Librarian Lich and Frost Giant sections)
+  const KEY = 'prototype-test-tune-31';   // bumped so old saved values don't override the new defaults (last: the Moonfang, Giant Innkeeper and Goblin Warlord sections)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurn', 1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
@@ -11,8 +11,8 @@ const tunePanel = (() => {
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1], ['parryRestore', 1], ['blockRefund', 0.05]]],
     ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'jaguar', 'dartgoblin', 'strangler', 'tribal', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
-    ...['scarecrow', 'mushroom', 'lich', 'giant'].flatMap(id => {   // the Orchard, Cellar, Library and Chapel bosses (js/boss.js BOSS_DEFS): their stats, then one section per move (only the numbers that exist)
-      const d = BOSS_DEFS[id], st = { wind: 0.05, dmg: 0.05, r: 0.1, reach: 0.1, len: 0.5, width: 0.1, n: 1, spread: 1, arc: 5, speed: 1, minD: 0.5, maxD: 0.5, cd: 0.5, rec: 0.1, knock: 0.5, blockTake: 0.05, statusDur: 0.5, gap: 0.1, off: 5, behind: 0.1 };
+    ...['scarecrow', 'mushroom', 'lich', 'giant', 'werewolf', 'innkeeper', 'warlord'].flatMap(id => {   // the Orchard, Cellar, Library, Chapel, Jungle, Tavern and Market bosses (js/boss.js BOSS_DEFS): their stats, then one section per move (only the numbers that exist)
+      const d = BOSS_DEFS[id], st = { wind: 0.05, dmg: 0.05, r: 0.1, reach: 0.1, len: 0.5, width: 0.1, n: 1, spread: 1, arc: 5, speed: 1, minD: 0.5, maxD: 0.5, cd: 0.5, rec: 0.1, knock: 0.5, blockTake: 0.05, statusDur: 0.5, gap: 0.1, off: 5, behind: 0.1, dur: 0.05, h: 0.1, spin: 0.1, ticks: 1, selfStun: 0.1, splash: 0.1 };
       return [[d.name, d, [['hpMul', 0.05], ['dmgMul', 0.05], ['speedMul', 0.05], ['scale', 0.05], ['r', 0.05]]],
         ...d.moves.map(mv => [d.name + ': ' + mv.name + (mv.chain ? ' (chained)' : ''), mv, Object.keys(st).filter(k => typeof mv[k] === 'number').map(k => [k, st[k]])])];
     }),

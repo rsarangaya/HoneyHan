@@ -8,9 +8,9 @@
 //   bands: null for a biped (aimZone) or [legsTop, headBottom, top] in WORLD metres for other bodies (bossZone), meleeAlt: highest alt a swing still reaches (2.5),
 //   phases: [{ at, speedMul, windMul, enrage, add: [enemy types], dur }] with `at` the HP fraction, strictly DESCENDING in list order (phase i starts when hp <= at * maxHp);
 //     phase 0 is the base fight. Moves list phase: [from, to] (inclusive, default [0, 99]).
-//   moves: [{ id, name, shape: 'cone'|'circle'|'line'|'leap'|'projectile'|'summon',
+//   moves: [{ id, name, shape: 'cone'|'circle'|'line'|'leap'|'projectile'|'summon'|'blink'|'charge',
 //     wind (telegraph s; 0 = the legacy TUNE formula, only the cave swing), dmg (x e.hitMul), zone ('head'|'body'|'legs'|'rand'), reach (cone; 0 = e.reach), arc (cone/fan, degrees),
-//     r (circle/leap), len, width (line), at ('self'|'target': a circle or line aimed where the player stood), lock ('start'|'end': when the target point is fixed),
+//     r (circle/leap), stop (leap: lands this many m short of you), len, width (line), at ('self'|'target': a circle or line aimed where the player stood), lock ('start'|'end': when the target point is fixed),
 //     cd (this move's cooldown), gcd (cooldown before ANY move; -1 = e.cooldown), rec (stand still after), next (move id chained straight after), minD/maxD (selection range),
 //     weight, phase, parry (a parry staggers; false = a block only), ground (red telegraph, wind >= 0.8), blockTake (share of the damage a block lets through, 0.5), knock (metres),
 //     status/statusDur, kind/n/speed (projectile), spawn/n/cap (summon), dur/h (leap flight time, arc height),
@@ -18,9 +18,12 @@
 //     blink ('blink' shape: it vanishes and reappears `behind` metres behind you, a marker shows where; chain a quick strike with `next`; tele: true shows the marker),
 //     n/spread (line: n lines fanned `spread` degrees apart), chain (true: only ever started by another move's `next`), cloud {dur, daze} (a circle at 'target' that leaves a daze cloud
 //     instead of hitting: spawnCloud), expose {t, mul, all} (after the strike the boss takes mul x body damage, or x damage anywhere when `all`, for t s: put the same t in rec) }]
+//   next may be a list of ids: the first whose phase range fits the current phase is chained (the Innkeeper's combo grows a 4th hit in phase 2).
+//   charge ('charge' shape: it runs along the locked line at `speed` m/s up to `len` m, stops at you (hit: circle of `r`), or at a wall or prop: selfStun s of stagger, the only stun it can get), ticks/spin (a circle that hits `ticks` times
+//   over `spin` s after the strike: the Whirlwind), puddle {dur, r, slow} + splash (projectile: a bottle that lands within `splash` m of you still hurts and leaves a slowing puddle of radius r for dur s).
 //   blurb: one line for the glossary card (replaces the plate text).
 const BOSS_DEFS = {};
-const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon', 'blink'];
+const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon', 'blink', 'charge'];
 const BOSS_BASE_ID = 'cave';
 
 BOSS_DEFS.cave = {
@@ -104,8 +107,55 @@ BOSS_DEFS.giant = {
     { id: 'nova', name: 'Shatter Nova', shape: 'circle', wind: 1.3, dmg: 1.3, zone: 'body', r: 7, ground: true, knock: 4, rec: 2, expose: { t: 2, mul: 1.25, all: true }, maxD: 7.4, cd: 8, weight: 3, phase: [1, 99] },
   ],
 };
-// The Orchard, Cellar, Library and Chapel fight their own bosses (bossId is the theme id).
+// ---- Moonfang (Overgrown Ruin): a werewolf. Fast and hunched, it leaps from far away; the 1.2 s after a pounce is the time to hit it. ----
+BOSS_DEFS.werewolf = {
+  id: 'werewolf', name: 'Moonfang', theme: 'The Overgrown Ruin', color: '#d8a060', model: 'werewolf', scale: 1.7, r: 0.7, hpMul: 1, dmgMul: 1, speedMul: 1.05,
+  resist: { head: 0.75, body: 0.62, legs: 0.7 }, summonCap: 4, bands: [0.9, 1.9, 2.9], meleeAlt: 2.5,
+  blurb: 'A werewolf, hunched and shaggy, quick on its feet. It rakes with both claws, bites at the head, pounces from across the room and howls for wolves. After a pounce it is open for a moment; below half health it goes into a moon rage.',
+  phases: [{ at: 0.5, speedMul: 1.2, dur: 1.4 }],   // Moon rage: faster, two pounces in a row, a howl every cycle
+  moves: [
+    { id: 'rake', name: 'Claw Rake', shape: 'cone', wind: 0.55, dmg: 0.7, zone: 'body', reach: 2.6, arc: 100, next: 'rake2', weight: 3, parry: true },   // two claws in a row
+    { id: 'rake2', name: 'Claw Rake', shape: 'cone', wind: 0.4, dmg: 0.7, zone: 'body', reach: 2.6, arc: 100, chain: true, parry: true },
+    { id: 'bite', name: 'Bite', shape: 'cone', wind: 0.7, dmg: 1.4, zone: 'head', reach: 2.0, arc: 70, weight: 2, parry: true },
+    { id: 'pounce', name: 'Pounce', shape: 'leap', wind: 0.9, dmg: 1.3, zone: 'body', r: 2.2, dur: 0.7, h: 2.6, lock: 'end', stop: 1.2, ground: true, knock: 3, minD: 3.5, maxD: 10, cd: 3, rec: 1.2, next: 'pounce2', weight: 3 },   // the landing spot locks as the crouch ends
+    { id: 'pounce2', name: 'Pounce', shape: 'leap', wind: 0.8, dmg: 1.3, zone: 'body', r: 2.2, dur: 0.7, h: 2.6, lock: 'end', stop: 1.2, ground: true, knock: 3, maxD: 10, rec: 1.2, chain: true, phase: [1, 99] },
+    { id: 'howl', name: 'Howl', shape: 'summon', spawn: 'wolf', n: 2, cap: 4, wind: 1.2, dmg: 0, zone: 'head', rec: 1.5, minD: 3, maxD: 20, cd: 14, weight: 1, phase: [0, 0] },
+    { id: 'howl2', name: 'Howl', shape: 'summon', spawn: 'wolf', n: 2, cap: 4, wind: 1.2, dmg: 0, zone: 'head', rec: 1.5, minD: 3, maxD: 20, cd: 6, weight: 3, phase: [1, 99] },
+  ],
+};
+// ---- Giant Innkeeper (Sunken Tavern): a fat bartender with a tankard and a keg on his back. Combos, bottles that leave slowing puddles, a rolling keg. ----
+BOSS_DEFS.innkeeper = {
+  id: 'innkeeper', name: 'Giant Innkeeper', theme: 'The Sunken Tavern', color: '#e0b070', model: null, scale: 1.7, r: 0.8, hpMul: 1, dmgMul: 1, speedMul: 1,
+  resist: { head: 0.8, body: 0.65, legs: 0.8 }, summonCap: 4, bands: null, meleeAlt: 2.5,
+  blurb: 'A huge bartender in an apron, a tankard in one fist and a keg on his back. He smashes the mug down, brawls in combos, lobs bottles that leave slippery puddles and rolls the keg across the floor. Below half health he calls last orders and two drunks join in.',
+  phases: [{ at: 0.5, speedMul: 1.15, dur: 1.4, add: ['bandit', 'bandit'] }],   // Last Call: faster, a 4th hit in the combo, two bandits
+  moves: [
+    { id: 'smash', name: 'Mug Smash', shape: 'cone', wind: 0.7, dmg: 1.1, zone: 'head', reach: 3.0, arc: 70, weight: 3, parry: true },
+    { id: 'combo', name: 'Brawl Combo', shape: 'cone', wind: 0.55, dmg: 0.6, zone: 'body', reach: 2.5, arc: 100, next: 'combo2', weight: 3, parry: false },   // body, body, (body,) head: only the head finisher can be parried, and that staggers the whole combo
+    { id: 'combo2', name: 'Brawl Combo', shape: 'cone', wind: 0.4, dmg: 0.7, zone: 'body', reach: 2.5, arc: 100, next: ['combo3', 'fin'], chain: true, parry: false },
+    { id: 'combo3', name: 'Brawl Combo', shape: 'cone', wind: 0.4, dmg: 0.7, zone: 'body', reach: 2.5, arc: 100, next: 'fin', chain: true, parry: false, phase: [1, 99] },
+    { id: 'fin', name: 'Brawl Combo', shape: 'cone', wind: 0.8, dmg: 1.3, zone: 'head', reach: 2.6, arc: 90, chain: true, parry: true },
+    { id: 'bottles', name: 'Bottle Toss', shape: 'projectile', kind: 'bottle', n: 3, arc: 22, speed: 12, wind: 0.7, dmg: 0.5, zone: 'body', splash: 1.2, puddle: { dur: 5, r: 1.2, slow: 0.7 }, minD: 4, maxD: 16, cd: 5, weight: 2 },
+    { id: 'keg', name: 'Keg Roll', shape: 'line', wind: 1.0, dmg: 1.2, zone: 'legs', len: 12, width: 1.4, ground: true, knock: 3, minD: 3, maxD: 13, cd: 6, weight: 2 },
+  ],
+};
+// ---- Goblin Warlord (Goblin Market): the old goblin look, its own moves. A shield charge that stuns it against a wall, thrown cleavers, a banner that calls guards. ----
+BOSS_DEFS.warlord = {
+  id: 'warlord', name: 'Goblin Warlord', theme: 'The Goblin Market', color: '#a0d060', model: null, scale: null, r: null, hpMul: 1.1, dmgMul: 1, speedMul: 1,
+  resist: { head: 0.7, body: 0.65, legs: 0.75 }, summonCap: 4, bands: null, meleeAlt: 2.5,
+  blurb: 'A goblin warlord in plate and a red cape. He cleaves, charges behind his shield (and stuns himself if he hits a wall or a pillar), throws cleavers and rallies guards with his banner. Below half health he spins in a whirlwind.',
+  phases: [{ at: 0.5, dur: 1.4 }],   // the Whirlwind joins
+  moves: [
+    { id: 'cleave', name: 'War Cleave', shape: 'cone', wind: 0.75, dmg: 1.1, zone: 'head', reach: 3.2, arc: 80, weight: 3, parry: true },
+    { id: 'charge', name: 'Shield Charge', shape: 'charge', wind: 0.9, dmg: 1.3, zone: 'legs', speed: 11, len: 18, width: 1.6, r: 1.3, lock: 'end', ground: true, knock: 3, selfStun: 1.2, rec: 0.6, minD: 6, maxD: 14, cd: 7, weight: 3 },
+    { id: 'cleaver', name: 'Cleaver Throw', shape: 'projectile', kind: 'axe', n: 1, speed: 15, wind: 0.8, dmg: 0.9, zone: 'body', minD: 4, maxD: 18, cd: 3.5, weight: 2 },
+    { id: 'rally', name: 'Banner Rally', shape: 'summon', spawn: 'goblin', n: 2, cap: 4, wind: 1.2, dmg: 0, zone: 'head', rec: 0.6, minD: 3, maxD: 20, cd: 14, weight: 1 },
+    { id: 'whirl', name: 'Whirlwind', shape: 'circle', wind: 1.0, dmg: 0.5, zone: 'body', r: 3.4, ticks: 3, spin: 1.6, ground: true, knock: 3, maxD: 4, cd: 6, weight: 3, phase: [1, 99] },
+  ],
+};
+// The Orchard, Cellar, Library, Chapel, Tavern, Market and Jungle fight their own bosses (bossId is the theme id).
 BOSS_DEFS.orchard = BOSS_DEFS.scarecrow; BOSS_DEFS.cellar = BOSS_DEFS.mushroom; BOSS_DEFS.library = BOSS_DEFS.lich; BOSS_DEFS.chapel = BOSS_DEFS.giant;
+BOSS_DEFS.jungle = BOSS_DEFS.werewolf; BOSS_DEFS.tavern = BOSS_DEFS.innkeeper; BOSS_DEFS.market = BOSS_DEFS.warlord;
 for (const k in BOSS_DEFS) bossNormalize(BOSS_DEFS[k]);
 
 // Problems with a def (empty = valid): unique move ids, known shapes, a telegraph of at least 0.5 s for a hit of 1.0 or more (0.8 s for ground moves), phases in order.
@@ -118,7 +168,7 @@ function validateBossDef(def) {
     if (!BOSS_SHAPES.includes(mv.shape)) err.push(mv.id + ': unknown shape ' + mv.shape);
     if (mv.wind > 0 && mv.dmg >= 1.0 && mv.wind < 0.5) err.push(mv.id + ': wind ' + mv.wind + ' < 0.5 s for a hit of ' + mv.dmg);   // wind 0 = the TUNE formula (the cave swing, 0.48 s)
     if (mv.ground && mv.wind > 0 && mv.wind < 0.8) err.push(mv.id + ': ground telegraph ' + mv.wind + ' < 0.8 s');
-    if (mv.next && !(def.byId ? def.byId[mv.next] : def.moves.some(m => m.id === mv.next))) err.push(mv.id + ': next ' + mv.next + ' does not exist');
+    for (const nx of [].concat(mv.next || [])) if (!def.moves.some(m => m.id === nx)) err.push(mv.id + ': next ' + nx + ' does not exist');
     if (mv.phase && mv.phase[0] > mv.phase[1]) err.push(mv.id + ': phase range reversed');
   }
   let prev = 1;
@@ -147,6 +197,7 @@ function moveHits(mv, boss, player) {
       if (mv.arc > 0 && mv.arc < 360 && d > 0.5 && (dx * -Math.sin(boss.yaw) + dz * -Math.cos(boss.yaw)) / d < Math.cos(mv.arc * Math.PI / 360)) return null;
       return zone;
     }
+    case 'charge': return Math.hypot(player.x - boss.x, player.z - boss.z) <= mv.r + pr ? zone : null;   // the shield and the body ploughing into you
     case 'circle': case 'leap': {
       const target = mv.shape === 'leap' || mv.at === 'target', cx = target ? bs.tx : boss.x, cz = target ? bs.tz : boss.z;
       return Math.hypot(player.x - cx, player.z - cz) <= mv.r + pr ? zone : null;
@@ -193,15 +244,17 @@ function bossLock(e, player) {
   const bs = e.bs, mv = bs.mv; if (mv.shape === 'blink') { bossBlinkSpot(e, player, mv.behind || 3); return; }
   let dx = player.x - e.x, dz = player.z - e.z; const d = Math.hypot(dx, dz) || 1;
   dx /= d; dz /= d; bs.dx = dx; bs.dz = dz;
-  const k = mv.shape === 'leap' && mv.maxD > 0 ? Math.min(d, mv.maxD) : d;
+  const k = mv.shape === 'leap' && mv.maxD > 0 ? (d > mv.maxD ? mv.maxD : Math.max(0, d - (mv.stop || 0))) : d;   // a leap lands `stop` m short of you (so it never lands on top of you), or 10 m out at most
   bs.tx = e.x + dx * k; bs.tz = e.z + dz * k;
 }
+function bossLive(e) { let live = 0; const all = Enemy.all; for (let i = 0; i < all.length; i++) if (all[i].minion === e && !all[i].dead) live++; return live; }
 function bossPick(e, dist) {
   const bs = e.bs, mvs = e.def.moves, cand = bs.cand; let n = 0, tot = 0;
   for (let i = 0; i < mvs.length; i++) {
     const mv = mvs[i];
     if (mv.chain || bs.phase < mv.phase[0] || bs.phase > mv.phase[1] || bs.cd[mv.id] > 0) continue;
     if (dist < (mv.minD || 0) || dist >= (mv.maxD || mv.reach || e.reach)) continue;
+    if (mv.shape === 'summon' && bossLive(e) >= (mv.cap || e.def.summonCap || 4)) continue;   // the cap is full: no howl
     cand[n++] = i; tot += mv.weight;
   }
   if (n === 0) return null;
@@ -217,7 +270,8 @@ function bossStart(e, mv, player) {
   bossLock(e, player);
 }
 function bossAfter(e, mv, player) {
-  const bs = e.bs, nx = mv.next && e.def.byId[mv.next];
+  const bs = e.bs, by = e.def.byId; let nx = null;
+  if (mv.next) { if (typeof mv.next === 'string') nx = by[mv.next]; else for (let i = 0; i < mv.next.length && !nx; i++) { const c = by[mv.next[i]]; if (c && bs.phase >= c.phase[0] && bs.phase <= c.phase[1]) nx = c; } }
   if (nx && bs.phase >= nx.phase[0] && bs.phase <= nx.phase[1]) { bs.nx = nx; bs.st = 'chain'; bs.combo++; return; }   // started next frame, after this hit is resolved
   bs.combo = 0;
   if (mv.expose) { bs.exp = mv.expose.t; bs.expMul = mv.expose.mul; bs.expAll = !!mv.expose.all; }
@@ -243,8 +297,9 @@ function bossStrike(e, mv, player, noise, los) {
   const bs = e.bs;
   e.winding = false; e.atkCd = mv.gcd >= 0 ? mv.gcd : e.cooldown; bs.cd[mv.id] = mv.cd;
   noise.emit(e.x, e.z, CLASH_R, e);                       // a fight is loud
-  if (mv.shape !== 'leap') bossTeleHide();                // a leap keeps its landing mark until it lands
-  if (mv.shape === 'leap') { bs.st = 'special'; bs.t = 0; bs.ox = e.x; bs.oz = e.z; return null; }
+  if (mv.shape !== 'leap' && !mv.ticks) bossTeleHide();   // a leap keeps its landing mark until it lands, a whirlwind its circle until it stops
+  if (mv.shape === 'leap' || mv.shape === 'charge') { bs.st = 'special'; bs.t = 0; bs.run = 0; bs.ox = e.x; bs.oz = e.z; return null; }
+  if (mv.ticks > 1) { bs.st = 'spin'; bs.t = 0; bs.tk = 1; return moveHits(mv, e, player); }   // the first tick lands with the strike, the rest while it spins
   let attack = null;
   if (mv.shape === 'blink') { e.x = bs.tx; e.z = bs.tz; e.yaw = Math.atan2(-(player.x - e.x), -(player.z - e.z)); }   // gone, and there behind you
   else if (mv.shape === 'projectile') bossFire(e, mv, noise);
@@ -255,6 +310,20 @@ function bossStrike(e, mv, player, noise, los) {
   bossAfter(e, mv, player);
   return attack;
 }
+// The Shield Charge: run along the locked line at mv.speed. Reaching you ends it with the hit (the caller resolves it); a wall or prop ends it with a stagger of mv.selfStun s (e.stun, the one
+// stun the boss can get: the Enemy.update stun branch then stands it still and poses it staggered); running out of line just stops it. Returns the hit zone or null.
+function bossCharge(e, dt, player) {
+  const bs = e.bs, mv = bs.mv, sp = mv.speed || 11, step = sp * dt, nx = e.x + bs.dx * step, nz = e.z + bs.dz * step;
+  collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = e.r || r0;
+  const free = !Player.prototype.blocked.call(collider, e.floor, nx, nz); collider.radius = r0;
+  e.yaw = Math.atan2(-bs.dx, -bs.dz); e.walkT += sp * dt * 5;
+  if (free) { e.x = nx; e.z = nz; bs.run += step; }
+  const hit = moveHits(mv, e, player);
+  if (hit) { bossAfter(e, mv, player); return hit; }
+  if (!free && mv.selfStun) { bs.st = 'recover'; bs.t = 0; bs.combo = 0; e.stun = mv.selfStun; e.atkCd = Math.max(e.atkCd, 0.6); }   // it hit the stonework: a free window
+  else if (!free || bs.run >= (mv.len || 16)) bossAfter(e, mv, player);
+  return null;
+}
 // One frame of an alerted boss. Returns the zone of a hit that lands this frame, else null (main.js resolves it). dist/los: to the player, from Enemy.update.
 function bossUpdate(e, dt, player, noise, dist, los) {
   const bs = e.bs, def = e.def, cd = bs.cd, mvs = def.moves, dx = player.x - e.x, dz = player.z - e.z;
@@ -262,7 +331,7 @@ function bossUpdate(e, dt, player, noise, dist, los) {
   e.atkCd -= dt;
   for (let i = 0; i < mvs.length; i++) { const id = mvs[i].id; if (cd[id] > 0) cd[id] -= dt; }
   if (bs.exp > 0) bs.exp -= dt;
-  if (e.mv && bs.st !== 'telegraph' && bs.st !== 'attack' && bs.st !== 'special') e.mv = null;   // a finished move stops being the boss's move (its hit was resolved last frame)
+  if (e.mv && bs.st !== 'telegraph' && bs.st !== 'attack' && bs.st !== 'special' && bs.st !== 'spin') e.mv = null;   // a finished move stops being the boss's move (its hit was resolved last frame)
   if (bs.st === 'idle' || bs.st === 'stagger') bs.st = 'chase';
   if ((bs.st === 'chase' || bs.st === 'recover') && bs.phase < def.phases.length && e.hp <= def.phases[bs.phase].at * e.maxHp) bossPhase(e, bs.phase + 1);
   switch (bs.st) {
@@ -281,12 +350,24 @@ function bossUpdate(e, dt, player, noise, dist, los) {
       if (e.windT >= w + STRIKE_T) attack = bossStrike(e, mv, player, noise, los);
       break;
     }
+    case 'spin': {                                                      // the Whirlwind: it stays put and spins; a tick every spin / (ticks - 1) s after the first
+      const mv = bs.mv, n = mv.ticks; bs.t += dt;
+      e.yaw += 9 * dt; bossTeleDraw(e, mv, 1);
+      if (bs.tk < n && bs.t >= bs.tk * (mv.spin || 1.6) / (n - 1)) {
+        bs.tk++; e.hitMul = mv.dmg; attack = moveHits(mv, e, player);
+        if (bs.tk >= n) { bossTeleHide(); bossAfter(e, mv, player); }
+      }
+      break;
+    }
     case 'special': {                                                   // a leap: slide from the take-off point to the locked landing point, arcing up, then the landing circle hits
-      const mv = bs.mv, dur = mv.dur || 0.6; bs.t += dt;
+      const mv = bs.mv, dur = mv.dur || 0.6;
+      if (mv.shape === 'charge') { attack = bossCharge(e, dt, player); break; }
+      bs.t += dt;
       let k = Math.min(1, bs.t / dur);
       const nx = bs.ox + (bs.tx - bs.ox) * k, nz = bs.oz + (bs.tz - bs.oz) * k;
-      collider.props = e.floor.solids;
+      collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = e.r || r0;   // the boss's own body radius, not the shared 0.4 m
       if (!Player.prototype.blocked.call(collider, e.floor, nx, nz)) { e.x = nx; e.z = nz; } else { k = 1; bs.tx = e.x; bs.tz = e.z; }   // a wall or pillar ends the leap there
+      collider.radius = r0;
       e.alt = Math.sin(Math.PI * k) * (mv.h || 2.5);
       e.yaw = Math.atan2(-(bs.tx - bs.ox), -(bs.tz - bs.oz));
       if (k >= 1) { e.alt = 0; bossTeleHide(); noise.emit(e.x, e.z, CLASH_R, e); attack = moveHits(mv, e, player); bossAfter(e, mv, player); }
@@ -306,19 +387,17 @@ function bossUpdate(e, dt, player, noise, dist, los) {
 // Summon up to n of enemy type `type` round the boss, never more than cap alive from this boss. Returns how many appeared. Main.js builds them (Enemy.summon).
 function bossSummon(e, type, n, cap) {
   if (!Enemy.summon) return 0;
-  let live = 0; const all = Enemy.all;
-  for (let i = 0; i < all.length; i++) if (all[i].minion === e && !all[i].dead) live++;
-  let made = 0;
+  let live = bossLive(e), made = 0;
   while (made < n && live < cap) { if (!Enemy.summon(e, type)) break; made++; live++; }
   return made;
 }
 
 // ---- pools (per floor group: group.userData.bossFx; the meshes are children of the group, so they are freed with it) ----
 const BOSS_TELE_N = 4, BOSS_POOL_N = 12;
-const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0, geo: 'page', both: true }, shard: { color: 0x9ad8ff, r: 0.14, g: 0, geo: 'shard' }, bottle: { color: 0x6aa04a, r: 0.14, g: 6 }, axe: { color: 0xa0a0aa, r: 0.17, g: 4 }, fire: { color: 0xff7a20, r: 0.2, g: 5 } };
+const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0, geo: 'page', both: true }, shard: { color: 0x9ad8ff, r: 0.14, g: 0, geo: 'shard' }, bottle: { color: 0x6aa04a, r: 0.14, g: 6, geo: 'bottle', spin: true }, axe: { color: 0xa0a0aa, r: 0.17, g: 4, geo: 'axe', spin: true }, fire: { color: 0xff7a20, r: 0.2, g: 5 } };
 const BOSS_SHOT_MATS = {};
 let BOSS_TELE_MAT = null;
-const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {}, lane: [] });
+const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {}, lane: [], pud: [] });
 
 function bossTeleGeo(kind, arc) {
   if (kind === 'disc') return cachedGeo('tdisc', () => { const g = new THREE.CircleGeometry(1, 32); g.rotateX(-Math.PI / 2); return g; });
@@ -342,6 +421,7 @@ function bossTeleShow(i, kind, x, z, yaw, sx, sz, arc) {
 function bossTeleDraw(e, mv, k) {
   const bs = e.bs;
   if (mv.shape === 'blink') bossTeleShow(0, 'disc', bs.tx, bs.tz, 0, 1.1, 1.1);                  // the marker where it will appear
+  else if (mv.shape === 'charge') bossTeleShow(0, 'strip', e.x, e.z, Math.atan2(-bs.dx, -bs.dz), mv.width, mv.len);
   else if (mv.shape === 'circle' || mv.shape === 'leap') { const t = mv.shape === 'leap' || mv.at === 'target'; bossTeleShow(0, 'disc', t ? bs.tx : e.x, t ? bs.tz : e.z, 0, mv.r, mv.r); }
   else if (mv.shape === 'line') {
     const base = mv.at === 'target' ? Math.atan2(-bs.dx, -bs.dz) : e.yaw, n = mv.n || 1;
@@ -362,7 +442,7 @@ function bossFxAcquire(kind) {
   if (pool.length >= BOSS_POOL_N) return null;
   const S = BOSS_SHOT[kind];
   const mat = BOSS_SHOT_MATS[kind] || (BOSS_SHOT_MATS[kind] = Object.assign(new THREE.MeshBasicMaterial({ color: S.color, side: S.bird || S.both ? THREE.DoubleSide : THREE.FrontSide }), { userData: { shared: true } }));
-  const m = new THREE.Mesh(cachedGeo('bshot' + kind, () => S.bird ? bossBirdGeo() : S.geo === 'page' ? bossPageGeo() : S.geo === 'shard' ? bossShardGeo() : new THREE.SphereGeometry(S.r, 8, 6)), mat);
+  const m = new THREE.Mesh(cachedGeo('bshot' + kind, () => S.bird ? bossBirdGeo() : S.geo === 'page' ? bossPageGeo() : S.geo === 'shard' ? bossShardGeo() : S.geo === 'axe' ? bossAxeGeo() : S.geo === 'bottle' ? bossBottleGeo() : new THREE.SphereGeometry(S.r, 8, 6)), mat);
   m.userData = { busy: true, pooled: true }; group.add(m); pool.push(m);
   return m;
 }
@@ -374,6 +454,21 @@ function bossBirdGeo() {
 }
 // A page: a flat sheet turned a little about its flight line and tipped, so it shows from the front (placeholder). A shard: a four-sided spike, tip forward (+z).
 function bossPageGeo() { const g = new THREE.PlaneGeometry(0.3, 0.4); g.rotateX(-0.6); g.rotateZ(0.5); return g; }
+// A cleaver (a handle and a broad blade, tumbling end over end in flight) and a bottle (a fat body and a neck), each one shared geometry, nose along +z.
+function bossAxeGeo() {
+  const a = new THREE.BoxGeometry(0.05, 0.05, 0.55), b = new THREE.BoxGeometry(0.035, 0.3, 0.22); b.translate(0, 0.12, 0.2);
+  const g = new THREE.BufferGeometry(), n = a.attributes.position.count;
+  g.setAttribute('position', new THREE.Float32BufferAttribute([...a.attributes.position.array, ...b.attributes.position.array], 3));
+  g.setIndex([...a.index.array, ...Array.from(b.index.array, i => i + n)]);
+  a.dispose(); b.dispose(); return g;
+}
+function bossBottleGeo() {
+  const a = new THREE.CylinderGeometry(0.08, 0.08, 0.26, 7), b = new THREE.CylinderGeometry(0.03, 0.04, 0.16, 6); b.translate(0, 0.2, 0);
+  const g = new THREE.BufferGeometry(), n = a.attributes.position.count;
+  g.setAttribute('position', new THREE.Float32BufferAttribute([...a.attributes.position.array, ...b.attributes.position.array], 3));
+  g.setIndex([...a.index.array, ...Array.from(b.index.array, i => i + n)]);
+  g.rotateX(Math.PI / 2); a.dispose(); b.dispose(); return g;
+}
 function bossShardGeo() { const g = new THREE.CylinderGeometry(0, 0.1, 0.65, 4, 1); g.rotateX(Math.PI / 2); return g; }
 
 // ---- ice lanes (Ground Freeze): up to 4 strips of ice on the floor for mv.lane.dur s. bossLaneAt(x, z) says whether a point is on one (main.js makes the player slide).
@@ -408,12 +503,39 @@ function bossLanesUpdate(dt) {
   }
 }
 function bossLanesClear() { const L = BOSS_LANE.items; for (let i = 0; i < 4; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_LANE.n = 0; }
+// ---- ale puddles (Bottle Toss): up to 6 pooled discs on the floor for mv.puddle.dur s; bossPuddleMul(x, z) is the speed multiplier you wade at (1 = dry). The same cost model as the ice lanes: preallocated records, one decal each. ----
+const BOSS_PUD_N = 6, BOSS_PUD = { n: 0, items: Array.from({ length: BOSS_PUD_N }, () => ({ t: 0, dur: 1, x: 0, z: 0, r: 1, slow: 1, m: null })) };
+function bossPuddleAdd(x, z, mv) {
+  const L = BOSS_PUD.items; let it = null;
+  for (let i = 0; i < BOSS_PUD_N && !it; i++) if (L[i].t <= 0) it = L[i];
+  if (!it) { it = L[0]; for (let i = 1; i < BOSS_PUD_N; i++) if (L[i].t < it.t) it = L[i]; }       // all in use: replace the one about to dry
+  if (it.t <= 0) BOSS_PUD.n++;
+  const P = mv.puddle; it.t = it.dur = P.dur; it.x = x; it.z = z; it.r = P.r; it.slow = P.slow;
+  const pool = bossFxFor(group).pud, i = L.indexOf(it);
+  if (!pool[i]) { const m = new THREE.Mesh(bossTeleGeo('disc'), new THREE.MeshBasicMaterial({ color: 0xc8902a, transparent: true, opacity: 0.55, depthWrite: false })); m.position.y = 0.022; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
+  const m = it.m = pool[i]; m.position.x = x; m.position.z = z; m.scale.set(it.r, 1, it.r); m.material.opacity = 0.55; m.visible = true;
+}
+function bossPuddleMul(x, z) {
+  if (!BOSS_PUD.n) return 1;
+  const L = BOSS_PUD.items; let k = 1;
+  for (let i = 0; i < BOSS_PUD_N; i++) { const p = L[i]; if (p.t > 0 && (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) <= (p.r + 0.1) * (p.r + 0.1) && p.slow < k) k = p.slow; }
+  return k;
+}
+function bossPuddlesUpdate(dt) {
+  if (!BOSS_PUD.n) return;
+  const L = BOSS_PUD.items;
+  for (let i = 0; i < BOSS_PUD_N; i++) {
+    const p = L[i]; if (p.t <= 0) continue;
+    if ((p.t -= dt) <= 0) { p.t = 0; BOSS_PUD.n--; if (p.m) p.m.visible = false; } else if (p.t < 1 && p.m) p.m.material.opacity = 0.55 * p.t;   // it dries up over the last second
+  }
+}
+function bossPuddlesClear() { const L = BOSS_PUD.items; for (let i = 0; i < BOSS_PUD_N; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_PUD.n = 0; }
 function bossFxRelease(m) { m.visible = false; m.userData.busy = false; }
 
 // ---- HUD and glossary text from the defs ----
 function bossMoveText(mv) {
   const wind = mv.wind > 0 ? `${mv.wind.toFixed(1)} s warning` : 'short warning';
-  const how = mv.ground ? 'a red mark on the floor; blocking still hurts, so dodge' + (mv.lane ? ', and the floor stays icy' : '') : mv.shape === 'projectile' ? 'blockable shots' : mv.shape === 'summon' ? 'calls help' : mv.shape === 'blink' ? 'it vanishes and appears behind you, then strikes' : mv.parry === false ? 'block it, no parry' : 'parry it to stagger';
+  const how = mv.ground ? 'a red mark on the floor; blocking still hurts, so dodge' + (mv.lane ? ', and the floor stays icy' : '') + (mv.selfStun ? ', and it stuns itself on a wall or pillar' : '') : mv.shape === 'projectile' ? 'blockable shots' + (mv.puddle ? ' that leave slowing puddles' : '') : mv.shape === 'summon' ? 'calls help' : mv.shape === 'blink' ? 'it vanishes and appears behind you, then strikes' : mv.parry === false ? 'block it, no parry' : 'parry it to stagger';
   return `${mv.name || mv.id} (${wind}, ${how})`;
 }
 function bossCardLines(def, hp) {
@@ -421,6 +543,6 @@ function bossCardLines(def, hp) {
     def.blurb ? `Boss of floor 5. ${hp} HP. ${def.blurb}` : `Boss of floor 5. ${hp} HP in heavy plate, and it hits much harder than a guard.`,
     'Sleeps in the middle of the arena until you get close. Cannot be sneak-killed and is not staggered by normal hits.',
     'Moves: ' + def.moves.filter(m => !m.chain).map(bossMoveText).join('; ') + '.',
-    'A parry still staggers it, and a sprinting player can outrun it.',
+    'A parry still staggers it.',
     'Drops an Epic piece of equipment (with a small chance of Legendary), more equipment and gold. The stairs stay sealed until it falls. The safe room behind it leads to the next stage.'];
 }

@@ -468,7 +468,7 @@ function pruneThemeTextures() {
 
 function buildFloor() {
   wallKinds = new Map();
-  knock.m = 0; bossLanesClear();   // no knockback or ice lane carries over a floor change or restart
+  knock.m = 0; bossLanesClear(); bossPuddlesClear();   // no knockback, ice lane or ale puddle carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -1104,6 +1104,11 @@ function allyShotHit(a, ev) {
   if (k === 'thorn') al.addStatus('bleed', 4); else if (k === 'dart') al.addStatus('bleed', 5); else if (k === 'curse') al.addStatus('slow', 5); else if (k === 'hex') al.addStatus(gameRng() < 0.5 ? 'slow' : 'daze', 4);
   else { al.cause = 'was shot'; al.hurt(TUNE.enemyDmg * a.from.dmgMul * ZONE_MUL[ev.zone] * (al.resist[ev.zone] || 1), a.from); }
 }
+// A bottle that reached the floor: it leaves an ale puddle, and anyone within its splash radius is hit like by a thrown bottle (blockable).
+function bottleLand(a) {
+  const mv = a.mv; bossPuddleAdd(a.x, a.z, mv);
+  if (Math.hypot(a.x - player.x, a.z - player.z) <= mv.splash + player.radius) resolveEnemyAttack(a.from, 'body', true, mv, a.dmg);
+}
 function enemyShotHit(a) {
   if (a.kind === 'dart') {                                                           // a poison dart: bleed for 5 s, no block stops it
     hitReaction(4);
@@ -1167,9 +1172,10 @@ function updateArrows(dt) {
     if (a.owner === 'enemy') {
       const ev = stepArrow(a, dt, floor, enemies, player, Enemy.ally && Enemy.ally.floor === floor ? Enemy.ally : null);
       a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
-      if (a.kind === 'arrow' || a.pool) a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
-      if (ev && ev.type === 'player') enemyShotHit(a);
+      if (a.kind === 'arrow' || a.pool) { a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz); if (a.pool && BOSS_SHOT[a.kind].spin) a.mesh.rotateX(a.life * 14); }   // cleavers and bottles tumble
+      if (ev && ev.type === 'player') { enemyShotHit(a); if (a.mv && a.mv.puddle) bossPuddleAdd(a.x, a.z, a.mv); }
       else if (ev && ev.type === 'ally') allyShotHit(a, ev);
+      else if (ev && ev.type === 'ground' && a.mv && a.mv.puddle) bottleLand(a);
       if (ev || a.life <= 0) { dropArrowMesh(a); arrows.splice(i, 1); }
       continue;
     }
@@ -1214,6 +1220,7 @@ function bossDefeated(e) {
 // A dead enemy leaves a lootable body only if its drop roll gave something.
 function makeCorpse(e, sneak) {
   e.corpseDone = true;
+  if (e.minion) return;   // a boss's summons leave no body or loot (no farming the howl / rally / last call)
   if (e.T.mimic) return mimicCorpse(e);
   const bonus = sneak ? 0.15 : 0;
   if (!dryRoll(() => rollLoot('corpse', effFloor(), makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot && !e.spec.carry) return;
@@ -1481,6 +1488,7 @@ function updateCombat(dt) {
   const mt = theme.mechanic.TUNE;                                                 // the theme's mechanic numbers (undefined in themes with none)
   if (mech && mech.slippery) player.slipT = mt.carry; else if (player.slipT > 0) player.slipT -= dt;   // ice: the slide carries on for a moment after you leave it
   if (mech && mech.slow && mt) player.speedMul *= mt.slow;                      // wading through the Tavern's water
+  if (BOSS_PUD.n) player.speedMul *= bossPuddleMul(player.x, player.z);                   // wading through the Innkeeper's ale
   if (BOSS_LANE.n && bossLaneAt(player.x, player.z)) player.slipT = Math.max(player.slipT, mt && mt.carry || 0.6);   // the Frost Giant's ice lane: slide like on the Chapel's ice
   player.slippery = player.slipT > 0; if (mt && mt.slip) player.slipRate = mt.slip;
   if (floor.prints) updatePrints(dt);
@@ -1810,7 +1818,7 @@ function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU mem
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
-  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear();
+  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear(); bossPuddlesClear();
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
 }
@@ -1924,7 +1932,7 @@ function updateRespawn(dt) {
 Enemy.summon = (boss, type) => {
   for (let k = 0; k < 6; k++) {
     const a = gameRng() * Math.PI * 2, x = boss.x + Math.cos(a) * 2.4, z = boss.z + Math.sin(a) * 2.4;
-    if (Player.wallHit(floor, x, z, 0.5)) continue;
+    if (Player.wallHit(floor, x, z, 0.5) || Player.prototype.blocked.call({ radius: 0.5, props: floor.solids, mob: true }, floor, x, z)) continue;   // not inside a wall, a prop or the stairwell
     const tx = Math.floor(x / TILE), ty = Math.floor(z / TILE);
     const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: (gameRng() * 4294967296) >>> 0, type }, floor);
     e.x = x; e.z = z; e.minion = boss; e.last = { x: player.x, z: player.z }; e.set('alerted');
@@ -2193,7 +2201,7 @@ function frame(now) {
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
-    updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt);
+    updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt); bossPuddlesUpdate(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

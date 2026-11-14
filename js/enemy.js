@@ -225,7 +225,7 @@ class Enemy {
     const rg = makeRng(this.seed || 1);
     const pal = arr => arr[Math.floor(rg() * arr.length)];
     const lam = lamMat;
-    const skin = lam(this.spec.skin || this.T.skin || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
+    const skin = lam(this.spec.skin || this.T.skin || (this.boss && this.spec.dress === 'innkeeper' ? 0xc8946c : 0) || pal([0x5f8a3c, 0x6a9244, 0x557a3a, 0x7b8f40]));
     const dark = lam(new THREE.Color(skin.color).multiplyScalar(0.65).getHex());     // hands, ear tips, warts, brow
     const cloth = lam(pal([0x6a3f2a, 0x5a3a46, 0x3a4a5a, 0x5a5230]));
     const leather = lam(0x3a2616), metal = lam(0x8a8e96), bone = lam(0xe6e0c8), black = lam(0x120c08);
@@ -260,12 +260,13 @@ class Enemy {
     else if (this.quad) this.buildQuad(m, lam);
     else {
     const box = (w, h, d, mat, x, y, z, parent) => { const p = new THREE.Mesh(boxGeo(w, h, d), mat); p.position.set(x, y, z); parent.add(p); return p; };
+    const inn = this.boss && this.spec.dress === 'innkeeper', bt = inn ? null : boots;           // the Giant Innkeeper wears no plate (an apron, a belly and a keg instead)
     this.legs = [-1, 1].map(s => {
-      const g = new THREE.Group(); g.position.set(s * 0.15, 0.7, 0);
-      cylPart(0.115, 0.095, 0.7, skin, 0, -0.35, 0, g);
-      box(0.25, 0.2, 0.32, boots ? metalFor(boots) : leather, 0, -0.6, -0.04, g);                // boot
-      if (boots && boots.cls >= 1) box(0.23, 0.3, 0.25, metalFor(boots), 0, -0.4, 0, g);          // greave
-      if (boots && boots.cls === 2) box(0.27, 0.1, 0.27, metalFor(boots), 0, -0.12, 0, g);        // knee plate
+      const g = new THREE.Group(); g.position.set(s * (inn ? 0.2 : 0.15), 0.7, 0); if (inn) g.scale.set(1.25, 1, 1.25);
+      cylPart(0.115, 0.095, 0.7, inn ? lam(0x4a3a2a) : skin, 0, -0.35, 0, g);
+      box(0.25, 0.2, 0.32, bt ? metalFor(bt) : leather, 0, -0.6, -0.04, g);                      // boot
+      if (bt && bt.cls >= 1) box(0.23, 0.3, 0.25, metalFor(bt), 0, -0.4, 0, g);                  // greave
+      if (bt && bt.cls === 2) box(0.27, 0.1, 0.27, metalFor(bt), 0, -0.12, 0, g);                // knee plate
       box(0.26, 0.05, 0.3, black, 0, -0.69, -0.04, g);                                           // sole
       m.add(g); return g;
     });
@@ -279,7 +280,7 @@ class Enemy {
     part(0.1, 0.08, 0.02, metal, 0, 0.1, -0.18);                                                 // buckle
     if (this.spec.carry) { const gold = lam(0xe8c040); part(0.035, 0.14, 0.02, gold, 0.2, -0.02, -0.19); part(0.1, 0.07, 0.02, gold, 0.2, 0.07, -0.19); part(0.06, 0.025, 0.02, gold, 0.23, -0.07, -0.19); }   // a small gold key hanging on the belt (the quest key, see QUEST_TYPES.prisoner)
     part(0.46, 0.3, 0.05, cloth, 0, -0.04, -0.17);                                               // loincloth
-    if (vest) {
+    if (vest && !inn) {
       const vm = metalFor(vest);
       part(0.62, 0.46, 0.4, vm, 0, 0.46, 0);                                                      // the armor wraps the whole chest, over the cloth torso
       part(0.5, 0.38, 0.05, vm, 0, 0.45, -0.21); part(0.58, 0.05, 0.34, leather, 0, 0.66, 0);   // jerkin / chainmail / plate front
@@ -326,8 +327,11 @@ class Enemy {
     // weapon in the right hand: a knobbed club or a chipped cleaver
     const wpn = new THREE.Group(); wpn.position.set(0, -0.62, -0.04);
     const blade = lam(weapon.tier >= 2 ? TIERS[weapon.tier].color : 0x8a8e96);
-    const look = this.T.look || kind;
-    if (look === 'bow') {
+    const look = inn ? 'tankard' : this.T.look || kind;
+    if (look === 'tankard') {                                                                    // a big pewter-and-oak tankard with a foaming head
+      cylPart(0.14, 0.13, 0.34, lam(0x9a6a2a), 0, 0.02, -0.14, wpn); cylPart(0.15, 0.15, 0.04, metal, 0, -0.1, -0.14, wpn); cylPart(0.15, 0.15, 0.04, metal, 0, 0.12, -0.14, wpn);
+      cylPart(0.13, 0.13, 0.07, lam(0xf6f2e0), 0, 0.22, -0.14, wpn); box(0.04, 0.22, 0.1, metal, 0.19, 0.03, -0.14, wpn);   // foam and a handle
+    } else if (look === 'bow') {
       box(0.04, 0.85, 0.05, lam(0x6a4a24), 0.02, -0.3, -0.05, wpn); box(0.01, 0.8, 0.01, bone, 0.02, -0.3, 0.0, wpn);                         // a bow and its string
     } else if (look === 'staff') {
       box(0.045, 1.25, 0.045, lam(0x4a3018), 0, -0.4, 0, wpn);
@@ -412,7 +416,22 @@ class Enemy {
     }
     if (this.boss && this.spec.dress) {                                                                                           // each theme's boss has its own look
       const d = this.spec.dress, gold = lam(0xe8c040);
-      if (d === 'innkeeper') { part(0.42, 0.26, 0.42, lam(0xf2efe6), 0, 1.3, 0); part(0.2, 0.2, 0.06, gold, 0, 0.2, -0.24); }   // a chef's hat in place of the helm (and no apron over his plate)
+      if (d === 'innkeeper') {                                                                  // a fat bartender: a round belly under a white apron, rolled sleeves, a moustache, a keg strapped to his back
+        const shirt = lam(0xe0d8c0), shirtD = lam(0xb8ae90), apron = lam(0xf4f0e4), wood = lam(0x7a4a22), brown = lam(0x3a2410);
+        up.scale.set(1.3, 1, 1.2); ellPart(0.8, 0.72, 0.62, shirt, 0, 0.26, -0.08, up);              // the belly
+        ellPart(0.7, 0.6, 0.12, apron, 0, 0.22, -0.4, up); part(0.5, 0.36, 0.05, apron, 0, 0.58, -0.2);   // the apron over belly and chest
+        for (const s of [-1, 1]) part(0.07, 0.34, 0.04, apron, s * 0.19, 0.78, -0.18);                  // its straps up to the neck
+        part(0.2, 0.15, 0.03, brown, 0.12, 0.06, -0.47); part(0.62, 0.07, 0.05, brown, 0, 0.02, -0.43);  // a pocket and the apron string
+        for (const a of this.arms) { cylPart(0.125, 0.115, 0.26, shirt, 0, -0.14, 0, a); cylPart(0.14, 0.14, 0.07, shirtD, 0, -0.29, 0, a); }   // sleeves rolled up to the elbow
+        const keg = cylPart(0.27, 0.27, 0.62, wood, 0, 0.5, 0.45, up); keg.rotation.z = Math.PI / 2;     // the keg, on its side across his back
+        for (const x of [-0.2, 0.2]) { const h = cylPart(0.285, 0.285, 0.05, metal, x, 0.5, 0.45, up); h.rotation.z = Math.PI / 2; }
+        for (const s of [-1, 1]) { const c = cylPart(0.2, 0.2, 0.03, lam(0x5a3416), s * 0.32, 0.5, 0.45, up); c.rotation.z = Math.PI / 2; }   // the keg ends
+        cylPart(0.04, 0.04, 0.14, gold, 0, 0.5, 0.74, up).rotation.x = Math.PI / 2;                      // its brass tap
+        part(0.06, 0.8, 0.02, leather, 0.12, 0.45, -0.2).rotation.z = 0.5; part(0.06, 0.8, 0.02, leather, -0.12, 0.45, 0.2).rotation.z = -0.5;   // the straps over his shoulders
+        part(0.34, 0.07, 0.07, brown, 0, 0.79, -0.19); for (const s of [-1, 1]) part(0.1, 0.05, 0.05, brown, s * 0.2, 0.75, -0.19).rotation.z = s * 0.7;   // a big moustache
+        part(0.32, 0.08, 0.08, brown, 0, 1.0, -0.17); ellPart(0.15, 0.16, 0.14, lam(0xd8806a), 0, 0.84, -0.24, up);   // bushy brows and a red nose
+        part(0.2, 0.08, 0.34, shirt, -0.32, 0.76, 0);                                                    // a bar towel over one shoulder
+      }
       else if (d === 'king') { part(0.4, 0.14, 0.4, gold, 0, 1.12, 0); for (const x of [-0.14, 0, 0.14]) part(0.06, 0.14, 0.06, gold, x, 1.24, 0); part(0.7, 0.9, 0.06, lam(0x8a2a2a), 0, 0.3, 0.22); }
       else if (d === 'golem') { for (const [x, y] of [[-0.15, 0.5], [0.18, 0.3], [0, 0.85], [-0.1, 0.1]]) part(0.06, 0.2, 0.02, new THREE.MeshBasicMaterial({ color: 0xff8a30 }), x, y, -0.19); part(0.7, 0.3, 0.5, lam(0x6a6a70), 0, 0.7, 0); }
       else if (d === 'fungus') { for (const [x, y, z] of [[-0.4, 0.9, 0], [0.4, 0.85, 0.1], [0.1, 1.2, 0.1], [-0.2, 1.15, 0.1]]) { part(0.14, 0.16, 0.14, lam(0xd8c8f0), x, y, z); part(0.34, 0.1, 0.34, lam(0xa05ad0), x, y + 0.12, z); } }
@@ -1029,6 +1048,7 @@ class Enemy {
     if (this.dormant && this.T.ambush) setPose(target, 0, 0, 1.57, 1.57, 0);                // a scarecrow stands with its arms out
     else setPose(target, 0, 0, this.state === 'alerted' ? 0.7 : sw * 0.8, -sw * 0.8, 0);
     if (this.stun > 0) setPose(target, 0.35, 0, -0.3, -0.3, 0);
+    else if (this.bs && this.bs.st === 'spin') setPose(target, 0.2, 0, 1.45, 1.45, 0.1);   // the Whirlwind: both arms out, spinning
     else if (this.winding) {
       const A = ATTACK_POSES[this.zone][0], B = ATTACK_POSES[this.zone][1], w = this.windT_;
       if (this.windT < w) {

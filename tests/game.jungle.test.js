@@ -39,7 +39,7 @@ run('Jungle and Frozen Chapel', async ({ open, check }) => {
   check('locked doors are cave mouths keyed with the Cave Key', jw.hasDoor && jw.door.every(s => s === 'cave|Cave Key'), JSON.stringify(jw.door));
   check('a cave door is baked into a few meshes (not dozens)', jw.doorMeshes >= 2 && jw.doorMeshes <= 6, jw.doorMeshes + ' meshes');
   check('a cave door rolls up (squashes) and is gone when it has opened', jw.midScale < 1 && jw.midScale > 0.05 && jw.done, 'mid scale ' + jw.midScale);
-  check('Jungle natives have glossary text and the boss is the Cave Warlord', jw.types.every(Boolean) && jw.boss === 'Cave Warlord' && jw.roster.signature === 'jaguar' && jw.roster.elite === 'tribal');
+  check('Jungle natives have glossary text and the boss is Moonfang', jw.types.every(Boolean) && jw.boss === 'Moonfang' && jw.roster.signature === 'jaguar' && jw.roster.elite === 'tribal');
 
   const jm = await page.evaluate(async () => {
     const out = {}, quiet = { events: [], emit() {}, shoot() {} };

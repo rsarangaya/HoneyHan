@@ -1,4 +1,4 @@
-// Boss models (BOSS2 to BOSS5 fill this in; the scarecrow, mushroom, lich and giant are here): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
+// Boss models (BOSS2 to BOSS5 fill this in; the scarecrow, mushroom, lich, giant and werewolf are here): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
 // build adds the parts to the boss's mesh group m inside animated groups and sets e.bd = { groups, skip, g }: bakeMeshes merges each group on its own (skipping the other
 // animated groups nested in it), so a model is a handful of baked meshes however many parts it has. pose eases its channels each frame (e.bp, no allocation).
 // A def points at its entry with `model: id`. Units are local (the mesh is scaled by def.scale); the front is -z. The current cave boss is a dressed biped (Enemy.build).
@@ -289,5 +289,99 @@ BOSS_MODELS.giant = {
     g.aR.rotation.x = p[2]; g.aL.rotation.x = p[3]; g.aR.rotation.z = p[4]; g.aL.rotation.z = p[5]; g.aR.position.y = g.aL.position.y = 1.2 + p[7] * 0.8;
     const sh = bs.phase >= 1 && !e.dormant; if (g.orbit.visible !== sh) g.orbit.visible = sh;
     if (sh) { g.orbit.rotation.y = t * 1.8; g.orbit.position.y = 0.95 + p[7]; }
+  },
+};
+
+// ---- Moonfang: a hunched werewolf with long forelimbs, a wolf head and a shaggy coat. Channels: 0 lean (body x, negative = forward), 1 twist y, 2 right arm angle x, 3 left arm angle x (both from the vertical, + = forward),
+// 4 jaw open, 5 head x (+ = snout up), 6 crouch dip, 7 tail wag y, 8 arms spread z ----
+const WW_T = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+const wwPut = (a, b, c, d, f, g, h, i, j) => { const T = WW_T; T[0] = a; T[1] = b; T[2] = c; T[3] = d; T[4] = f; T[5] = g; T[6] = h; T[7] = i; T[8] = j; };
+BOSS_MODELS.werewolf = {
+  tagY: 2.05, iconY: 1.85, shadow: 1.05,
+  build(e, m, lam) {
+    const fur = lam(0x54402c), furD = lam(0x2c2016), furG = lam(0x6e5a42), furL = lam(0xa88c64), belly = lam(0x8a7452), claw = lam(0xe8e0c8), tooth = lam(0xf6f0dc), mouth = lam(0x5a1620), nose = lam(0x0e0a0a), eye = bmGlow(0xffc830);
+    const body = bmGroup(m, 0, 0.7, 0.2), head = bmGroup(body, 0, 0.9, -0.4), jaw = bmGroup(head, 0, -0.14, -0.12), aL = bmGroup(body, -0.52, 0.5, -0.2), aR = bmGroup(body, 0.52, 0.5, -0.2);
+    const lL = bmGroup(m, -0.26, 0.7, 0.12), lR = bmGroup(m, 0.26, 0.7, 0.12), tail = bmGroup(body, 0, 0.05, 0.6);
+    ellPart(0.78, 0.8, 0.8, fur, 0, 0.35, -0.1, body);                                                // the deep chest
+    ellPart(0.5, 0.5, 0.3, belly, 0, 0.3, -0.45, body);                                               // a pale patch of fur on it
+    ellPart(0.6, 0.6, 0.8, furD, 0, 0.0, 0.3, body);                                                  // the lean abdomen
+    ellPart(0.72, 0.42, 0.55, furD, 0, 0.62, 0.0, body);                                              // the hump of the shoulders
+    for (const [y, z] of [[0.82, -0.12], [0.86, 0.08], [0.8, 0.28], [0.66, 0.48], [0.44, 0.62], [0.22, 0.72]]) bmSpike(body, y > 0.7 ? furL : furG, 0.11, 0.32, 0, y, z, 0, 1, 0.8);   // a ridge of shaggy fur down the back
+    for (const s of [-1, 1]) {
+      for (const [y, z] of [[0.55, -0.1], [0.3, 0.1], [0.05, 0.3]]) bmSpike(body, furL, 0.07, 0.34, s * 0.38, y, z, s, -0.3, 0.5);   // tufts along the flanks
+      bmSpike(body, furG, 0.1, 0.4, s * 0.4, 0.72, -0.05, s * 0.8, 0.6, 0.4);                        // and bristling shoulders
+    }
+    for (const x of [-0.2, 0, 0.2]) bmSpike(body, furL, 0.06, 0.3, x, 0.05, -0.42, 0, -1, -0.4);       // a ragged fringe under the chest
+    ellPart(0.46, 0.42, 0.5, fur, 0, 0, 0, head);                                                      // the skull
+    ellPart(0.25, 0.2, 0.46, furG, 0, -0.08, -0.36, head);                                             // the long snout
+    ellPart(0.13, 0.1, 0.1, nose, 0, -0.01, -0.6, head);                                               // a black nose
+    bmBox(0.18, 0.03, 0.4, mouth, 0, -0.17, -0.36, head);                                              // the dark roof of the mouth
+    for (const s of [-1, 1]) {
+      bmBox(0.2, 0.06, 0.12, furD, s * 0.11, 0.14, -0.2, head, 0, 0, -s * 0.35);                       // heavy angry brows
+      bmBox(0.1, 0.055, 0.03, eye, s * 0.13, 0.07, -0.238, head, 0, 0, -s * 0.3);                      // burning eyes
+      bmSpike(head, fur, 0.11, 0.38, s * 0.16, 0.27, 0.06, s * 0.3, 1, -0.1);                          // pricked ears
+      bmSpike(head, furL, 0.06, 0.22, s * 0.16, 0.25, 0.02, s * 0.3, 1, -0.1);
+      bmSpike(head, tooth, 0.035, 0.15, s * 0.09, -0.21, -0.5, 0, -1, 0);                              // bared fangs
+      for (const z of [0.0, 0.14]) bmSpike(head, furL, 0.07, 0.3, s * 0.24, -0.05, z, s, -0.1, 0.5);   // cheek ruff
+      bmSpike(jaw, tooth, 0.03, 0.12, s * 0.08, 0.04, -0.4, 0, 1, 0);                                  // and lower fangs
+    }
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; bmSpike(head, i % 2 ? furL : furG, 0.09, 0.4, Math.sin(a) * 0.22, 0.02 + Math.cos(a) * 0.2, 0.2, Math.sin(a) * 0.6, Math.cos(a) * 0.6, 0.9); }   // the mane round the neck
+    ellPart(0.2, 0.1, 0.42, furD, 0, -0.04, -0.2, jaw); bmBox(0.16, 0.03, 0.38, mouth, 0, 0.02, -0.2, jaw);   // the lower jaw and the inside of the mouth
+    for (const [g, s] of [[aL, -1], [aR, 1]]) {
+      ellPart(0.32, 0.32, 0.32, fur, 0, 0, 0, g);                                                      // the shoulder
+      cylPart(0.13, 0.1, 0.5, fur, 0, -0.25, 0, g); ellPart(0.17, 0.17, 0.17, furD, 0, -0.5, 0, g);        // a long upper arm, the elbow
+      cylPart(0.1, 0.07, 0.5, furG, 0, -0.78, -0.03, g);                                              // a long forearm
+      ellPart(0.22, 0.18, 0.3, furD, 0, -1.02, -0.08, g);                                              // the paw
+      for (const x of [-0.07, 0, 0.07]) bmSpike(g, claw, 0.035, 0.22, x, -1.12, -0.24, 0, -0.4, -1);   // three long claws
+      for (const y of [-0.5, -0.8]) bmSpike(g, furL, 0.05, 0.26, s * 0.1, y, 0.02, s, -1, 0.3);         // shaggy tufts on the arm
+    }
+    for (const l of [lL, lR]) {
+      const th = cylPart(0.19, 0.14, 0.4, fur, 0, -0.153, -0.129, l); th.rotation.x = 0.7;             // the thigh angles forward to the knee...
+      ellPart(0.2, 0.2, 0.22, furD, 0, -0.306, -0.26, l);
+      const sh = cylPart(0.12, 0.07, 0.42, furG, 0, -0.474, -0.132, l); sh.rotation.x = -0.64;         // ...and the shin back to the heel: a digitigrade leg
+      ellPart(0.2, 0.1, 0.44, furD, 0, -0.66, -0.12, l);                                               // a long foot
+      for (const x of [-0.06, 0.06]) bmSpike(l, claw, 0.03, 0.16, x, -0.67, -0.38, 0, -0.2, -1);
+      bmSpike(l, furL, 0.07, 0.3, 0, -0.1, 0.1, 0, 0.3, 1); bmSpike(l, furL, 0.06, 0.22, 0, -0.5, 0.05, 0, -0.3, 1);   // tufts on the haunch and the heel
+    }
+    ellPart(0.24, 0.24, 0.55, fur, 0, 0, 0.22, tail); ellPart(0.3, 0.3, 0.5, furG, 0, -0.08, 0.62, tail); ellPart(0.22, 0.22, 0.42, furL, 0, -0.2, 0.98, tail);   // a bushy tail
+    for (const [y, z] of [[0.12, 0.35], [0.1, 0.7], [-0.05, 1.05]]) bmSpike(tail, furL, 0.07, 0.3, 0, y, z, 0, 1, 0.6);
+    e.bd = { groups: [body, head, jaw, aL, aR, lL, lR, tail], skip: new Set([body, head, jaw, aL, aR, lL, lR, tail]), g: { body, head, jaw, aL, aR, lL, lR, tail } };
+    e.bp = [-0.55, 0, 0.5, 0.5, 0.05, 0, 0, 0, 0.15];
+  },
+  pose(e, dt) {
+    const g = e.bd.g, p = e.bp, t = performance.now() * 0.001 + e.seed % 7, sw = Math.sin(e.walkT), id = e.mv ? e.mv.id : '', bs = e.bs;
+    bmPhase(e);
+    const sn = Math.sin(t * 1.5);
+    let snap = false;
+    if (e.dormant) wwPut(-0.95, 0.1, 0.25, 0.25, 0, -0.5, 0.32, 0.5, 0.25);                            // asleep: curled low, the head on its paws
+    else wwPut(-0.55 + 0.03 * sn, 0.05 * sn, 0.5 + 0.6 * sw, 0.5 - 0.6 * sw, 0.08 + 0.05 * sn, 0.05 * sn, 0.04 * Math.abs(sw), 0.4 * Math.sin(t * 2.2), 0.15);   // idle: a loping gait, panting
+    if (e.stun > 0) wwPut(-0.1, 0, -0.5, -0.5, 0.7, 0.4, 0, 0.3, 0.6);                                 // reeling back
+    else if (bs.st === 'special' && (id === 'pounce' || id === 'pounce2')) wwPut(-0.95, 0, 2.3, 2.3, 0.9, -0.2, 0, 0.1, 0.2);   // in the air: stretched out, claws reaching
+    else if (bs.st === 'phase') wwPut(-0.2, 0, 0.7, 0.7, 0.8, 0.95, 0, 0.6, 1.1);                      // the moon rage: it throws its head back and howls
+    else if (BM_PH) {
+      const k = BM_K, T = WW_T, a = BM_PH === 1 ? 0 : 1;
+      if (id === 'rake' || id === 'rake2') {                                                           // one arm up and back, then the claws raked down and across
+        const R = id === 'rake', hi = R ? 2 : 3, lo = R ? 3 : 2, tw = R ? 1 : -1;
+        if (a === 0) { wwPut(bmLerp(T[0], -0.4, k), -0.5 * tw * k, 0.5, 0.5, 0.2, 0, 0, 0.3, 0.2); WW_T[hi] = bmLerp(T[hi], 2.5, k); WW_T[lo] = 0.5; }
+        else { wwPut(bmLerp(-0.4, -0.85, k), bmLerp(-0.5 * tw, 0.5 * tw, k), 0.5, 0.5, 0.3, 0, 0.05, 0.3, 0.2); WW_T[hi] = bmLerp(2.5, 0.0, k); WW_T[lo] = 0.5; snap = true; }
+      } else if (id === 'bite') {                                                                      // rears back, jaws wide, then lunges and snaps
+        if (a === 0) wwPut(bmLerp(T[0], -0.3, k), 0, bmLerp(T[2], 0.9, k), bmLerp(T[3], 0.9, k), bmLerp(T[4], 1.0, k), bmLerp(T[5], 0.55, k), 0, 0.3, 0.3);
+        else { wwPut(bmLerp(-0.3, -0.95, k), 0, 1.0, 1.0, bmLerp(1.0, 0.0, k), bmLerp(0.55, -0.3, k), 0.05, 0.3, 0.3); snap = true; }
+      } else if (id === 'pounce' || id === 'pounce2') {                                                // the crouch: low to the ground, coiled, the arms back
+        wwPut(bmLerp(T[0], -0.85, k), 0, bmLerp(T[2], 0.1, k), bmLerp(T[3], 0.1, k), 0.35, bmLerp(T[5], -0.15, k), bmLerp(T[6], 0.3, k), bmLerp(T[7], 0.1, k), 0.3);
+        if (a === 1) snap = true;
+      } else {                                                                                         // the howl: the head thrown back, jaws wide, the chest out
+        wwPut(bmLerp(T[0], -0.2, k), 0, bmLerp(T[2], 0.8, k), bmLerp(T[3], 0.8, k), bmLerp(T[4], 0.8, k), bmLerp(T[5], 0.95, k), 0, 0.6, bmLerp(T[8], 1.0, k));
+        if (a === 1) snap = true;
+      }
+    }
+    const k = snap ? 1 : 1 - Math.exp(-12 * dt), T = WW_T;
+    for (let i = 0; i < 9; i++) p[i] += (T[i] - p[i]) * k;
+    const d = p[6], ls = (0.7 - d) / 0.7;
+    g.body.rotation.x = p[0]; g.body.rotation.y = p[1]; g.body.position.y = 0.7 - d;
+    g.aR.rotation.x = p[2] - p[0]; g.aL.rotation.x = p[3] - p[0]; g.aR.rotation.z = -p[8] * 0.5; g.aL.rotation.z = p[8] * 0.5;
+    g.head.rotation.x = p[5] - p[0] * 0.6; g.jaw.rotation.x = p[4];
+    g.tail.rotation.y = p[7]; g.tail.rotation.x = 0.5 + p[0] * 0.5;
+    const lw = 0.55 * (1 - d * 2); g.lL.rotation.x = sw * lw; g.lR.rotation.x = -sw * lw; g.lL.position.y = g.lR.position.y = 0.7 - d; g.lL.scale.y = g.lR.scale.y = ls;
   },
 };

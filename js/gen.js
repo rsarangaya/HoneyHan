@@ -122,7 +122,7 @@ const THEME_DEFS = [
     doors: { style: 'cave', keyNames: { armory: 'Cave Key', vault: 'Cave Key', brewery: 'Cave Key', lair: 'Cave Key', cell: 'Cave Key' }, openAnim: 'roll' },
     props: { noCeil: true, edge: [['hammock', 0, 1]], inner: [['log', 0, 1], ['idol', 0, 1]], floor: [['fern', 3, 5], ['glowmoss', 0, 2], ['vines', 2, 3]], locked: [['glowmoss', 1, 2], ['bones', 1, 2]] },
     natives: { commons: ['dartgoblin', 'strangler'], signature: 'jaguar', elite: 'tribal', prefer: { dartgoblin: 'library', strangler: 'storeroom' } },
-    boss: { name: 'Cave Warlord', dress: 'warlord', skin: 0x5a8a3a },
+    boss: { name: 'Moonfang', dress: 'warlord', skin: 0x5a8a3a },   // the werewolf (js/bossmodels.js) draws its own fur: dress and skin are only the fallback
     mechanic: { kind: 'brush', n: [10, 14], hint: 'Thick brush hides you from guards (more if you crouch) but rustles when you move through it. Jaguars lie in wait.',
       TUNE: { stealth: 0.5, stealthCrouch: 0.35, rustle: 3, fade: 0.45 } } }),   // stealth: guards see you x this in brush, stealthCrouch: crouched, rustle: extra noise metres while moving in brush, fade: opacity of an enemy standing in brush
 ];
