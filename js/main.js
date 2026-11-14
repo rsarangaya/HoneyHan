@@ -468,6 +468,7 @@ function pruneThemeTextures() {
 
 function buildFloor() {
   wallKinds = new Map();
+  knock.m = 0;   // no knockback carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -625,7 +626,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
-  for (const b of enemies) if (b.boss) nameTag(b, b.def.tag || b.def.name, b.def.color);                // every boss has its name over its head (the placeholder final boss says what it is)
+  for (const b of enemies) if (b.boss) { nameTag(b, b.def.tag || b.def.name, b.def.color); if (b.bm) b.tag.position.y = b.bm.tagY; }                // every boss has its name over its head (the placeholder final boss says what it is)
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   floor.prints = theme.mechanic.prints && !floor.boss ? buildPrints() : null;
@@ -935,7 +936,7 @@ function dealHit(e, zone, base, w, noise) {
   const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you (or smelling you); the boss cannot be sneak-killed
   const guarded = !sneak && e.stun <= 0 && e.T.blockFront < 1 && e.facesPlayer(player);        // a raised shield or guard takes hits from the front
   const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1) * (guarded ? e.T.blockFront : 1)
-    * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1);
+    * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1) * (e.bs ? bossTakeMul(e, zone) : 1);
   const killed = e.hurt(dmg, player);
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
@@ -1125,8 +1126,7 @@ function enemyShotHit(a) {
     return;
   }
   const zone = a.y > player.eye - 0.4 ? 'head' : a.y > 0.65 ? 'body' : 'legs';       // where it landed, by your height
-  if (a.mv) { a.from.hitMul = a.dmg; a.from.mv = a.mv; }                             // a boss's shot: the move's damage, blockable like an arrow
-  resolveEnemyAttack(a.from, zone, true);
+  resolveEnemyAttack(a.from, zone, true, a.mv, a.dmg);                               // a boss's shot: the move's damage, blockable like an arrow (passed in, the boss's own move state is untouched)
 }
 
 // ---- bow: hold attack to draw, release to fire. One arrow per shot, found arrows can be picked up again ----
@@ -1167,7 +1167,7 @@ function updateArrows(dt) {
     if (a.owner === 'enemy') {
       const ev = stepArrow(a, dt, floor, enemies, player, Enemy.ally && Enemy.ally.floor === floor ? Enemy.ally : null);
       a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
-      if (a.kind === 'arrow') a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+      if (a.kind === 'arrow' || a.pool) a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
       if (ev && ev.type === 'player') enemyShotHit(a);
       else if (ev && ev.type === 'ally') allyShotHit(a, ev);
       if (ev || a.life <= 0) { dropArrowMesh(a); arrows.splice(i, 1); }
@@ -1351,14 +1351,14 @@ function smashChest(w) {
   return false;
 }
 
-function resolveEnemyAttack(e, zone, ranged = false) {
+function resolveEnemyAttack(e, zone, ranged = false, shotMv = null, shotDmg = 1) {   // shotMv/shotDmg: a boss's projectile brings its own move and damage, so a shot landing mid-telegraph never touches the boss's live e.mv / e.hitMul
   const w = wstats();
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
   const facing = (dx * fx + dz * fz) / d > 0.2;
-  const full = TUNE.enemyDmg * e.dmgMul * (e.hitMul || 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));
-  e.hitMul = 1;   // armor in that zone's slot cuts it
-  const mv = e.mv;                                                                  // a boss's move in play (js/boss.js)
+  const full = TUNE.enemyDmg * e.dmgMul * (shotMv ? shotDmg : e.hitMul || 1) * ZONE_MUL[zone] * (1 - inv.armorRed(zone));
+  if (!shotMv) e.hitMul = 1;   // armor in that zone's slot cuts it
+  const mv = shotMv || e.mv;                                                                  // a boss's move in play (js/boss.js)
   if (mv && mv.ground && !ranged) { groundHit(e, mv, zone, full, facing, w, -dx / d, -dz / d); return; }   // circles, floor lines, shockwaves: a block only softens them
   const bs = blockStats();
   if (cb.block && facing && !w.ranged) {
@@ -1389,14 +1389,17 @@ function resolveEnemyAttack(e, zone, ranged = false) {
 // through (0.5; a shield takes less: x SHIELD.legsTake) and skips the status; the knockback (mv.knock metres, away from the boss) happens either way.
 function groundHit(e, mv, zone, full, facing, w, nx, nz) {
   const bs = blockStats();
-  let take = 1;
-  if (cb.block && facing && !w.ranged && bs.cost > 0) {
+  let take = 1, broke = false;
+  // Same cover rule as a normal hit: a low guard only covers a legs-zone move, a high guard covers head/body ones (a leg sweep goes under it), a shield covers both.
+  const covers = bs.legs || (bs.low ? zone === 'legs' : zone !== 'legs');
+  if (cb.block && facing && !w.ranged && !covers) mark(zone === 'legs' ? 'LEG SWEEP: look down to guard low' : 'HIGH HIT: guard is low', '#ff6a4a');
+  if (cb.block && facing && !w.ranged && bs.cost > 0 && covers) {
     if (cb.stamina >= bs.cost || dev.on) { spend(bs.cost); cb.stamina = Math.min(STAMINA_MAX, cb.stamina + bs.cost * TUNE.blockRefund); take = (mv.blockTake === undefined ? 0.5 : mv.blockTake) * (bs.legs ? SHIELD.legsTake : 1); mark('BRACED: it still hurts', '#cfe'); loud(5); }
-    else { cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); }
+    else { cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); take = 0.5; broke = true; }   // a broken guard: half damage and the statuses, like the normal path
   }
   if (take === 1) cb.atk = null;
   damage(full * take);
-  if (take === 1) { hitStatuses(e, zone); if (mv.status) moveStatus(mv); }
+  if (take === 1 || broke) { hitStatuses(e, zone); if (mv.status) moveStatus(mv); }
   if (mv.knock) applyKnock(nx, nz, mv.knock);
 }
 function moveStatus(mv) { if (pst.apply(mv.status, mv.statusDur)) { discover('status:' + mv.status, STATUS[mv.status].name); addLog(STATUS[mv.status].name + '!', STATUS[mv.status].color); } }
@@ -1613,7 +1616,7 @@ function damage(n) {
   if (dev.on) return;
   inv.hp = Math.max(0, inv.hp - n);
   if (inv.hp <= 0) {
-    state = 'dead';
+    state = 'dead'; knock.m = 0;
     document.exitPointerLock();
     hud.overlayText.innerHTML = `<h1>You died on stage ${stage}, floor ${floorNum}</h1><p>Click to start a new run.</p>`;
     hud.overlay.style.display = 'flex';

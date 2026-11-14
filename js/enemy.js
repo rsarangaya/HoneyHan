@@ -183,7 +183,7 @@ class Enemy {
     this.quad = this.T.model === 'quad' || this.T.model === 'float' || this.T.model === 'mimic';   // floating things aim and animate like animals
     this.handlerRef = null;             // a wolf's goblin handler (linkHandlers in enemytypes.js)
     this.boss = !!spec.boss;            // big, hits harder, no stagger, and asleep until the player gets within TUNE.bossWake
-    this.def = this.boss ? bossDefOf(spec) : null; this.bs = this.def ? bossState(this.def) : null;   // js/boss.js: its data and state machine
+    this.def = this.boss ? bossDefOf(spec) : null; this.bs = this.def ? bossState(this.def) : null; this.bm = this.def && this.def.model && BOSS_MODELS[this.def.model] || null; this.bd = null;   // js/boss.js: its data and state machine
     this.mv = null; this.alt = 0; this.minion = null;   // mv: the boss move in play (read by resolveEnemyAttack); alt: height above the floor (a flying boss); minion: the boss that summoned it
     this.dormant = this.boss || !!this.T.ambush || this.T.mimic;   // the boss and scarecrows wait, as scenery, until you come close
     this.x = (spec.x + 0.5) * TILE; this.z = (spec.y + 0.5) * TILE;
@@ -248,13 +248,14 @@ class Enemy {
     this.spdRoll = this.boss ? TUNE.bossAtkSpd : (WSTATS[kind].spd || 1) * (0.9 + rg() * 0.2);   // the guard's own attack speed stat: weapon spd x a small roll
     this.gear = this.quad ? [] : [helmet, vest, boots, weapon].filter(Boolean);   // animals carry nothing
     const cut = it => it ? Math.min(0.5, ARMOR_RED[it.cls] * TIERS[it.tier].mul) : 0;
-    this.resist = { head: 1 - cut(helmet), body: 1 - cut(vest), legs: 1 - cut(boots) };
+    this.resist = this.def && this.def.resist ? { ...this.def.resist } : { head: 1 - cut(helmet), body: 1 - cut(vest), legs: 1 - cut(boots) };   // a boss def can set its own toughness
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
     m.scale.setScalar(this.boss ? this.def.scale || BOSS_SCALE * (this.final ? TUNE.finalBossScale : 1) : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
-    if (this.T.model === 'float') this.buildFloat(m, lam);
+    if (this.bm) this.bm.build(this, m, lam);                                  // a non-biped boss (js/bossmodels.js): fills this.bd = { groups, skip }
+    else if (this.T.model === 'float') this.buildFloat(m, lam);
     else if (this.T.model === 'mimic') this.buildMimic(m);
     else if (this.quad) this.buildQuad(m, lam);
     else {
@@ -421,20 +422,21 @@ class Enemy {
     }
     if (!SHADOW_GEO) { SHADOW_GEO = cachedGeo('shadow', () => new THREE.CircleGeometry(1, 20)); SHADOW_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }); SHADOW_MAT.userData.shared = true; }
     this.shadow = new THREE.Mesh(SHADOW_GEO, SHADOW_MAT);
-    this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
+    this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar(this.bm && this.bm.shadow || (this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
     this.shadow.renderOrder = 1; m.add(this.shadow);
     // Merge the parts inside each animated group (torso and head, each arm, each leg): about 60 meshes become about 25
     // per creature, and the pose code still moves the same groups.
     if (!this.T.mimic) {
       const ctx = { flash: null };   // one lit material for the whole creature: vertex colours carry the paint, its emissive carries the hit flash   // a mimic is a handful of animated meshes: never baked or merged
-      if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), ctx); for (const w of this.wings || []) bakeMeshes(w, NO_SKIP, ctx); }
+      if (this.bm) for (const g of this.bd.groups) bakeMeshes(g, this.bd.skip, ctx);   // every animated group of a boss model, each merged on its own (the groups themselves stay)
+      else if (this.quad) { bakeMeshes(this.body, new Set(this.wings || []), ctx); for (const w of this.wings || []) bakeMeshes(w, NO_SKIP, ctx); }
       else { bakeMeshes(this.upper, new Set(this.arms), ctx); for (const a of this.arms) bakeMeshes(a, this.keep ? new Set(this.keep) : NO_SKIP, ctx); }
-      for (const l of this.legs) bakeMeshes(l, NO_SKIP, ctx);
+      if (!this.bm) for (const l of this.legs) bakeMeshes(l, NO_SKIP, ctx);
       this.mats = ctx.flash ? [ctx.flash] : [];   // the flash material (a wisp, all glow, has none)
     }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
-    this.icon.position.y = this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
+    this.icon.position.y = this.bm ? this.bm.iconY : this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
     m.add(this.icon);
 
     // flat fan showing the vision cone, drawn at VIS_RANGE and scaled to the real range each frame; shown in dev mode, and in Easy mode (assist.showVision) for living guards within 25 m
@@ -1013,7 +1015,8 @@ class Enemy {
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;
       return;
     }
-    if (this.quad) this.poseQuad(dt);
+    if (this.bm) this.bm.pose(this, dt);
+    else if (this.quad) this.poseQuad(dt);
     else {
     const sw = Math.sin(this.walkT) * 0.6;
     this.legs[0].rotation.x = sw; this.legs[1].rotation.x = -sw;

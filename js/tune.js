@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-28';   // bumped so old saved values don't override the new defaults (last: enemy turn speeds)
+  const KEY = 'prototype-test-tune-29';   // bumped so old saved values don't override the new defaults (last: the Harvest King and Fungal Warden sections)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurn', 1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
@@ -11,6 +11,11 @@ const tunePanel = (() => {
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1], ['parryRestore', 1], ['blockRefund', 0.05]]],
     ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'jaguar', 'dartgoblin', 'strangler', 'tribal', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),
+    ...['scarecrow', 'mushroom'].flatMap(id => {   // the Orchard and Cellar bosses (js/boss.js BOSS_DEFS): their stats, then one section per move (only the numbers that exist)
+      const d = BOSS_DEFS[id], st = { wind: 0.05, dmg: 0.05, r: 0.1, reach: 0.1, len: 0.5, width: 0.1, n: 1, spread: 1, arc: 5, speed: 1, minD: 0.5, maxD: 0.5, cd: 0.5, rec: 0.1, knock: 0.5, blockTake: 0.05, statusDur: 0.5 };
+      return [[d.name, d, [['hpMul', 0.05], ['dmgMul', 0.05], ['speedMul', 0.05], ['scale', 0.05], ['r', 0.05]]],
+        ...d.moves.map(mv => [d.name + ': ' + mv.name + (mv.chain ? ' (chained)' : ''), mv, Object.keys(st).filter(k => typeof mv[k] === 'number').map(k => [k, st[k]])])];
+    }),
     ['tavern water', THEME_BY_NAME['The Sunken Tavern'].mechanic.TUNE, [['slow', 0.05], ['splash', 0.5], ['splashRun', 0.5], ['enemySlow', 0.05]]],
     ['market crowd', THEME_BY_NAME['The Goblin Market'].mechanic.TUNE, [['blend', 0.05], ['din', 0.05], ['watchR', 0.5], ['watchAware', 0.05]]],
     ['final chamber runes', THEME_BY_NAME['The Final Chamber'].mechanic.TUNE, [['flareEvery', 0.5], ['flareLen', 0.1], ['flareWarn', 0.1], ['flareR', 0.5], ['flareSeen', 0.05]]],
@@ -47,9 +52,10 @@ const tunePanel = (() => {
     ['arrows', BOW, [['speedMin', 1], ['speedMax', 1], ['gravity', 0.5], ['minDraw', 0.05], ['recoverWorld', 0.05], ['recoverHit', 0.05], ['impactNoise', 1]]],
     ['shield', SHIELD, [['cost', 1], ['parryWin', 0.05], ['legsTake', 0.05], ['legsCost', 0.05], ['bashStam', 1], ['bashCd', 0.1], ['bashStun', 0.1], ['bashDmg', 1], ['bashReach', 0.1], ['bashPush', 0.1]]],
   ];
-  const defaults = JSON.stringify(sections.map(s => ({ ...s[1] })));
+  const nums = o => { const r = {}; for (const k in o) if (typeof o[k] === 'number') r[k] = o[k]; return r; };   // a boss def holds arrays and objects too: save and restore only its numbers
+  const defaults = JSON.stringify(sections.map(s => nums(s[1])));
 
-  const read = () => sections.map(s => ({ ...s[1] }));
+  const read = () => sections.map(s => nums(s[1]));
   const apply = saved => saved.forEach((vals, i) => Object.assign(sections[i][1], vals));
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.length === sections.length) apply(s); } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(read())); } catch (e) {} };

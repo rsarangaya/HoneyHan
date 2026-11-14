@@ -48,7 +48,7 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
     game.startStage(2); game.startFloor(3); out.g2f3 = mk().maxHp;
     game.startStage(1); game.startFloor(1); out.g1 = mk().maxHp;
     out.boss = [];
-    for (const s of [1, 2, 3, 4]) { game.startStage(s); game.startFloor(5); const b = game.enemies.find(x => x.boss); out.boss.push([b.maxHp, b.dmgMul, b.final]); }
+    for (const s of [1, 2, 3, 4]) { game.startStage(s); game.startFloor(5); const b = game.enemies.find(x => x.boss); out.boss.push([b.maxHp, b.dmgMul, b.final, b.def.hpMul]); }
     game.startStage(5); const fb = game.enemies.find(x => x.boss); out.final = [fb.maxHp, fb.dmgMul, fb.final, fb.scaleK / BOSS_SCALE];
     game.startStage(3); game.startFloor(2); out.eff32 = effFloor();
     game.startStage(4); game.startFloor(4); out.eff44 = effFloor();
@@ -59,8 +59,8 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
   check('stage 2 floor 3 goblin stacks the floor and stage scaling (55 x 1.24 x 1.35)', Math.abs(sc.g2f3 - 55 * 1.24 * 1.35) < 1e-6, sc.g2f3.toFixed(2));
   check('stage 1 goblins are unchanged (55 HP)', Math.abs(sc.g1 - 55) < 1e-6, String(sc.g1));
   const bossWant = [[220, 1.4], [330, 1.68], [440, 1.96], [550, 2.24]];
-  check('stage bosses: HP 220 x (1 + 0.5 x (stage - 1)), damage x (1 + 0.2 x (stage - 1))',
-    sc.boss.every(([hp, dm, fin], i) => Math.abs(hp - bossWant[i][0]) < 1e-6 && Math.abs(dm - bossWant[i][1]) < 1e-9 && !fin), JSON.stringify(sc.boss.map(b => b.slice(0, 2))));
+  check('stage bosses: HP 220 x the boss hpMul x (1 + 0.5 x (stage - 1)), damage x (1 + 0.2 x (stage - 1))',
+    sc.boss.every(([hp, dm, fin, hm], i) => Math.abs(hp - bossWant[i][0] * hm) < 1e-6 && Math.abs(dm - bossWant[i][1]) < 1e-9 && !fin), JSON.stringify(sc.boss.map(b => b.slice(0, 2))));
   check('the final boss: 660 HP (3x), damage 1.8x the stage 1 boss, drawn 1.25x bigger',
     Math.abs(sc.final[0] - 660) < 1e-6 && Math.abs(sc.final[1] - 2.52) < 1e-9 && sc.final[2] && Math.abs(sc.final[3] - 1.25) < 1e-9, JSON.stringify(sc.final));
   check('loot depth follows the stage: effFloor = floor + 1.5 x (stage - 1)', Math.abs(sc.eff32 - 5) < 1e-9 && Math.abs(sc.eff44 - 8.5) < 1e-9, `stage 3 floor 2: ${sc.eff32}, stage 4 floor 4: ${sc.eff44}`);
