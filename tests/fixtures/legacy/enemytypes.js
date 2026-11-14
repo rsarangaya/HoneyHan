@@ -206,7 +206,7 @@ function linkHandlers(list) {
 const THEME_BOSS = {
   'The Sunken Tavern':     { name: 'Giant Innkeeper',   dress: 'innkeeper' },
   'The Moonlit Orchard':   { name: 'Harvest King',      dress: 'king',    skin: 0xb88a3a },
-  'The Clockwork Library': { name: 'Librarian Golem',   dress: 'golem',   skin: 0x8a8a90 },
+  'The Clockwork Library': { name: 'Librarian Lich',    dress: 'golem',   skin: 0x8a8a90 },
   'The Mushroom Cellar':   { name: 'Fungal Warden',     dress: 'fungus',  skin: 0x6a5a8a },
   'The Goblin Market':     { name: 'Goblin Warlord',    dress: 'warlord', skin: 0x7a9a3a },
   'The Frozen Chapel':     { name: 'Frost Giant',       dress: 'frost',   skin: 0x9ac4e0 },

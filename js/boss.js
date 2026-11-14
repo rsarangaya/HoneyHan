@@ -14,11 +14,13 @@
 //     cd (this move's cooldown), gcd (cooldown before ANY move; -1 = e.cooldown), rec (stand still after), next (move id chained straight after), minD/maxD (selection range),
 //     weight, phase, parry (a parry staggers; false = a block only), ground (red telegraph, wind >= 0.8), blockTake (share of the damage a block lets through, 0.5), knock (metres),
 //     status/statusDur, kind/n/speed (projectile), spawn/n/cap (summon), dur/h (leap flight time, arc height),
+//     ring (projectile: n shots spaced round the full circle, `off` degrees turned), gap (projectile: metres between shots lined up behind the muzzle), lane {dur} (a line leaves an ice lane: you slide on it),
+//     blink ('blink' shape: it vanishes and reappears `behind` metres behind you, a marker shows where; chain a quick strike with `next`; tele: true shows the marker),
 //     n/spread (line: n lines fanned `spread` degrees apart), chain (true: only ever started by another move's `next`), cloud {dur, daze} (a circle at 'target' that leaves a daze cloud
-//     instead of hitting: spawnCloud), expose {t, mul} (after the strike the boss takes mul x body damage for t s: put the same t in rec) }]
+//     instead of hitting: spawnCloud), expose {t, mul, all} (after the strike the boss takes mul x body damage, or x damage anywhere when `all`, for t s: put the same t in rec) }]
 //   blurb: one line for the glossary card (replaces the plate text).
 const BOSS_DEFS = {};
-const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon'];
+const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon', 'blink'];
 const BOSS_BASE_ID = 'cave';
 
 BOSS_DEFS.cave = {
@@ -29,8 +31,8 @@ BOSS_DEFS.cave = {
 if (typeof THEME_DEFS !== 'undefined') for (const t of THEME_DEFS) if (t.boss) BOSS_DEFS[t.id] = { ...BOSS_DEFS.cave, id: t.id, name: t.boss.name, theme: t.name };
 if (typeof FINAL_BOSS !== 'undefined') BOSS_DEFS.final = { ...BOSS_DEFS.cave, id: 'final', name: FINAL_BOSS.name, theme: null, tag: FINAL_BOSS.tag, color: '#c060ff' };
 
-// Damage multiplier on a hit to the boss: a Spore Burst leaves its cap deflated for a moment (body hits x expMul). Pure.
-function bossTakeMul(e, zone) { const bs = e.bs; return bs && bs.exp > 0 && zone === 'body' ? bs.expMul : 1; }
+// Damage multiplier on a hit to the boss: a Spore Burst leaves its cap deflated for a moment (body hits x expMul), a Shatter Nova opens the Frost Giant's core (any hit, expAll). Pure.
+function bossTakeMul(e, zone) { const bs = e.bs; return bs && bs.exp > 0 && (zone === 'body' || bs.expAll) ? bs.expMul : 1; }
 
 // Fill in move defaults and the id lookup (idempotent). Returns the def.
 function bossNormalize(def) {
@@ -74,8 +76,36 @@ BOSS_DEFS.mushroom = {
     { id: 'roots', name: 'Mycelium Roots', shape: 'line', wind: 1.0, dmg: 0.9, zone: 'legs', len: 10, width: 1.2, n: 3, spread: 28, ground: true, knock: 1, minD: 2, maxD: 11, cd: 5, weight: 2, phase: [1, 99] },
   ],
 };
-// The Orchard and the Cellar fight their own bosses (bossId is the theme id).
-BOSS_DEFS.orchard = BOSS_DEFS.scarecrow; BOSS_DEFS.cellar = BOSS_DEFS.mushroom;
+// ---- Librarian Lich (Clockwork Library): a robed skeleton with a floating tome. It blinks behind you; no ground moves, so the answer is a block and a parry. ----
+BOSS_DEFS.lich = {
+  id: 'lich', name: 'Librarian Lich', theme: 'The Clockwork Library', color: '#80e0b0', model: 'lich', scale: 1.7, r: 0.6, hpMul: 0.9, dmgMul: 1, speedMul: 1,
+  resist: { head: 0.7, body: 0.6, legs: 0.8 }, summonCap: 4, bands: [1.1, 2.6, 3.6], meleeAlt: 2.5,
+  blurb: 'A robed skeleton with a glowing skull and a floating tome. It slams the book, fires fans of pages, and blinks to appear behind you; when it opens the tome it rains pages and calls books to its side.',
+  phases: [{ at: 0.5, dur: 1.4, add: ['book', 'book'] }],   // Open Tome: the Tome Barrage and two books
+  moves: [
+    { id: 'slam', name: 'Book Slam', shape: 'cone', wind: 0.8, dmg: 1.2, zone: 'head', reach: 2.8, arc: 70, weight: 3, parry: true },
+    { id: 'pages', name: 'Page Volley', shape: 'projectile', kind: 'page', n: 3, arc: 24, speed: 14, wind: 0.7, dmg: 0.5, zone: 'body', minD: 4, maxD: 18, cd: 3, weight: 2 },
+    { id: 'bookmark', name: 'Bookmark', shape: 'blink', tele: true, behind: 3.2, wind: 0.8, dmg: 0, zone: 'body', lock: 'end', next: 'bookslam', minD: 4, maxD: 16, cd: 7, weight: 2 },   // it vanishes (fades) and reappears behind you (3.2 m: just inside a slam)
+    { id: 'bookslam', name: 'Book Slam', shape: 'cone', wind: 0.6, dmg: 1.2, zone: 'head', reach: 2.8, arc: 70, chain: true, parry: true },
+    { id: 'barrage', name: 'Tome Barrage', shape: 'projectile', kind: 'page', n: 8, ring: true, speed: 12, wind: 1.0, dmg: 0.4, zone: 'body', next: 'spiral', minD: 3, maxD: 18, cd: 7, weight: 2, phase: [1, 99] },   // a ring of 8 pages, then a spiral behind it
+    { id: 'spiral', name: 'Tome Barrage', shape: 'projectile', kind: 'page', n: 4, ring: true, off: 22, speed: 12, wind: 0.5, dmg: 0.4, zone: 'body', chain: true, phase: [1, 99] },
+  ],
+};
+// ---- Frost Giant (Frozen Chapel): a hovering mass of ice shards round a glowing core. Its Ground Freeze leaves a lane of ice; its Shatter Nova opens the core. ----
+BOSS_DEFS.giant = {
+  id: 'giant', name: 'Frost Giant', theme: 'The Frozen Chapel', color: '#9adcff', model: 'giant', scale: 2.0, r: 1.0, hpMul: 1.1, dmgMul: 1, speedMul: 0.85,
+  resist: { head: 0.75, body: 0.6, legs: 0.8 }, summonCap: 4, bands: [1.0, 2.4, 4.2], meleeAlt: 2.5,
+  blurb: 'A giant made of ice shards, hovering round a pale blue core. It punches with a shard fist, throws lines of icicles that slow you and freezes a lane of the floor to slide on. Below half health it shatters and a nova opens its core to be hit.',
+  phases: [{ at: 0.5, dur: 1.4 }],   // Shatter: four shards orbit it and the Shatter Nova starts
+  moves: [
+    { id: 'fist', name: 'Shard Fist', shape: 'cone', wind: 0.85, dmg: 1.15, zone: 'body', reach: 3.2, arc: 70, weight: 3, parry: true },
+    { id: 'icicles', name: 'Icicle Volley', shape: 'projectile', kind: 'shard', n: 3, arc: 4, gap: 2, speed: 16, wind: 0.7, dmg: 0.45, zone: 'body', status: 'slow', statusDur: 3, minD: 4, maxD: 18, cd: 3.5, weight: 2 },
+    { id: 'freeze', name: 'Ground Freeze', shape: 'line', wind: 1.0, dmg: 0.8, zone: 'legs', len: 14, width: 2.4, ground: true, knock: 1, status: 'slow', statusDur: 3, lane: { dur: 6 }, minD: 2, maxD: 15, cd: 6, weight: 2 },
+    { id: 'nova', name: 'Shatter Nova', shape: 'circle', wind: 1.3, dmg: 1.3, zone: 'body', r: 7, ground: true, knock: 4, rec: 2, expose: { t: 2, mul: 1.25, all: true }, maxD: 7.4, cd: 8, weight: 3, phase: [1, 99] },
+  ],
+};
+// The Orchard, Cellar, Library and Chapel fight their own bosses (bossId is the theme id).
+BOSS_DEFS.orchard = BOSS_DEFS.scarecrow; BOSS_DEFS.cellar = BOSS_DEFS.mushroom; BOSS_DEFS.library = BOSS_DEFS.lich; BOSS_DEFS.chapel = BOSS_DEFS.giant;
 for (const k in BOSS_DEFS) bossNormalize(BOSS_DEFS[k]);
 
 // Problems with a def (empty = valid): unique move ids, known shapes, a telegraph of at least 0.5 s for a hit of 1.0 or more (0.8 s for ground moves), phases in order.
@@ -102,7 +132,7 @@ const bossDefByTheme = themeName => { const t = typeof THEME_BY_NAME !== 'undefi
 // The per-boss state, built once (enemy.bs). cd: seconds left on each move's own cooldown; cand: scratch list for move selection.
 function bossState(def) {
   const cd = {}; for (const mv of def.moves) cd[mv.id] = 0;
-  return { st: 'idle', t: 0, mv: null, nx: null, combo: 0, phase: 0, spd: 1, windMul: 1, tx: 0, tz: 0, dx: 0, dz: -1, ox: 0, oz: 0, exp: 0, expMul: 1, cd, cand: new Array(def.moves.length).fill(0) };
+  return { st: 'idle', t: 0, mv: null, nx: null, combo: 0, phase: 0, spd: 1, windMul: 1, tx: 0, tz: 0, dx: 0, dz: -1, ox: 0, oz: 0, exp: 0, expMul: 1, expAll: false, cd, cand: new Array(def.moves.length).fill(0) };
 }
 
 // ---- hit tests (pure: plain objects with x, z, yaw, zone, reach, bs; no globals) ----
@@ -150,8 +180,18 @@ function bossZone(y, e, d) {
 }
 
 // ---- state machine ----
+// Where a blink lands: `dist` m behind the player (opposite his facing), nearer if a wall or prop is there, else in front of him, else it stays put. Writes bs.tx / bs.tz.
+function bossBlinkSpot(e, player, dist) {
+  const bs = e.bs, sx = Math.sin(player.yaw), sz = Math.cos(player.yaw); collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = e.r || r0;   // test with the boss own radius, not the shared 0.4 m
+  for (let i = 0; i < 6; i++) {
+    const d = dist * (i < 3 ? 1 - i * 0.25 : -(1 - (i - 3) * 0.25)), x = player.x + sx * d, z = player.z + sz * d;
+    if (!Player.prototype.blocked.call(collider, e.floor, x, z)) { bs.tx = x; bs.tz = z; collider.radius = r0; return; }
+  }
+  collider.radius = r0; bs.tx = e.x; bs.tz = e.z;
+}
 function bossLock(e, player) {
-  const bs = e.bs, mv = bs.mv; let dx = player.x - e.x, dz = player.z - e.z; const d = Math.hypot(dx, dz) || 1;
+  const bs = e.bs, mv = bs.mv; if (mv.shape === 'blink') { bossBlinkSpot(e, player, mv.behind || 3); return; }
+  let dx = player.x - e.x, dz = player.z - e.z; const d = Math.hypot(dx, dz) || 1;
   dx /= d; dz /= d; bs.dx = dx; bs.dz = dz;
   const k = mv.shape === 'leap' && mv.maxD > 0 ? Math.min(d, mv.maxD) : d;
   bs.tx = e.x + dx * k; bs.tz = e.z + dz * k;
@@ -180,7 +220,7 @@ function bossAfter(e, mv, player) {
   const bs = e.bs, nx = mv.next && e.def.byId[mv.next];
   if (nx && bs.phase >= nx.phase[0] && bs.phase <= nx.phase[1]) { bs.nx = nx; bs.st = 'chain'; bs.combo++; return; }   // started next frame, after this hit is resolved
   bs.combo = 0;
-  if (mv.expose) { bs.exp = mv.expose.t; bs.expMul = mv.expose.mul; }
+  if (mv.expose) { bs.exp = mv.expose.t; bs.expMul = mv.expose.mul; bs.expAll = !!mv.expose.all; }
   if (mv.rec > 0) { bs.st = 'recover'; bs.t = mv.rec; } else bs.st = 'chase';
 }
 function bossPhase(e, i) {
@@ -195,8 +235,9 @@ function bossStagger(e) {
   bs.st = 'stagger'; bs.combo = 0; bs.nx = null; bs.exp = 0; e.mv = null; e.alt = 0; bossTeleHide();
 }
 function bossFire(e, mv, noise) {
-  const n = mv.n || 1, y = 1.35 * e.scaleK;
-  for (let i = 0; i < n; i++) noise.shoot({ from: e, kind: mv.kind, x: e.x, y, z: e.z, speed: mv.speed || 12, dmg: mv.dmg, mv, fan: n > 1 && mv.arc ? (i / (n - 1) - 0.5) * mv.arc * Math.PI / 180 : 0 });
+  const n = mv.n || 1, y = 1.35 * e.scaleK, bs = e.bs, gap = mv.gap || 0;
+  for (let i = 0; i < n; i++) noise.shoot({ from: e, kind: mv.kind, x: e.x - bs.dx * gap * i, y, z: e.z - bs.dz * gap * i, speed: mv.speed || 12, dmg: mv.dmg, mv,   // gap: lined up one behind another
+    fan: mv.ring ? (i / n * 360 + (mv.off || 0)) * Math.PI / 180 : n > 1 && mv.arc ? (i / (n - 1) - 0.5) * mv.arc * Math.PI / 180 : 0 });   // ring: spread round the whole circle
 }
 function bossStrike(e, mv, player, noise, los) {
   const bs = e.bs;
@@ -205,10 +246,12 @@ function bossStrike(e, mv, player, noise, los) {
   if (mv.shape !== 'leap') bossTeleHide();                // a leap keeps its landing mark until it lands
   if (mv.shape === 'leap') { bs.st = 'special'; bs.t = 0; bs.ox = e.x; bs.oz = e.z; return null; }
   let attack = null;
-  if (mv.shape === 'projectile') bossFire(e, mv, noise);
+  if (mv.shape === 'blink') { e.x = bs.tx; e.z = bs.tz; e.yaw = Math.atan2(-(player.x - e.x), -(player.z - e.z)); }   // gone, and there behind you
+  else if (mv.shape === 'projectile') bossFire(e, mv, noise);
   else if (mv.shape === 'summon') bossSummon(e, mv.spawn, mv.n || 1, mv.cap || e.def.summonCap || 4);
   else if (mv.cloud) { if (typeof spawnCloud === 'function') spawnCloud(bs.tx, bs.tz, mv.r, mv.cloud.dur, mv.cloud.daze, true); }   // a spore lob: a daze cloud where you stood, no damage
   else if (mv.shape !== 'cone' || los) attack = moveHits(mv, e, player);   // no swings through a wall corner
+  if (mv.lane) bossLaneAdd(e, mv);
   bossAfter(e, mv, player);
   return attack;
 }
@@ -234,7 +277,7 @@ function bossUpdate(e, dt, player, noise, dist, los) {
         e.yaw = turnToward(e.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
         if (mv.lock === 'end') bossLock(e, player);
       } else bs.st = 'attack';
-      if (mv.ground) bossTeleDraw(e, mv, Math.min(1, e.windT / w));
+      if (mv.ground || mv.tele) bossTeleDraw(e, mv, Math.min(1, e.windT / w));
       if (e.windT >= w + STRIKE_T) attack = bossStrike(e, mv, player, noise, los);
       break;
     }
@@ -272,10 +315,10 @@ function bossSummon(e, type, n, cap) {
 
 // ---- pools (per floor group: group.userData.bossFx; the meshes are children of the group, so they are freed with it) ----
 const BOSS_TELE_N = 4, BOSS_POOL_N = 12;
-const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0 }, shard: { color: 0x9ad8ff, r: 0.14, g: 0 }, bottle: { color: 0x6aa04a, r: 0.14, g: 6 }, axe: { color: 0xa0a0aa, r: 0.17, g: 4 }, fire: { color: 0xff7a20, r: 0.2, g: 5 } };
+const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0, geo: 'page', both: true }, shard: { color: 0x9ad8ff, r: 0.14, g: 0, geo: 'shard' }, bottle: { color: 0x6aa04a, r: 0.14, g: 6 }, axe: { color: 0xa0a0aa, r: 0.17, g: 4 }, fire: { color: 0xff7a20, r: 0.2, g: 5 } };
 const BOSS_SHOT_MATS = {};
 let BOSS_TELE_MAT = null;
-const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {} });
+const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {}, lane: [] });
 
 function bossTeleGeo(kind, arc) {
   if (kind === 'disc') return cachedGeo('tdisc', () => { const g = new THREE.CircleGeometry(1, 32); g.rotateX(-Math.PI / 2); return g; });
@@ -298,7 +341,8 @@ function bossTeleShow(i, kind, x, z, yaw, sx, sz, arc) {
 }
 function bossTeleDraw(e, mv, k) {
   const bs = e.bs;
-  if (mv.shape === 'circle' || mv.shape === 'leap') { const t = mv.shape === 'leap' || mv.at === 'target'; bossTeleShow(0, 'disc', t ? bs.tx : e.x, t ? bs.tz : e.z, 0, mv.r, mv.r); }
+  if (mv.shape === 'blink') bossTeleShow(0, 'disc', bs.tx, bs.tz, 0, 1.1, 1.1);                  // the marker where it will appear
+  else if (mv.shape === 'circle' || mv.shape === 'leap') { const t = mv.shape === 'leap' || mv.at === 'target'; bossTeleShow(0, 'disc', t ? bs.tx : e.x, t ? bs.tz : e.z, 0, mv.r, mv.r); }
   else if (mv.shape === 'line') {
     const base = mv.at === 'target' ? Math.atan2(-bs.dx, -bs.dz) : e.yaw, n = mv.n || 1;
     for (let i = 0; i < n; i++) bossTeleShow(i, 'strip', e.x, e.z, base + (n > 1 ? (i - (n - 1) / 2) * mv.spread * Math.PI / 180 : 0), mv.width, mv.len);
@@ -317,8 +361,8 @@ function bossFxAcquire(kind) {
   for (let i = 0; i < pool.length; i++) { const m = pool[i]; if (!m.userData.busy) { m.userData.busy = true; m.visible = true; return m; } }
   if (pool.length >= BOSS_POOL_N) return null;
   const S = BOSS_SHOT[kind];
-  const mat = BOSS_SHOT_MATS[kind] || (BOSS_SHOT_MATS[kind] = Object.assign(new THREE.MeshBasicMaterial({ color: S.color, side: S.bird ? THREE.DoubleSide : THREE.FrontSide }), { userData: { shared: true } }));
-  const m = new THREE.Mesh(cachedGeo('bshot' + kind, () => S.bird ? bossBirdGeo() : new THREE.SphereGeometry(S.r, 8, 6)), mat);
+  const mat = BOSS_SHOT_MATS[kind] || (BOSS_SHOT_MATS[kind] = Object.assign(new THREE.MeshBasicMaterial({ color: S.color, side: S.bird || S.both ? THREE.DoubleSide : THREE.FrontSide }), { userData: { shared: true } }));
+  const m = new THREE.Mesh(cachedGeo('bshot' + kind, () => S.bird ? bossBirdGeo() : S.geo === 'page' ? bossPageGeo() : S.geo === 'shard' ? bossShardGeo() : new THREE.SphereGeometry(S.r, 8, 6)), mat);
   m.userData = { busy: true, pooled: true }; group.add(m); pool.push(m);
   return m;
 }
@@ -328,12 +372,48 @@ function bossBirdGeo() {
   g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.3, -0.08, 0, -0.1, 0.08, 0, -0.1,   -0.08, 0, -0.1, 0.08, 0, -0.1, 0, 0, -0.38,   -0.07, 0, 0.1, -0.42, 0.14, -0.05, -0.07, 0, -0.14,   0.07, 0, 0.1, 0.07, 0, -0.14, 0.42, 0.14, -0.05], 3));
   return g;
 }
+// A page: a flat sheet turned a little about its flight line and tipped, so it shows from the front (placeholder). A shard: a four-sided spike, tip forward (+z).
+function bossPageGeo() { const g = new THREE.PlaneGeometry(0.3, 0.4); g.rotateX(-0.6); g.rotateZ(0.5); return g; }
+function bossShardGeo() { const g = new THREE.CylinderGeometry(0, 0.1, 0.65, 4, 1); g.rotateX(Math.PI / 2); return g; }
+
+// ---- ice lanes (Ground Freeze): up to 4 strips of ice on the floor for mv.lane.dur s. bossLaneAt(x, z) says whether a point is on one (main.js makes the player slide).
+// The decals are 4 pooled strips (one material each, so each fades on its own); the lane state is 4 preallocated records. ----
+const BOSS_LANE = { n: 0, items: [0, 1, 2, 3].map(() => ({ t: 0, dur: 1, x: 0, z: 0, dx: 0, dz: -1, len: 1, w: 1, m: null })) };
+function bossLaneAdd(e, mv) {
+  const L = BOSS_LANE.items; let it = null;
+  for (let i = 0; i < 4 && !it; i++) if (L[i].t <= 0) it = L[i];
+  if (!it) { it = L[0]; for (let i = 1; i < 4; i++) if (L[i].t < it.t) it = L[i]; }          // all four in use: replace the one about to melt
+  if (it.t <= 0) BOSS_LANE.n++;
+  it.t = it.dur = mv.lane.dur; it.x = e.x; it.z = e.z; it.dx = -Math.sin(e.yaw); it.dz = -Math.cos(e.yaw); it.len = mv.len; it.w = mv.width;
+  const pool = bossFxFor(group).lane, i = L.indexOf(it);
+  if (!pool[i]) { const m = new THREE.Mesh(bossTeleGeo('strip'), new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.5, depthWrite: false })); m.position.y = 0.025; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
+  const m = it.m = pool[i]; m.position.x = it.x; m.position.z = it.z; m.rotation.y = e.yaw; m.scale.set(it.w, 1, it.len); m.material.opacity = 0.5; m.visible = true;
+}
+function bossLaneAt(x, z) {
+  if (!BOSS_LANE.n) return false;
+  const L = BOSS_LANE.items;
+  for (let i = 0; i < 4; i++) {
+    const l = L[i]; if (l.t <= 0) continue;
+    const rx = x - l.x, rz = z - l.z, along = rx * l.dx + rz * l.dz;
+    if (along >= 0 && along <= l.len && Math.abs(rx * l.dz - rz * l.dx) <= l.w / 2 + 0.1) return true;
+  }
+  return false;
+}
+function bossLanesUpdate(dt) {
+  if (!BOSS_LANE.n) return;
+  const L = BOSS_LANE.items;
+  for (let i = 0; i < 4; i++) {
+    const l = L[i]; if (l.t <= 0) continue;
+    if ((l.t -= dt) <= 0) { l.t = 0; BOSS_LANE.n--; if (l.m) l.m.visible = false; } else if (l.t < 1 && l.m) l.m.material.opacity = 0.5 * l.t;   // it melts over the last second
+  }
+}
+function bossLanesClear() { const L = BOSS_LANE.items; for (let i = 0; i < 4; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_LANE.n = 0; }
 function bossFxRelease(m) { m.visible = false; m.userData.busy = false; }
 
 // ---- HUD and glossary text from the defs ----
 function bossMoveText(mv) {
   const wind = mv.wind > 0 ? `${mv.wind.toFixed(1)} s warning` : 'short warning';
-  const how = mv.ground ? 'a red mark on the floor; blocking still hurts, so dodge' : mv.shape === 'projectile' ? 'blockable shots' : mv.shape === 'summon' ? 'calls help' : mv.parry === false ? 'block it, no parry' : 'parry it to stagger';
+  const how = mv.ground ? 'a red mark on the floor; blocking still hurts, so dodge' + (mv.lane ? ', and the floor stays icy' : '') : mv.shape === 'projectile' ? 'blockable shots' : mv.shape === 'summon' ? 'calls help' : mv.shape === 'blink' ? 'it vanishes and appears behind you, then strikes' : mv.parry === false ? 'block it, no parry' : 'parry it to stagger';
   return `${mv.name || mv.id} (${wind}, ${how})`;
 }
 function bossCardLines(def, hp) {

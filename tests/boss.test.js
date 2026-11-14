@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const ctx = vm.createContext({ console, Math, THREE: {} });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/boss.js'), 'utf8'), ctx, { filename: 'js/boss.js' });
-const { BOSS_DEFS, moveHits, validateBossDef, bossZone, bossNormalize, bossTakeMul, bossCardLines } = vm.runInContext('({ BOSS_DEFS, moveHits, validateBossDef, bossZone, bossNormalize, bossTakeMul, bossCardLines })', ctx);
+const { BOSS_DEFS, moveHits, validateBossDef, bossZone, bossNormalize, bossTakeMul, bossCardLines, BOSS_LANE, bossLaneAt, bossLanesUpdate, BOSS_SHOT } = vm.runInContext('({ BOSS_DEFS, moveHits, validateBossDef, bossZone, bossNormalize, bossTakeMul, bossCardLines, BOSS_LANE, bossLaneAt, bossLanesUpdate, BOSS_SHOT })', ctx);
 let fails = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? '  (' + detail + ')' : ''}`); if (!ok) fails++; };
 
@@ -74,5 +74,28 @@ check('bossTakeMul: body hits x1.3 only while the window runs, never head or leg
 const txt = bossCardLines(sc, 200).join(' ');
 check('the glossary card text names every unchained move and each def validates', sc.moves.filter(m => !m.chain).every(m => txt.includes(m.name)) && !txt.includes('heavy plate') && validateBossDef(sc).length === 0 && validateBossDef(mu).length === 0);
 
+// the Librarian Lich and the Frost Giant (numbers live in the defs)
+const li = BOSS_DEFS.lich, gi = BOSS_DEFS.giant;
+check('Library and Chapel themes use the lich and giant defs, named Librarian Lich and Frost Giant', BOSS_DEFS.library === li && BOSS_DEFS.chapel === gi && li.name === 'Librarian Lich' && gi.name === 'Frost Giant' && li.theme === 'The Clockwork Library' && gi.theme === 'The Frozen Chapel');
+check('lich: scale 1.7, hp x0.9, 50% phase adds 2 books; giant: scale 2.0, hp x1.1, speed x0.85, 50% phase with no adds', li.scale === 1.7 && li.hpMul === 0.9 && li.phases.length === 1 && li.phases[0].at === 0.5 && li.phases[0].add.join() === 'book,book' && gi.scale === 2 && gi.hpMul === 1.1 && gi.speedMul === 0.85 && gi.phases.length === 1 && gi.phases[0].at === 0.5 && !gi.phases[0].add);
+const bs1 = mvOf(li, 'slam'), pv = mvOf(li, 'pages'), bk = mvOf(li, 'bookmark'), bk2 = mvOf(li, 'bookslam'), tb = mvOf(li, 'barrage'), sp = mvOf(li, 'spiral');
+check('Book Slam: cone 2.8 m, wind 0.8, dmg 1.2, head, parry', bs1.shape === 'cone' && bs1.reach === 2.8 && bs1.wind === 0.8 && bs1.dmg === 1.2 && bs1.zone === 'head' && bs1.parry === true);
+check('Page Volley: 3 pages fanned, speed 14, wind 0.7, 0.5 each', pv.kind === 'page' && pv.n === 3 && pv.arc > 0 && pv.speed === 14 && pv.wind === 0.7 && pv.dmg === 0.5);
+check('Bookmark: a blink with a 0.8 s telegraph and marker, chained to a quick Book Slam (wind 0.6, head, parry)', bk.shape === 'blink' && bk.tele && bk.wind === 0.8 && bk.next === 'bookslam' && bk2.chain && bk2.wind === 0.6 && bk2.zone === 'head' && bk2.parry === true && bk2.dmg === 1.2);
+check('Tome Barrage: phase 2 only, a ring of 8 pages (wind 1.0, 0.4 each) then a chained spiral; the pool of 12 holds both (8 + 4)', tb.phase[0] === 1 && tb.ring && tb.n === 8 && tb.wind === 1 && tb.dmg === 0.4 && tb.next === 'spiral' && sp.chain && sp.ring && sp.off > 0 && tb.n + sp.n <= 12);
+check('the lich has no ground moves (a block and a parry are the answer)', li.moves.every(m => !m.ground) && li.bands.join() === '1.1,2.6,3.6');
+const fi = mvOf(gi, 'fist'), ic = mvOf(gi, 'icicles'), fz = mvOf(gi, 'freeze'), nv = mvOf(gi, 'nova');
+check('Shard Fist: cone 3.2 m, wind 0.85, dmg 1.15, body, parry', fi.shape === 'cone' && fi.reach === 3.2 && fi.wind === 0.85 && fi.dmg === 1.15 && fi.zone === 'body' && fi.parry === true);
+check('Icicle Volley: 3 shards in a line, speed 16, wind 0.7, 0.45 each, slow on hit', ic.kind === 'shard' && ic.n === 3 && ic.gap > 0 && ic.speed === 16 && ic.wind === 0.7 && ic.dmg === 0.45 && ic.status === 'slow');
+check('Ground Freeze: line 14 x 2.4, wind 1.0, 0.8, ground, slow, knock 1 m, an ice lane for 6 s', fz.shape === 'line' && fz.len === 14 && fz.width === 2.4 && fz.wind === 1 && fz.dmg === 0.8 && fz.ground && fz.status === 'slow' && fz.knock === 1 && fz.lane.dur === 6);
+check('Shatter Nova: phase 2 only, circle r 7, wind 1.3, 1.3, ground, knock 4 m, then exposed 2 s with x1.25 on any hit', nv.shape === 'circle' && nv.r === 7 && nv.wind === 1.3 && nv.dmg === 1.3 && nv.ground && nv.knock === 4 && nv.phase[0] === 1 && nv.expose.t === 2 && nv.expose.mul === 1.25 && nv.expose.all === true && nv.rec === 2);
+check('giant bands: legs < 1.0, body 1.0-2.4, head above', bossZone(0.5, { alt: 0, def: gi }) === 'legs' && bossZone(1.5, { alt: 0, def: gi }) === 'body' && bossZone(3, { alt: 0, def: gi }) === 'head');
+check('bossTakeMul: an open window with expAll is x mul on every zone, without it body only', bossTakeMul({ bs: { exp: 1, expMul: 1.25, expAll: true } }, 'head') === 1.25 && bossTakeMul({ bs: { exp: 1, expMul: 1.25, expAll: true } }, 'legs') === 1.25 && bossTakeMul({ bs: { exp: 0, expMul: 1.25, expAll: true } }, 'head') === 1 && bossTakeMul({ bs: { exp: 1, expMul: 1.3, expAll: false } }, 'head') === 1);
+check('the blink shape is valid, page and shard shots exist', validateBossDef(li).length === 0 && validateBossDef(gi).length === 0 && BOSS_SHOT.page && BOSS_SHOT.shard);
+check('the glossary cards name every move, the lane and the blink', (t => li.moves.filter(m => !m.chain).every(m => t.includes(m.name)) && t.includes('appears behind you'))(bossCardLines(li, 200).join(' ')) && (t => gi.moves.every(m => t.includes(m.name)) && t.includes('icy'))(bossCardLines(gi, 200).join(' ')));
+// ice lanes: pure point test
+const L0 = BOSS_LANE.items[0]; Object.assign(L0, { t: 6, dur: 6, x: 0, z: 0, dx: 0, dz: -1, len: 14, w: 2.4 }); BOSS_LANE.n = 1;
+check('bossLaneAt: on the strip yes; beside it, behind it and past its end no', bossLaneAt(0, -7) && bossLaneAt(1.2, -3) && !bossLaneAt(1.6, -3) && !bossLaneAt(0, 1) && !bossLaneAt(0, -14.5));
+bossLanesUpdate(5.5); check('a lane melts after its time and then nothing is on ice', bossLaneAt(0, -7) && (bossLanesUpdate(1), !bossLaneAt(0, -7) && BOSS_LANE.n === 0));
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

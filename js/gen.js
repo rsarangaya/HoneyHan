@@ -80,7 +80,7 @@ const THEME_DEFS = [
     doors: { style: 'gate', keyNames: { armory: 'Gear Key', vault: 'Gear Key', brewery: 'Gear Key', lair: 'Gear Key', cell: 'Gear Key' }, openAnim: 'gate', noise: 7 },
     props: { edge: [['ladder', 1, 2], ['clock', 0, 1], ['bookshelf', 0, 2]], inner: [['orrery', 0, 1], ['scrolltable', 1, 2], ['globe', 0, 1]], locked: [['globe', 0, 1], ['scrolltable', 0, 1]] },
     natives: { commons: ['book', 'scholar'], signature: 'golem', elite: 'librarian', prefer: { scholar: 'library', book: 'library' } },
-    boss: { name: 'Librarian Golem', dress: 'golem', skin: 0x8a8a90 },
+    boss: { name: 'Librarian Lich', dress: 'golem', skin: 0x8a8a90 },
     mechanic: { kind: 'hush', hush: 1.4, hint: 'The library is eerily silent: every sound you make carries 40% farther. Whole shelves grind across the floor now and then: listen for them.',
       TUNE: { shelfMin: 1, shelfMax: 2, shelfEvery: 6, shelfSlide: 1, shelfRing: 6, shelfPush: 0.4 } } }),   // shelfMin/Max: shelf blocks per large room (at generation), shelfEvery: seconds per cycle, shelfSlide: seconds a slide (and its grinding) lasts, shelfRing: noise metres, shelfPush: metres you are shoved clear of the shelf
   // Mushroom Cellar: cap-stone and wine rack walls, a damp dark floor, purple-teal light. Layout 'caves': small eroded chambers and one-tile winding passages. Locked rooms are SPORE SEALS (a fungus

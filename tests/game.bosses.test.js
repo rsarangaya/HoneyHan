@@ -209,8 +209,10 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
   check('ground moves follow the low guard rule: a legs move is only braced by a low guard, a body move only by a high one', Math.abs(fx.high.legsHigh - fx.full.legs) < 1e-6 && Math.abs(fx.high.legsLow - fx.full.legs * 0.5) < 1e-6 && Math.abs(fx.high.bodyHigh - fx.full.body * 0.5) < 1e-6 && Math.abs(fx.high.bodyLow - fx.full.body) < 1e-6 && Math.abs(fx.high.none - fx.full.body) < 1e-6, JSON.stringify(fx.high) + ' ' + JSON.stringify(fx.full));
   check('a broken guard on a ground move deals half damage, like a normal hit', Math.abs(fx.broken - fx.full.body * 0.5) < 1e-6, `${fx.broken} of ${fx.full.body}`);
   check('knockback is cleared by a floor change', fx.knockFloor === 0);
+  const cl = await page.evaluate(() => { game.startStage(2); game.startFloor(5); const b = BT.setup(6); clearClouds(); const m = bossSummon(b, 'puffer', 1, 4); const minion = game.enemies.find(e => e.minion === b); spawnCloud(b.x, b.z, 4, 6, 2.5, true); updateClouds(0.6); return { boss: b.st.has('daze'), made: m, minion: minion ? minion.st.has('daze') : null }; });
+  check('a spore cloud dazes ordinary enemies but never the boss (bosses are immune to daze)', cl.boss === false && cl.made === 1 && cl.minion === true, JSON.stringify(cl));
 
-  // 6. The Harvest King and the Fungal Warden: every move, phases, zones, summons, cost. seed 8 opens on the Orchard, seed 6 on the Cellar.
+  // 6. The Harvest King, the Fungal Warden, the Librarian Lich and the Frost Giant: every move, phases, zones, summons, cost. Stage 1 theme by seed: 8 Orchard, 6 Cellar, 12 Library, 2 Chapel.
   const BOSS2 = id => {
     const out = { id, moves: {} }, D = BOSS_DEFS[id], P = game.player;
     game.startFloor(5);
@@ -251,7 +253,7 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
       return { ev, vis, exp: b.bs.exp, hp: b.hp };
     };
     for (const mv of D.moves) {
-      if (mv.chain) continue;
+      if (mv.chain || mv.shape === 'blink') continue;
       const r0 = runMove(mv, false), r1 = runMove(mv, mv.shape === 'cone' ? 'parry' : true);
       let kd = null;
       if (mv.knock) {   // the slide: 1 m or more, away from the boss, through open floor
@@ -269,7 +271,8 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
       const mine = game.arrows.slice(before), n = mine.length, xs = mine.map(a => Math.atan2(a.vx, a.vz));
       const hit = block => { game.inv.hp = 1000; game.cb.block = block; game.cb.blockT = 1; game.cb.stamina = 100; const a = mine.pop(); a.x = P.x; a.z = P.z; a.y = 1.0; a.vx = a.vy = a.vz = 0; P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); updateArrows(0.016); game.cb.block = false; return 1000 - game.inv.hp; };
       const un = hit(false), bl = hit(true);
-      out.shots[mv.id] = { n, firstShot, un, bl, spread: Math.max(...xs) - Math.min(...xs), expect: TUNE.enemyDmg * b.dmgMul * mv.dmg * ZONE_MUL.body * (1 - game.inv.armorRed('body')) };
+      const starts = mine.map(a => [a.x, a.z]), gaps = starts.slice(1).map((s, i) => Math.hypot(s[0] - starts[i][0], s[1] - starts[i][1]));
+      out.shots[mv.id] = { n, firstShot, un, bl, gaps, geo: group.userData.bossFx.shots[mv.kind][0].geometry.type, spread: Math.max(...xs) - Math.min(...xs), expect: TUNE.enemyDmg * b.dmgMul * mv.dmg * ZONE_MUL.body * (1 - game.inv.armorRed('body')) };
       for (const a of game.arrows) a.life = 0; updateArrows(0.016);
     }
     // spore lob: a cloud where you stood, no damage
@@ -279,12 +282,18 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
       for (let i = 0; i < 400; i++) { b.update(1 / 120, P, BT.noise); if (clouds.filter(c => c.on).length > c0) break; }
       const c = clouds.find(c => c.on); out.lob = { cloud: !!c, r: c && c.r, dur: c && c.dur, daze: c && c.daze, hp: game.inv.hp, near: c && Math.hypot(c.x - P.x, c.z - P.z) < 0.3 };
     }
-    // the cap-deflated window: body hits x1.3 while bs.exp runs
-    if (D.byId.burst) {
+    { const w0 = weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })); b = BT.setup(1.6); b.hp = b.maxHp = 50000; dealHit(b, 'body', w0.dmg, w0, 0); out.ttk = true; out.ttkReal = Math.ceil(220 * D.hpMul / (50000 - b.hp)); }   // Common sword body hits to kill at stage 1
+    // the open window (cap deflated, core open): hits x mul while bs.exp runs: sword body and head, wand, shield bash
+    const exm = D.moves.find(m => m.expose);
+    if (exm) {
       const w = weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 }));
-      b = BT.setup(3); b.hp = b.maxHp = 5000; b.bs.exp = 0; let h0 = b.hp; dealHit(b, 'body', 20, w, 0); const normal = h0 - b.hp;
-      b.bs.exp = 1; h0 = b.hp; dealHit(b, 'body', 20, w, 0); const open = h0 - b.hp; h0 = b.hp; dealHit(b, 'head', 20, w, 0); const head = h0 - b.hp; b.bs.exp = 0; h0 = b.hp; dealHit(b, 'head', 20, w, 0);
-      out.expose = { ratio: open / normal, headRatio: head / (h0 - b.hp) };
+      b = BT.setup(1.6); b.hp = b.maxHp = 50000;
+      const dmg = f => { const h0 = b.hp; f(); return h0 - b.hp; };
+      const bodyY = (D.bands[0] + D.bands[1]) / 2;
+      const all = () => ({ body: dmg(() => dealHit(b, 'body', w.dmg, w, 0)), head: dmg(() => dealHit(b, 'head', w.dmg, w, 0)), wand: dmg(() => hurtByWand(b, 10)),
+        bash: dmg(() => { game.inv.equip.offhand = makeItem({ type: 'shield', tier: 0 }); game.cb.bashCd = 0; game.cb.stamina = 100; P.pitch = Math.atan2(bodyY - eyeY(), 1.6); bash(); P.pitch = 0; game.inv.equip.offhand = null; }) });
+      b.bs.exp = 0; const n = all(); b.bs.exp = 1; const o = all(); b.bs.exp = 0; b.bs.phase = 0;
+      out.expose = { body: o.body / n.body, head: o.head / n.head, wand: o.wand / n.wand, bash: o.bash / n.bash, bashN: n.bash, exp: o.body > 0, t: o.body };
     }
     // phase 2: once at 50% hp, adds, summon cap
     b = BT.setup(7); b.bs = bossState(b.def); b.hp = b.maxHp * 0.51; for (let i = 0; i < 120; i++) b.update(1 / 60, P, BT.noise);
@@ -292,19 +301,56 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
     const minions = () => game.enemies.filter(e => e.minion === b && !e.dead).length;
     out.ph1 = b.bs.phase; out.adds1 = minions(); for (let i = 0; i < 600; i++) b.update(1 / 60, P, BT.noise);
     out.ph2 = b.bs.phase; out.adds2 = minions(); out.types = [...new Set(game.enemies.filter(e => e.minion === b).map(e => e.type))].join();
-    const made = bossSummon(b, 'puffer', 10, b.def.summonCap); out.cap = minions(); out.made = made;
+    const made = bossSummon(b, D.phases[0].add ? D.phases[0].add[0] : 'puffer', 10, b.def.summonCap); out.cap = minions(); out.made = made;
     // pools: run everything again, nothing grows
     const kids = group.children.length, tele = group.userData.bossFx ? group.userData.bossFx.tele.length : 0, shots = group.userData.bossFx ? Object.values(group.userData.bossFx.shots).map(a => a.length).join() : '';
     for (const mv of D.moves) if (!mv.chain) { runMove(mv, false); }
     for (const a of game.arrows) a.life = 0; updateArrows(0.016);
     out.pool = { kids0: kids, kids1: group.children.length, tele0: tele, tele1: group.userData.bossFx.tele.length, shots0: shots, shots1: Object.values(group.userData.bossFx.shots).map(a => a.length).join(), maxShot: Math.max(0, ...Object.values(group.userData.bossFx.shots).map(a => a.length)) };
+    // Bookmark: blink to 3.2 m behind the player, fade tell, a marker at the destination, then a quick slam
+    const bm = D.byId.bookmark;
+    if (bm) {
+      const run = (px, pz) => {
+        b = BT.setup(9); for (const m of D.moves) b.bs.cd[m.id] = m.id === 'bookmark' ? 0 : 99; b.bs.phase = 0; if (px !== undefined) { P.x = px; P.z = pz; }
+        const o = { vis: 0, op: 1, t: 0 }; let x0 = b.x, z0 = b.z, t = 0, t0 = null, tb = null, ts = null, md = 0, damaged = 0, mark = null;
+        for (let i = 0; i < 600; i++) {
+          const hp0 = game.inv.hp, z = b.update(1 / 120, P, BT.noise); b.sync(1 / 120);
+          if (b.winding && t0 === null) t0 = t; t += 1 / 120;
+          if (b.winding && b.mv.id === 'bookmark') { const f = group.userData.bossFx, v = f ? f.tele.filter(m => m.visible) : []; o.vis = Math.max(o.vis, v.length); o.op = Math.min(o.op, b.mats[0].opacity); if (v[0]) mark = [v[0].position.x, v[0].position.z]; }
+          if (tb === null && Math.hypot(b.x - x0, b.z - z0) > 1) { tb = t - t0; o.dist = Math.hypot(b.x - P.x, b.z - P.z); o.behindZ = b.z - P.z; o.free = !P.blocked(game.floor, b.x, b.z); o.mark = mark; o.facing = Math.abs(b.yaw - Math.atan2(-(P.x - b.x), -(P.z - b.z))) < 0.01; o.opAfter = b.mats[0].opacity; o.bx = b.x; o.bz = b.z; }
+          if (z) { ts = t - t0; o.zone = z; o.mvId = b.mv.id; o.wind2 = b.windT_; break; }
+          if (tb !== null && !ts && game.inv.hp < hp0) damaged++;
+        }
+        for (let i = 0; i < 4; i++) b.sync(1 / 60);
+        o.tb = tb; o.ts = ts; o.wind = bm.wind; o.hidden = (group.userData.bossFx.tele.filter(m => m.visible).length); o.damaged = damaged; o.opEnd = b.mats[0].opacity;
+        return o;
+      };
+      out.bm = run();
+      b = BT.setup(9); let zz = b.z + 3; while (!P.blocked(game.floor, b.x, zz)) zz += 0.1;   // the player stands 1 m from a wall: behind him is stone
+      b.z = zz - 9; const w2 = run(b.x, zz - 1); out.bmWall = { free: w2.free, dist: w2.dist, tb: w2.tb };
+    }
+    // Ground Freeze: an ice lane (4 pooled decals, 6 s, you slide on it)
+    const lm = D.moves.find(m => m.lane);
+    if (lm) {
+      bossLanesClear(); out.lane = { n0: BOSS_LANE.n };
+      const kids = group.children.length; b = BT.setup(5); for (const m of D.moves) b.bs.cd[m.id] = m.id === lm.id ? 0 : 99; b.bs.phase = 0;
+      for (let i = 0; i < 700 && !BOSS_LANE.n; i++) { const z = b.update(1 / 120, P, BT.noise); if (z) resolveEnemyAttack(b, z); }
+      const it = BOSS_LANE.items.find(l => l.t > 0), fx2 = group.userData.bossFx;
+      out.lane.n1 = BOSS_LANE.n; out.lane.dur = it && it.t; out.lane.len = it && it.len; out.lane.w = it && it.w;
+      out.lane.on = it ? bossLaneAt(it.x + it.dx * 7, it.z + it.dz * 7) : null; out.lane.off = it ? bossLaneAt(it.x + it.dx * 7 + it.dz * 3, it.z + it.dz * 7 - it.dx * 3) : null; out.lane.beyond = it ? bossLaneAt(it.x + it.dx * 15, it.z + it.dz * 15) : null; out.lane.behind = it ? bossLaneAt(it.x - it.dx * 1, it.z - it.dz * 1) : null;
+      out.lane.vis = fx2.lane.filter(m => m.visible).length; out.lane.mid = it ? [it.x + it.dx * 7, it.z + it.dz * 7] : null;
+      for (let n = 0; n < 6; n++) { b = BT.setup(5); for (const m of D.moves) b.bs.cd[m.id] = m.id === lm.id ? 0 : 99; for (let i = 0; i < 700; i++) { const z = b.update(1 / 120, P, BT.noise); if (z) { resolveEnemyAttack(b, z); break; } } }
+      out.lane.nMax = BOSS_LANE.n; out.lane.decals = fx2.lane.length; out.lane.kidsGrew = group.children.length - kids;
+      bossLanesUpdate(5); out.lane.after5 = BOSS_LANE.n; bossLanesUpdate(2); out.lane.after7 = BOSS_LANE.n; out.lane.visEnd = fx2.lane.filter(m => m.visible).length;
+      bossLanesClear(); out.lane.clear = BOSS_LANE.n;
+    }
     // draw calls: the worst of eight views from 6 m
     b = BT.setup(6); let worst = 0;
     for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; P.x = b.x + Math.sin(a) * 6; P.z = b.z + Math.cos(a) * 6; P.yaw = a; P.pitch = 0.1; game.renderFrame ? game.renderFrame() : 0; worst = Math.max(worst, game.renderInfo().calls); }
     out.calls = worst;
     return out;
   };
-  for (const [seed, id, nm] of [[8, 'scarecrow', 'Harvest King'], [6, 'mushroom', 'Fungal Warden']]) {
+  for (const [seed, id, nm] of [[8, 'scarecrow', 'Harvest King'], [6, 'mushroom', 'Fungal Warden'], [12, 'lich', 'Librarian Lich'], [2, 'giant', 'Frost Giant']]) {
     const pg = await open(seed);
     await pg.evaluate(BOSS_HELPERS);
     const th = await pg.evaluate(() => game.stageThemes[0].name);
@@ -317,9 +363,15 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
     for (const mv of D.moves) {
       if (mv.chain) continue;
       const m = o.moves[mv.id], tag2 = `${tag} ${mv.name}`;
+      if (mv.shape === 'blink') {
+        const q = o.bm, w = o.bmWall;
+        check(`${tag2}: a ${mv.wind} s telegraph with a marker at the destination and a fade tell, then it is ${mv.behind} m behind you (not in a wall), facing you, and the quick slam lands after its own wind-up`, q.vis === 1 && q.op < 0.5 && q.opAfter === 1 && q.opEnd === 1 && Math.abs(q.tb - (mv.wind + 0.07)) < 0.05 && Math.abs(q.dist - mv.behind) < 0.15 && Math.abs(q.behindZ - mv.behind) < 0.15 && q.free && q.facing && q.mark && Math.hypot(q.mark[0] - q.bx, q.mark[1] - q.bz) < 0.01 && q.zone === 'head' && q.mvId === D.byId[mv.next].id && q.ts - q.tb >= D.byId[mv.next].wind - 0.02 && q.ts - q.tb < D.byId[mv.next].wind + 0.2 && q.damaged === 0 && q.hidden === 0, JSON.stringify(q));
+        check(`${tag2}: at a wall it lands nearer or in front, never inside stone`, w.free && w.dist > 0 && w.dist <= mv.behind + 0.01, JSON.stringify(w));
+        continue;
+      }
       if (mv.shape === 'projectile') {
         const s = o.shots[mv.id];
-        check(`${tag2}: ${mv.n} shots appear only once the wind-up is done (${mv.wind} s), fanned, 12 pooled meshes at most`, s.n === mv.n && s.firstShot.t >= s.firstShot.wind - 0.02 && s.firstShot.t < s.firstShot.wind + 0.2 && s.spread > 0 && o.pool.maxShot <= 12, JSON.stringify({ n: s.n, t: s.firstShot.t, wind: s.firstShot.wind, spread: s.spread }));
+        check(`${tag2}: ${mv.n} shots appear only once the wind-up is done (${mv.wind} s), ${mv.ring ? 'in a ring' : 'fanned'}, 12 pooled meshes at most, a ${mv.kind} mesh`, s.n === mv.n && s.firstShot.t >= s.firstShot.wind - 0.02 && s.firstShot.t < s.firstShot.wind + 0.2 && (mv.ring ? s.spread > 2.5 : s.spread > 0) && o.pool.maxShot <= 12 && s.geo === (mv.kind === 'page' ? 'PlaneGeometry' : mv.kind === 'shard' ? 'CylinderGeometry' : s.geo) && (!mv.gap || s.gaps.every(g => Math.abs(g - mv.gap) < 0.01)), JSON.stringify({ n: s.n, t: s.firstShot.t, wind: s.firstShot.wind, spread: s.spread }));
         check(`${tag2}: a shot hits for ${mv.dmg} x 18.2 x body zone and a block stops it`, Math.abs(s.un - s.expect) < 1e-6 && s.bl === 0, `${s.un} vs ${s.expect}, blocked ${s.bl}`);
         continue;
       }
@@ -338,10 +390,13 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
         check(`${tag2}: a parry staggers it (stun 1, wind cancelled, no damage)`, m.bl.ev.length === 1 && m.bl.ev[0].lost === 0 && m.bl.ev[0].stun === 1 || m.bl.ev.length === 0, JSON.stringify(m.bl.ev));
       }
     }
-    if (o.expose) check(`${tag} after a Spore Burst the cap is deflated: body hits x1.3, head hits x1`, Math.abs(o.expose.ratio - 1.3) < 1e-6 && Math.abs(o.expose.headRatio - 1) < 1e-6 && Math.abs(o.moves.burst.expo - 1.5) < 0.1, JSON.stringify(o.expose) + ' ' + o.moves.burst.expo);
+    const exm = D.moves.find(m => m.expose);
+    if (exm) check(`${tag} ${exm.name} opens it for ${exm.expose.t} s: sword body hits, wands and shield bashes x${exm.expose.mul}, head hits ${exm.expose.all ? 'x' + exm.expose.mul : 'x1'}`, Math.abs(o.expose.body - exm.expose.mul) < 1e-6 && Math.abs(o.expose.wand - exm.expose.mul) < 1e-6 && o.expose.bashN > 0 && Math.abs(o.expose.bash - exm.expose.mul) < 1e-6 && Math.abs(o.expose.head - (exm.expose.all ? exm.expose.mul : 1)) < 1e-6 && Math.abs(o.moves[exm.id].expo - exm.expose.t) < 0.1, JSON.stringify(o.expose) + ' ' + o.moves[exm.id].expo);
+    if (o.ttk !== undefined) check(`${tag} time to kill with a Common sword at stage 1: 14 to 22 body hits`, o.ttkReal >= 14 && o.ttkReal <= 22, `${o.ttkReal} hits (${220 * D.hpMul} hp)`);
+    if (o.lane) check(`${tag} Ground Freeze leaves an ice lane (${D.byId.freeze.len} x ${D.byId.freeze.width} m) for ${D.byId.freeze.lane.dur} s: on it yes, beside, behind and past its end no; at most 4 lanes and 4 pooled decals, nothing grows, it melts`, o.lane.n0 === 0 && o.lane.n1 === 1 && o.lane.dur > 5.9 && o.lane.on === true && o.lane.off === false && o.lane.beyond === false && o.lane.behind === false && o.lane.vis === 1 && o.lane.nMax <= 4 && o.lane.decals <= 4 && o.lane.kidsGrew <= 4 && o.lane.after5 > 0 && o.lane.after7 === 0 && o.lane.visEnd === 0 && o.lane.clear === 0, JSON.stringify(o.lane));
     check(`${tag} phase 2 fires once at 50% hp (not at 51%)`, o.ph0 === 0 && o.ph1 === 1 && o.ph2 === 1, `${o.ph0} ${o.ph1} ${o.ph2}`);
     const addN = D.phases[0].add ? D.phases[0].add.length : 0;
-    check(`${tag} phase 2 summons ${addN} (${addN ? D.phases[0].add[0] : 'none'}) once, and the summon cap (${D.summonCap}) holds`, o.adds1 === addN && o.adds2 === addN && o.cap <= D.summonCap && o.cap >= addN && (!addN || o.types === 'puffer'), `${o.adds1} ${o.adds2} cap ${o.cap}`);
+    check(`${tag} phase 2 summons ${addN} (${addN ? D.phases[0].add[0] : 'none'}) once, and the summon cap (${D.summonCap}) holds`, o.adds1 === addN && o.adds2 === addN && o.cap <= D.summonCap && o.cap >= addN && (!addN || o.types === D.phases[0].add[0]), `${o.adds1} ${o.adds2} cap ${o.cap}`);
     check(`${tag} nothing grows while it fights: same children, at most 4 telegraph meshes and 12 per shot kind`, o.pool.kids0 === o.pool.kids1 && o.pool.tele0 === o.pool.tele1 && o.pool.tele1 <= 4 && o.pool.shots0 === o.pool.shots1 && o.pool.maxShot <= 12, JSON.stringify(o.pool));
     const ui = await pg.evaluate(async id => {
       const b = game.enemies.find(e => e.boss); b.dormant = false; await T.sleep(400);

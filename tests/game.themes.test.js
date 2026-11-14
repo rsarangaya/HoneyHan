@@ -216,6 +216,6 @@ run('The five other themes', async ({ open, check }) => {
     bosses[name] = await pg.evaluate(async () => { game.startFloor(5); await T.sleep(250); const b = game.enemies.find(e => e.boss); return { name: document.querySelector('#boss div').textContent, dress: b && b.spec.dress, theme: document.getElementById('theme').textContent }; });
     await pg.close();
   }
-  const want = { 'The Sunken Tavern': 'Giant Innkeeper', 'The Moonlit Orchard': 'Harvest King', 'The Clockwork Library': 'Librarian Golem', 'The Mushroom Cellar': 'Fungal Warden', 'The Goblin Market': 'Goblin Warlord', 'The Frozen Chapel': 'Frost Giant' };
+  const want = { 'The Sunken Tavern': 'Giant Innkeeper', 'The Moonlit Orchard': 'Harvest King', 'The Clockwork Library': 'Librarian Lich', 'The Mushroom Cellar': 'Fungal Warden', 'The Goblin Market': 'Goblin Warlord', 'The Frozen Chapel': 'Frost Giant' };
   check('every theme has its own boss', Object.entries(want).every(([t, n]) => bosses[t] && bosses[t].name === n && bosses[t].dress), JSON.stringify(Object.fromEntries(Object.entries(bosses).map(([k, v]) => [k, v.name]))));
 });

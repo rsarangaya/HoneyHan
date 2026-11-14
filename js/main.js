@@ -468,7 +468,7 @@ function pruneThemeTextures() {
 
 function buildFloor() {
   wallKinds = new Map();
-  knock.m = 0;   // no knockback carries over a floor change or restart
+  knock.m = 0; bossLanesClear();   // no knockback or ice lane carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -737,7 +737,7 @@ function updateClouds(dt) {
     c.tick = 0.5;
     const r2 = c.r * c.r;
     if (c.hitPlayer && !inSafe && (player.x - c.x) ** 2 + (player.z - c.z) ** 2 < r2 && pst.apply('daze', c.daze)) discover('status:daze', 'Daze');
-    for (let j = 0; j < enemies.length; j++) { const e = enemies[j]; if (!e.dead && (e.x - c.x) ** 2 + (e.z - c.z) ** 2 < r2) e.addStatus('daze', c.daze); }
+    for (let j = 0; j < enemies.length; j++) { const e = enemies[j]; if (!e.dead && !e.boss && (e.x - c.x) ** 2 + (e.z - c.z) ** 2 < r2) e.addStatus('daze', c.daze); }
     const al = Enemy.ally; if (al && !al.dead && al.floor === floor && (al.x - c.x) ** 2 + (al.z - c.z) ** 2 < r2) al.addStatus('daze', c.daze);
   }
 }
@@ -993,7 +993,7 @@ function bash() {
   const t = findMeleeTarget(player, eyeY(), enemies, floor, SHIELD.bashReach);
   if (!t) return;
   const e = t.e, sh = inv.equip.offhand;
-  const killed = e.hurt(SHIELD.bashDmg * TIERS[sh.tier].mul, player);
+  const killed = e.hurt(SHIELD.bashDmg * TIERS[sh.tier].mul * (e.bs ? bossTakeMul(e, 'body') : 1), player);   // (a boss's open window counts for a bash and a wand too)
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); mark('KILLED', '#ffd23a'); return; }
   const stunned = e.addStatus('stun', SHIELD.bashStun);
   if (stunned) discover('status:stun', 'Stun');
@@ -1023,7 +1023,7 @@ function breakWand(w) {
   flash(`The ${WANDS[w.kind].name} crumbles to dust.` + (best ? '' : ' You pull out a dagger.'));
 }
 function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
-  const killed = e.hurt(dmg, player);
+  const killed = e.hurt(dmg * (e.bs ? bossTakeMul(e, 'body') : 1), player);
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); }
   return killed;
 }
@@ -1481,6 +1481,7 @@ function updateCombat(dt) {
   const mt = theme.mechanic.TUNE;                                                 // the theme's mechanic numbers (undefined in themes with none)
   if (mech && mech.slippery) player.slipT = mt.carry; else if (player.slipT > 0) player.slipT -= dt;   // ice: the slide carries on for a moment after you leave it
   if (mech && mech.slow && mt) player.speedMul *= mt.slow;                      // wading through the Tavern's water
+  if (BOSS_LANE.n && bossLaneAt(player.x, player.z)) player.slipT = Math.max(player.slipT, mt && mt.carry || 0.6);   // the Frost Giant's ice lane: slide like on the Chapel's ice
   player.slippery = player.slipT > 0; if (mt && mt.slip) player.slipRate = mt.slip;
   if (floor.prints) updatePrints(dt);
   let seenMul = 1;
@@ -1809,7 +1810,7 @@ function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU mem
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
-  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide();
+  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear();
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
 }
@@ -2192,7 +2193,7 @@ function frame(now) {
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
-    updateBombs(dt); updateGas(dt); updateClouds(dt);
+    updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

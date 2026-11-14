@@ -77,7 +77,7 @@ Since the theme is fixed for the run, the boss belongs to that theme and the are
 - The arena uses the run's theme, so the boss fight feels like the end of that setting.
 - Minions come from the theme's enemy mix, scaled up for floor 5.
 - The theme's stealth gimmick carries into the fight, for example tall grass patches in the arena, creaky floors, or dark patches, so the boss can also be approached with stealth.
-- Examples: Sunken Tavern gives a giant Innkeeper, Clockwork Library gives a Librarian Golem, Mushroom Cellar gives a Fungal Warden.
+- Examples: Sunken Tavern gives a giant Innkeeper, Clockwork Library gives a Librarian Lich, Mushroom Cellar gives a Fungal Warden.
 - Prototype scope: one boss for the first theme you build, then add a boss per new theme. Because each run has only one theme, you can build and test one full theme (floors 1 to 5 plus boss) before adding others.
 - Roguelike layer: permadeath, light meta-progression (unlock starting kits), limited inventory, heavy armor is louder.
 

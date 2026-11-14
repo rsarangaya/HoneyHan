@@ -1,4 +1,4 @@
-// Boss models (BOSS2 to BOSS5 fill this in): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
+// Boss models (BOSS2 to BOSS5 fill this in; the scarecrow, mushroom, lich and giant are here): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
 // build adds the parts to the boss's mesh group m inside animated groups and sets e.bd = { groups, skip, g }: bakeMeshes merges each group on its own (skipping the other
 // animated groups nested in it), so a model is a handful of baked meshes however many parts it has. pose eases its channels each frame (e.bp, no allocation).
 // A def points at its entry with `model: id`. Units are local (the mesh is scaled by def.scale); the front is -z. The current cave boss is a dressed biped (Enemy.build).
@@ -135,5 +135,159 @@ BOSS_MODELS.mushroom = {
     g.body.rotation.x = p[0]; g.body.rotation.z = p[1]; g.body.scale.y = p[7];
     g.aR.rotation.x = p[2]; g.aL.rotation.x = p[3];
     g.cap.scale.set(p[4], p[5], p[4]); g.cap.position.y = 0.82 + p[6];
+  },
+};
+
+// A four-sided spike (a pyramid: base radius r, length h) centred on (x, y, z) with its tip along (dx, dy, dz): the shards of the Frost Giant.
+const BM_UP = new THREE.Vector3(0, 1, 0), BM_DIR = new THREE.Vector3();
+const bmSpike = (parent, mat, r, h, x, y, z, dx, dy, dz) => { const p = new THREE.Mesh(cachedGeo('spike' + r + ',' + h, () => { const g = new THREE.CylinderGeometry(0, r, h, 4, 1); g.rotateY(Math.PI / 4); return g; }), mat); p.position.set(x, y, z); p.quaternion.setFromUnitVectors(BM_UP, BM_DIR.set(dx, dy, dz).normalize()); parent.add(p); return p; };
+
+// ---- Librarian Lich: a robed skeleton with a floating tome. Channels: 0 lean x, 1 twist y, 2 left arm x, 3 left arm z, 4 right arm x, 5 right arm z, 6 head x, 7 hover, 8 tome tilt ----
+const LI_T = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+const liPut = (a, b, c, d, f, g, h, i, j) => { const T = LI_T; T[0] = a; T[1] = b; T[2] = c; T[3] = d; T[4] = f; T[5] = g; T[6] = h; T[7] = i; T[8] = j; };
+BOSS_MODELS.lich = {
+  tagY: 2.5, iconY: 2.2, shadow: 0.9,
+  build(e, m, lam) {
+    const bone = lam(0xdad4bc), boneD = lam(0xa49a7c), robe = lam(0x3a2d5c), robeD = lam(0x261e40), trim = lam(0xc8a040), black = lam(0x08060c), cover = lam(0x7a1e2a), page = lam(0xe8dcb4);
+    const eye = bmGlow(0x50ffa8), soul = bmGlow(0x70ffc8), rune = bmGlow(0xffd860);
+    const low = bmGroup(m, 0, 0, 0), up = bmGroup(m, 0, 0.95, 0), head = bmGroup(up, 0, 0.82, 0), aL = bmGroup(up, -0.4, 0.52, 0), aR = bmGroup(up, 0.4, 0.52, 0), tome = bmGroup(aL, 0, -0.74, -0.3);
+    cylPart(0.26, 0.56, 1.0, robe, 0, 0.5, 0, low);                                                   // the long robe, flaring to the floor
+    cylPart(0.27, 0.27, 0.07, trim, 0, 0.93, 0, low);                                                 // a gold belt
+    for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; bmBox(0.17, 0.26 + 0.06 * (i % 3), 0.03, robe, Math.sin(a) * 0.55, 0.1, Math.cos(a) * 0.55, low, 0.12, a, 0); }   // a tattered hem
+    bmBox(0.2, 0.7, 0.02, black, 0, 0.45, -0.37, low, 0.1, 0, 0);                                     // the dark slit of the robe
+    cylPart(0.035, 0.035, 0.62, boneD, 0, 0.28, 0.06, up);                                            // the spine
+    bmBox(0.3, 0.08, 0.1, bone, 0, -0.02, 0, up);                                                     // the pelvis
+    for (let i = 0; i < 5; i++) { const y = 0.1 + i * 0.1, hw = 0.15 + 0.06 * Math.sin((i + 0.6) / 5 * Math.PI); bmBox(hw * 2, 0.03, 0.03, bone, 0, y, -0.14, up); for (const s of [-1, 1]) bmBox(0.03, 0.03, 0.22, bone, s * hw, y, -0.03, up); }   // the bone-cage ribs: a bar across the front and one down each side
+    bmBox(0.035, 0.48, 0.03, bone, 0, 0.27, -0.145, up);                                              // the breastbone
+    ellPart(0.15, 0.15, 0.15, soul, 0, 0.28, -0.02, up);                                              // a soul-light caged in the ribs
+    bmBox(0.4, 0.035, 0.05, bone, 0, 0.5, -0.04, up);                                                 // collarbones
+    for (const s of [-1, 1]) ellPart(0.2, 0.15, 0.2, robe, s * 0.3, 0.52, 0, up);                     // cloth shoulders
+    cylPart(0.28, 0.34, 0.16, robeD, 0, 0.5, 0.04, up);                                               // a ragged collar
+    bmBox(0.56, 0.9, 0.05, robeD, 0, 0.05, 0.17, up, 0.08, 0, 0);                                     // a tattered cape down the back
+    for (let i = 0; i < 4; i++) bmBox(0.12, 0.3, 0.04, robeD, (i - 1.5) * 0.14, -0.5, 0.2, up, 0.08, 0, (i - 1.5) * 0.1);
+    ellPart(0.34, 0.36, 0.34, bone, 0, 0, 0, head);                                                   // the skull
+    bmBox(0.2, 0.1, 0.15, bone, 0, -0.11, -0.06, head);                                               // cheekbones and a jaw
+    bmBox(0.2, 0.05, 0.16, boneD, 0, -0.18, -0.06, head);
+    for (let i = 0; i < 6; i++) bmBox(0.02, 0.04, 0.02, bone, (i - 2.5) * 0.033, -0.14, -0.145, head);   // teeth
+    for (const s of [-1, 1]) { bmBox(0.11, 0.12, 0.04, black, s * 0.075, 0.02, -0.155, head, 0, 0, s * 0.15); bmBox(0.055, 0.065, 0.03, eye, s * 0.075, 0.02, -0.17, head); }   // sockets with a green fire in them
+    bmBox(0.03, 0.05, 0.03, black, 0, -0.045, -0.165, head);
+    for (const [x, t] of [[-0.1, -0.35], [0, 0], [0.1, 0.35]]) bmBox(0.035, 0.18, 0.035, boneD, x, 0.2, -0.02, head, 0, 0, t);   // a crown of bone spikes
+    bmBox(0.44, 0.48, 0.08, robeD, 0, 0.0, 0.17, head);                                               // the cowl behind the skull
+    for (const s of [-1, 1]) bmBox(0.06, 0.42, 0.3, robeD, s * 0.21, 0.0, 0.01, head, 0, 0, s * 0.1);
+    bmBox(0.44, 0.06, 0.36, robeD, 0, 0.21, 0.0, head);
+    for (const [g, s] of [[aL, -1], [aR, 1]]) {
+      cylPart(0.07, 0.15, 0.42, robe, 0, -0.21, 0, g);                                                // a bell sleeve
+      cylPart(0.025, 0.03, 0.34, bone, 0, -0.52, 0, g);                                               // forearm bone
+      bmBox(0.08, 0.1, 0.05, bone, 0, -0.72, 0, g);                                                   // the hand
+      for (const x of [-0.03, 0, 0.03]) bmBox(0.014, 0.09, 0.014, bone, x, -0.8, s > 0 ? -0.02 : -0.025, g, s > 0 ? -0.5 : 0, 0, 0);   // bony fingers (the right ones claw forward)
+    }
+    for (const s of [-1, 1]) {                                                                         // the tome, open and facing you: leather boards with cream pages and glowing runes
+      bmBox(0.3, 0.4, 0.02, cover, s * 0.16, 0.04, 0.0, tome, 0, s * 0.35, 0);
+      bmBox(0.27, 0.36, 0.015, page, s * 0.16, 0.04, -0.017, tome, 0, s * 0.35, 0);
+      for (let i = 0; i < 3; i++) bmBox(0.15, 0.018, 0.01, rune, s * 0.16, 0.12 - i * 0.07, -0.03, tome, 0, s * 0.35, 0);
+    }
+    bmBox(0.035, 0.42, 0.035, cover, 0, 0.04, 0.03, tome);
+    e.bd = { groups: [low, up, head, aL, aR, tome], skip: new Set([low, up, head, aL, aR, tome]), g: { low, up, head, aL, aR, tome } };
+    e.bp = [0.04, 0, 1.0, -0.15, 0.5, 0.25, 0, 0.08, 0];
+  },
+  pose(e, dt) {
+    const g = e.bd.g, p = e.bp, t = performance.now() * 0.001 + e.seed % 7, sw = Math.sin(e.walkT * 0.7), id = e.mv ? e.mv.id : '', bs = e.bs;
+    bmPhase(e);
+    const sn = Math.sin(t * 1.4), s2 = Math.sin(t * 2.1 + 1);
+    let snap = false;
+    if (e.dormant) liPut(0.3, 0, 0.15, -0.1, 0.12, 0.1, 0.55, 0.0, 0.2);                              // slumped, the tome resting
+    else liPut(0.04 + 0.03 * sn, 0.05 * s2, 1.0 + 0.06 * sn, -0.15, 0.5 + 0.2 * sw, 0.25, 0.04 * sn, 0.1 + 0.05 * sn, 0.05 * s2);   // idle: hovers and sways, the tome bobbing
+    if (e.stun > 0) liPut(-0.5, 0, 0.6, -0.5, 0.4, 0.6, -0.4, 0.1, 0.4);
+    else if (BM_PH) {
+      const k = BM_K, T = LI_T, a = BM_PH === 1 ? 0 : 1;
+      if (id === 'slam' || id === 'bookslam') {                                                        // the tome raised overhead, then brought down hard
+        if (a === 0) liPut(bmLerp(T[0], -0.25, k), 0.2 * k, bmLerp(T[2], 2.6, k), -0.2, bmLerp(T[4], 1.2, k), 0.3, bmLerp(T[6], -0.25, k), 0.12, bmLerp(T[8], 0.5, k));
+        else { liPut(bmLerp(-0.25, 0.5, k), bmLerp(0.2, -0.15, k), bmLerp(2.6, 0.7, k), -0.2, 1.2, 0.3, bmLerp(-0.25, 0.3, k), 0.05, bmLerp(0.5, -0.3, k)); snap = true; }
+      } else if (id === 'pages') {                                                                     // both arms thrust forward and the pages fly
+        if (a === 0) liPut(bmLerp(T[0], -0.1, k), 0, bmLerp(T[2], 1.6, k), bmLerp(T[3], -0.3, k), bmLerp(T[4], 1.7, k), bmLerp(T[5], 0.3, k), bmLerp(T[6], -0.15, k), 0.12, 0.1);
+        else { liPut(0.2, 0, 1.5, -0.3, 1.5, 0.3, 0.1, 0.1, 0); snap = true; }
+      } else if (id === 'bookmark') {                                                                  // the tome held up, a bow: it is about to vanish
+        liPut(bmLerp(T[0], 0.25, k), 0, bmLerp(T[2], 1.9, k), -0.15, bmLerp(T[4], 2.2, k), 0.2, bmLerp(T[6], 0.2, k), bmLerp(0.1, 0.0, k), 0);
+      } else {                                                                                         // the barrage: arms flung wide, the head back, the tome blazing
+        if (a === 0) liPut(bmLerp(T[0], -0.2, k), 0, bmLerp(T[2], 0.8, k), bmLerp(T[3], -1.6, k), bmLerp(T[4], 0.8, k), bmLerp(T[5], 1.6, k), bmLerp(T[6], -0.4, k), bmLerp(0.1, 0.3, k), bmLerp(T[8], 0.3, k));
+        else { liPut(0.15, 0, 1.0, -0.8, 1.0, 0.8, 0.1, 0.2, 0); snap = true; }
+      }
+    }
+    const mt = e.mats[0], op = id === 'bookmark' && BM_PH === 1 ? 1 - 0.8 * BM_K : 1;                  // the Bookmark's tell: the body fades out before it blinks
+    if (mt && mt.opacity !== op) { mt.transparent = op < 1; mt.opacity = op; }
+    const k = snap ? 1 : 1 - Math.exp(-12 * dt), T = LI_T;
+    for (let i = 0; i < 9; i++) p[i] += (T[i] - p[i]) * k;
+    g.up.rotation.x = p[0]; g.up.rotation.y = p[1]; g.low.position.y = p[7]; g.up.position.y = 0.95 + p[7];
+    g.aL.rotation.x = p[2]; g.aL.rotation.z = p[3]; g.aR.rotation.x = p[4]; g.aR.rotation.z = p[5]; g.head.rotation.x = p[6];
+    g.tome.rotation.x = -p[2] * 0.85 + p[8] + p[0];
+  },
+};
+
+// ---- Frost Giant: a hovering mass of ice shards round a glowing core. Channels: 0 lean x, 1 twist y, 2 right arm x, 3 left arm x, 4 right arm z, 5 left arm z, 6 head x, 7 hover, 8 core open ----
+const FG_T = [0, 0, 0, 0, 0, 0, 0, 0, 1];
+const fgPut = (a, b, c, d, f, g, h, i, j) => { const T = FG_T; T[0] = a; T[1] = b; T[2] = c; T[3] = d; T[4] = f; T[5] = g; T[6] = h; T[7] = i; T[8] = j; };
+BOSS_MODELS.giant = {
+  tagY: 2.7, iconY: 2.4, shadow: 1.5,
+  build(e, m, lam) {
+    const ice = lam(0xa4d4f0), iceL = lam(0xe0f6ff), iceD = lam(0x6aa6d6), iceDD = lam(0x3e78ac), dark = lam(0x123656), core = bmGlow(0xc4f6ff), eye = bmGlow(0xffffff);
+    const body = bmGroup(m, 0, 0.9, 0), head = bmGroup(m, 0, 1.6, 0), aL = bmGroup(m, -0.95, 1.2, 0), aR = bmGroup(m, 0.95, 1.2, 0), orbit = bmGroup(m, 0, 0.95, 0);
+    ellPart(0.85, 0.85, 0.85, core, 0, 0, 0, body);                                                   // the pale glowing core
+    const cols = [ice, iceL, iceD];
+    for (let i = 0; i < 9; i++) {                                                                      // nine shards round the core, jutting out and up
+      const a = i / 9 * Math.PI * 2, s = Math.sin(a), c = Math.cos(a), r = 0.5 + 0.05 * (i % 3);
+      bmSpike(body, cols[i % 3], 0.2 + 0.05 * (i % 3), 0.85 + 0.2 * (i % 2), s * r, 0.12 * (i % 3 - 1) + 0.12, c * r, s * 0.85, 0.5 + 0.5 * (i % 2), c * 0.85);
+    }
+    bmSpike(body, iceL, 0.2, 0.8, 0, -0.1, -0.5, 0, 0.6, -1);                                       // a great chest crystal
+    bmSpike(body, iceD, 0.26, 0.9, 0.3, 0.2, 0.3, 0.5, 1, 0.5);                                       // and spines on the back
+    bmSpike(body, iceD, 0.26, 0.9, -0.3, 0.2, 0.3, -0.5, 1, 0.5);
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.4; bmSpike(body, i % 2 ? ice : iceDD, 0.16, 0.7, Math.sin(a) * 0.3, -0.5, Math.cos(a) * 0.3, Math.sin(a) * 0.35, -1, Math.cos(a) * 0.35); }   // icicles hanging below: its legs
+    bmSpike(head, iceL, 0.3, 0.8, 0, 0.32, 0, 0, 1, 0);                                               // the head: a tall crystal
+    bmSpike(head, ice, 0.3, 0.55, 0, -0.24, 0, 0, -1, 0);
+    for (const s of [-1, 1]) { bmBox(0.2, 0.09, 0.04, dark, s * 0.1, 0.07, -0.2, head, 0, 0, -s * 0.25); bmBox(0.13, 0.045, 0.03, eye, s * 0.1, 0.06, -0.225, head, 0, 0, -s * 0.25); }   // a scowl: dark brows, white eyes
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; bmSpike(head, i % 2 ? iceL : ice, 0.07, 0.42, Math.sin(a) * 0.26, 0.15, Math.cos(a) * 0.26, Math.sin(a) * 0.7, 1, Math.cos(a) * 0.7); }   // a crown of shards
+    for (const [g, s] of [[aL, -1], [aR, 1]]) {
+      bmSpike(g, iceL, 0.22, 0.75, s * 0.12, 0.3, 0, s * 0.5, 1, 0);                                  // a shoulder spike
+      bmSpike(g, ice, 0.19, 0.85, 0, -0.4, 0, 0, -1, 0);                                              // upper arm
+      bmSpike(g, iceD, 0.13, 0.7, s * 0.04, -1.0, -0.08, 0, -1, -0.25);                               // forearm
+      for (const x of [-0.09, 0, 0.09]) bmSpike(g, iceL, 0.08, 0.42, x, -1.4, -0.22, 0, -0.3, -1);   // a fist of spikes
+      bmSpike(g, iceDD, 0.1, 0.5, s * 0.25, -0.65, 0.1, s * 0.8, -0.6, 0.2);                          // an elbow shard
+    }
+    for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2, s = Math.sin(a), c = Math.cos(a); bmSpike(orbit, cols[i % 3], 0.12, 0.6, s * 1.3, 0.3 * (i % 2 ? 1 : -1), c * 1.3, c, 0.2, -s); }   // the four shards that break off and orbit it
+    orbit.visible = false;
+    e.bd = { groups: [body, head, aL, aR, orbit], skip: new Set([body, head, aL, aR, orbit]), g: { body, head, aL, aR, orbit } };
+    e.bp = [0.04, 0, 0.25, 0.25, 0.3, -0.3, 0, 0.1, 1];
+  },
+  pose(e, dt) {
+    const g = e.bd.g, p = e.bp, t = performance.now() * 0.001 + e.seed % 7, sw = Math.sin(e.walkT * 0.6), id = e.mv ? e.mv.id : '', bs = e.bs;
+    bmPhase(e);
+    const sn = Math.sin(t * 1.2);
+    let snap = false;
+    if (e.dormant) fgPut(0.15, 0, 0.1, 0.1, 0.15, -0.15, 0.4, -0.2, 0.6);                              // asleep: sunk low, the core dim
+    else fgPut(0.04 + 0.03 * sn, 0.1 * Math.sin(t * 0.7), 0.25 + 0.15 * sw, 0.25 - 0.15 * sw, 0.3, -0.3, 0.05 * sn, 0.12 + 0.06 * sn, 1 + 0.08 * sn);   // idle: hovers and bobs, the core pulses
+    if (bs.exp > 0) { const k = Math.min(1, bs.exp * 3, (2 - bs.exp) * 6 + 0.2); fgPut(0.25, 0, 0.5, 0.5, 0.9, -0.9, 0.2, bmLerp(0.12, -0.05, k), bmLerp(1, 1.9, k)); }   // after a Shatter Nova: arms hang open, the core blazes
+    if (e.stun > 0) fgPut(-0.4, 0, 0.5, 0.5, 0.5, -0.5, -0.3, 0.1, 1.2);
+    else if (BM_PH) {
+      const k = BM_K, T = FG_T, a = BM_PH === 1 ? 0 : 1;
+      if (id === 'fist') {                                                                             // the right fist cocked back, then driven forward
+        if (a === 0) fgPut(bmLerp(T[0], -0.3, k), 0.35 * k, bmLerp(T[2], 2.5, k), 0.4, 0.3, -0.3, 0.1, 0.12, 1);
+        else { fgPut(bmLerp(-0.3, 0.45, k), bmLerp(0.35, -0.3, k), bmLerp(2.5, 1.4, k), 0.4, 0.3, -0.3, 0.2, 0.1, 1); snap = true; }
+      } else if (id === 'icicles') {                                                                   // both arms forward, spikes out
+        if (a === 0) fgPut(bmLerp(T[0], -0.1, k), 0, bmLerp(T[2], 1.6, k), bmLerp(T[3], 1.6, k), 0.2, -0.2, bmLerp(T[6], -0.15, k), 0.12, bmLerp(1, 1.25, k));
+        else { fgPut(0.2, 0, 1.5, 1.5, 0.2, -0.2, 0.1, 0.1, 1.1); snap = true; }
+      } else if (id === 'freeze') {                                                                    // both fists raised high, then slammed into the floor
+        if (a === 0) fgPut(bmLerp(T[0], -0.35, k), 0, bmLerp(T[2], 2.7, k), bmLerp(T[3], 2.7, k), 0.25, -0.25, bmLerp(T[6], -0.2, k), bmLerp(T[7], 0.3, k), bmLerp(1, 1.2, k));
+        else { fgPut(bmLerp(-0.35, 0.6, k), 0, bmLerp(2.7, 0.4, k), bmLerp(2.7, 0.4, k), 0.25, -0.25, 0.3, bmLerp(0.3, -0.12, k), 1.1); snap = true; }
+      } else {                                                                                         // the nova: arms flung wide, the core swelling
+        if (a === 0) fgPut(bmLerp(T[0], -0.2, k), 0, bmLerp(T[2], 0.6, k), bmLerp(T[3], 0.6, k), bmLerp(T[4], 1.7, k), bmLerp(T[5], -1.7, k), bmLerp(T[6], -0.35, k), bmLerp(T[7], 0.3, k), bmLerp(1, 2.0, k));
+        else { fgPut(0.2, 0, 0.4, 0.4, bmLerp(1.7, 0.6, k), bmLerp(-1.7, -0.6, k), 0.2, bmLerp(0.3, 0.05, k), bmLerp(2.0, 1.4, k)); snap = true; }
+      }
+    }
+    const k = snap ? 1 : 1 - Math.exp(-12 * dt), T = FG_T;
+    for (let i = 0; i < 9; i++) p[i] += (T[i] - p[i]) * k;
+    g.body.rotation.x = p[0]; g.body.rotation.y = p[1]; g.body.position.y = 0.9 + p[7]; g.body.scale.setScalar(p[8] > 1 ? 1 + (p[8] - 1) * 0.35 : 1);
+    g.head.position.y = 1.6 + p[7] * 1.2; g.head.rotation.x = p[6];
+    g.aR.rotation.x = p[2]; g.aL.rotation.x = p[3]; g.aR.rotation.z = p[4]; g.aL.rotation.z = p[5]; g.aR.position.y = g.aL.position.y = 1.2 + p[7] * 0.8;
+    const sh = bs.phase >= 1 && !e.dormant; if (g.orbit.visible !== sh) g.orbit.visible = sh;
+    if (sh) { g.orbit.rotation.y = t * 1.8; g.orbit.position.y = 0.95 + p[7]; }
   },
 };
