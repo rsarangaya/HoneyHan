@@ -105,6 +105,42 @@ function clearLine(floor, x0, z0, x1, z1) {
   return ok;
 }
 
+// Anti-stuck helpers for goTo (allocation free). colBlocked: is a body at (x, z) in a wall or prop? (the shared collider's radius and props must be set)
+const colBlocked = (fl, x, z) => Player.prototype.blocked.call(collider, fl, x, z);
+// Glide round the round prop (or NPC) that blocks a step: the solid whose circle the step at (nx, nz) runs into most, then a step of `step` metres along its
+// tangent (the side the heading leans to; head-on, the side it glided last time, e.sideSlide), kept just outside the circle. Moves e and returns true, or false
+// (a wall corner, nothing to glide on, or no free room). The shared collider's props and radius must be set.
+function glideRound(e, fl, nx, nz, ux, uz, step) {
+  const P = collider.props; let bi = -1, bp = 0;
+  for (let i = 0; i < P.length; i++) {
+    const s = P[i]; if (!(s.r > 0)) continue;
+    const m = collider.radius + s.r, ex = nx - s.x, ez = nz - s.z, pen = m * m - (ex * ex + ez * ez);
+    if (pen > bp) { bp = pen; bi = i; }
+  }
+  if (bi < 0) return false;
+  const s = P[bi], m = collider.radius + s.r + 0.01, ex = e.x - s.x, ez = e.z - s.z, len = Math.hypot(ex, ez) || 1, tx = -ez / len, tz = ex / len, lean = ux * tx + uz * tz;
+  let sign = lean > 0.15 ? 1 : lean < -0.15 ? -1 : e.slideSide;
+  for (let k = 0; k < 2; k++, sign = -sign) {
+    let px = e.x + tx * sign * step, pz = e.z + tz * sign * step;
+    const dx = px - s.x, dz = pz - s.z, dd = Math.hypot(dx, dz) || 1;
+    if (dd < m) { px = s.x + dx / dd * m; pz = s.z + dz / dd * m; }                  // stay on the surface, not inside it
+    if (!colBlocked(fl, px, pz)) { e.x = px; e.z = pz; e.slideSide = sign; return true; }
+  }
+  return false;
+}
+const SPOT = { x: 0, z: 0 }, SPOT_R = [0.5, 1.0, 1.6];
+// The free spot within 1.6 m of (x, z) that is closest to (gx, gz), into SPOT. false when there is none.
+function freeSpot(fl, x, z, gx, gz) {
+  let best = 1e9, found = false;
+  for (let ri = 0; ri < 3; ri++) for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4, cx = x + Math.cos(a) * SPOT_R[ri], cz = z + Math.sin(a) * SPOT_R[ri];
+    if (colBlocked(fl, cx, cz)) continue;
+    const d = (cx - gx) * (cx - gx) + (cz - gz) * (cz - gz) + ri * 0.5;   // (a nearer spot wins a tie)
+    if (d < best) { best = d; SPOT.x = cx; SPOT.z = cz; found = true; }
+  }
+  return found;
+}
+
 const turnToward = (a, b, max) => {
   let d = Math.atan2(Math.sin(b - a), Math.cos(b - a));
   return a + Math.max(-max, Math.min(max, d));
@@ -116,6 +152,26 @@ function iconTexture(text, color) {
   g.font = 'bold 56px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.lineWidth = 6; g.strokeStyle = '#000'; g.strokeText(text, 32, 34);
   g.fillStyle = color; g.fillText(text, 32, 34);
+  return new THREE.CanvasTexture(c);
+}
+// Status marks above a head (wands and Rage): drawn once, shared. z: sleep Z's; x: stun star; f: frost flake (slow); g: goo blob (stuck); r: rage.
+function statusIconTexture(kind) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.lineCap = 'round'; g.lineJoin = 'round';
+  if (kind === 'z') {
+    g.font = 'bold 46px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 6; g.strokeStyle = '#000'; g.fillStyle = '#9aaaff';
+    g.strokeText('Z', 26, 40); g.fillText('Z', 26, 40); g.font = 'bold 28px sans-serif'; g.strokeText('z', 48, 18); g.fillText('z', 48, 18);
+  } else if (kind === 'x') {
+    g.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? 11 : 27, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(32 + Math.cos(a) * r, 34 + Math.sin(a) * r); } g.closePath();
+    g.lineWidth = 5; g.strokeStyle = '#000'; g.stroke(); g.fillStyle = '#ffe84a'; g.fill();
+  } else if (kind === 'f') {
+    for (const [w, col] of [[9, '#000'], [4, '#9fe4ff']]) { g.lineWidth = w; g.strokeStyle = col; g.beginPath(); for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; g.moveTo(32 + Math.cos(a) * 24, 32 + Math.sin(a) * 24); g.lineTo(32 - Math.cos(a) * 24, 32 - Math.sin(a) * 24); } g.stroke(); }
+  } else if (kind === 'g') {
+    g.beginPath(); g.arc(32, 28, 18, 0, 7); g.lineWidth = 5; g.strokeStyle = '#000'; g.stroke(); g.fillStyle = '#f4f4ee'; g.fill(); g.fillRect(24, 40, 7, 16); g.fillRect(38, 40, 6, 11);
+  } else {
+    g.font = 'bold 52px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 6; g.strokeStyle = '#000'; g.fillStyle = '#ff5a1a';
+    g.strokeText('!!', 32, 34); g.fillText('!!', 32, 34);
+  }
   return new THREE.CanvasTexture(c);
 }
 let ICONS = null;
@@ -192,7 +248,7 @@ class Enemy {
     this.yaw = (spec.seed % 628) / 100;
     this.state = 'unaware'; this.aware = 0;
     this.last = null; this.path = []; this.pk = ''; this.rp = 0; this.smT = 0;
-    this.wait = spec.pause || 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
+    this.wait = spec.pause || 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0; this.slideSide = 1;
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.healCd = 3; this.healFx = 0; this.cast = null; this.castTarget = null;   // shaman: heals wounded allies
@@ -219,7 +275,7 @@ class Enemy {
   }
 
   build() {
-    if (!ICONS) { ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a') }; for (const k in ICONS) ICONS[k].userData = { shared: true }; }
+    if (!ICONS) { ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a'), z: statusIconTexture('z'), x: statusIconTexture('x'), f: statusIconTexture('f'), g: statusIconTexture('g'), r: statusIconTexture('r') }; for (const k in ICONS) ICONS[k].userData = { shared: true }; }
     // Every guard rolls its own look from its seed: skin and cloth colours, size, headgear
     // (iron helmet, hood or bare with a tuft), a vest, shoulder pads, a sack, and a club or cleaver.
     const rg = makeRng(this.seed || 1);
@@ -458,7 +514,7 @@ class Enemy {
     }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
-    this.icon.position.y = this.bm ? this.bm.iconY : this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
+    this.icon.position.y = this.iconY0 = this.bm ? this.bm.iconY : this.quad ? (this.T.height + 0.55) / this.scaleK : 2.25; this.icon.scale.set(0.7, 0.7, 1); this.icon.renderOrder = 10; this.icon.visible = false;
     m.add(this.icon);
 
     // flat fan showing the vision cone, drawn at VIS_RANGE and scaled to the real range each frame; shown in dev mode, and in Easy mode (assist.showVision) for living guards within 25 m
@@ -622,22 +678,25 @@ class Enemy {
         }
       }
       gx = (this.path[0].x + 0.5) * T; gz = (this.path[0].y + 0.5) * T;
-      if (Math.hypot(gx - this.x, gz - this.z) < 0.4) { this.path.shift(); return Math.hypot(tx - this.x, tz - this.z); }
+      const nd = Math.hypot(gx - this.x, gz - this.z);
+      collider.props = this.floor.solids;
+      if (nd < 0.4 || (nd < 1.3 && colBlocked(this.floor, gx, gz))) { this.path.shift(); return Math.hypot(tx - this.x, tz - this.z); }   // (a node under a prop or NPC that bulges into the tile is passed once close: the body cannot stand on it)
     }
     let dx = gx - this.x, dz = gz - this.z, d = Math.hypot(dx, dz) || 1;
-    // Stuck on a corner or prop: after a moment, re-path from here; if that fails too, steer to the
-    // centre of the current tile (always open floor) and finally snap there.
+    // Stuck on a corner or prop (it is gliding round them, see below, so this means that failed too): after a moment, re-path from here and steer to the
+    // nearest free spot toward the goal (the old tile centre can lie inside a prop or NPC), and after 1.2 s hop to that spot (to the tile centre if there is none).
+    collider.props = this.floor.solids;           // stairwell and furniture, set when the floor is built
     if (this.stuckT > 0.3) {
       this.rp = 0;
-      const cx = (Math.floor(this.x / T) + 0.5) * T, cz = (Math.floor(this.z / T) + 0.5) * T;
+      const ok = freeSpot(this.floor, this.x, this.z, gx, gz), cx = ok ? SPOT.x : (Math.floor(this.x / T) + 0.5) * T, cz = ok ? SPOT.z : (Math.floor(this.z / T) + 0.5) * T;
       if (this.stuckT > 1.2) { this.x = cx; this.z = cz; this.stuckT = 0; }
       else { dx = cx - this.x; dz = cz - this.z; d = Math.hypot(dx, dz) || 1; }
     }
     const step = Math.min(speed * dt, d);
-    const nx = this.x + dx / d * step, nz = this.z + dz / d * step, ox = this.x, oz = this.z;
-    collider.props = this.floor.solids;           // stairwell and furniture, set when the floor is built
-    if (!Player.prototype.blocked.call(collider, this.floor, nx, this.z)) this.x = nx;
-    if (!Player.prototype.blocked.call(collider, this.floor, this.x, nz)) this.z = nz;
+    const ux = dx / d, uz = dz / d, nx = this.x + ux * step, nz = this.z + uz * step, ox = this.x, oz = this.z;
+    if (!colBlocked(this.floor, nx, this.z)) this.x = nx;
+    if (!colBlocked(this.floor, this.x, nz)) this.z = nz;
+    if (step > 0.005 && Math.hypot(this.x - ox, this.z - oz) < step * 0.3) glideRound(this, this.floor, nx, nz, ux, uz, step);   // blocked head-on by a round prop: slide along it instead of stopping
     if (step > 0.005 && Math.hypot(this.x - ox, this.z - oz) < step * 0.3) this.stuckT += dt; else this.stuckT = Math.max(0, this.stuckT - dt * 2);
     this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurn * dt);
     this.walkT += step * 5;
@@ -1086,9 +1145,16 @@ class Enemy {
     const fl = this.hitT > 0 ? 0xaa2010 : this.healFx > 0 ? 0x1a6a2a : this.rageT > 0 ? 0x701010 : warn ? 0xdd3a10 : this.st.tint();
     for (let i = 0; i < this.mats.length; i++) this.mats[i].emissive.setHex(fl || (this.baseEm ? this.baseEm[i] : 0));
 
-    const show = this.state !== 'unaware' || this.aware > 0.2;
+    const sk = this.dead ? null : this.sleepT > 0 ? 'z' : this.rageT > 0 ? 'r' : this.stun > 0 || this.st.has('stun') ? 'x' : this.st.has('stuck') ? 'g' : this.st.has('slow') ? 'f' : null;   // a status mark (wands, Rage) shows instead of the awareness mark
+    const show = sk !== null || this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;
-    if (show) {
+    if (sk) {
+      const k = this.quad ? 1 / this.scaleK : 1;
+      this.icon.material.map = ICONS[sk]; this.icon.material.opacity = 1;
+      if (sk === 'z') { const t = performance.now() / 1000; this.icon.position.y = this.iconY0 + 0.07 * Math.sin(t * 2.4 + (this.seed | 0)); this.icon.scale.setScalar((0.62 + 0.1 * Math.sin(t * 2.4 + (this.seed | 0))) * k); }   // the Z's bob and swell
+      else { this.icon.position.y = this.iconY0; this.icon.scale.setScalar((sk === 'r' ? 0.8 : 0.6) * k); }
+    } else if (show) {
+      if (this.icon.position.y !== this.iconY0) this.icon.position.y = this.iconY0;
       const alerted = this.state === 'alerted';
       this.icon.material.map = alerted ? ICONS.a : this.state === 'searching' ? ICONS.s : ICONS.q;
       this.icon.material.opacity = alerted ? 1 : 0.35 + 0.65 * this.aware;

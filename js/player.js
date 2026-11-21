@@ -21,6 +21,7 @@ class Player {
     this.noiseBonus = 0;     // extra noise metres from armor
     this.stealthMul = 1;     // 0.5 with a shadow potion: guards see half as far
     this.acc = 0;
+    this.dashS = { on: false, t: 0, dur: 0.18, dist: 6, dx: 0, dz: 1 };   // the dash in progress (one shared object, no allocation): see startDash
     this.slippery = false;   // on ice (set each frame by main.js)
     this.slipT = 0; this.slipRate = 2.2;   // seconds of slide left after leaving the ice, and how little you steer on it (14 on normal floor)
   }
@@ -84,6 +85,19 @@ class Player {
     if (into < 0) { this.vx -= into * nx; this.vz -= into * nz; }
   }
 
+  // Dash: a short eased slide of `dist` metres in `dur` seconds along the movement keys (forward when none are held). It sets the velocity each
+  // step (fast at the start, easing out) and then goes through the same wall test and prop push-out as walking, so it can never pass a wall,
+  // door, prop or guard. Whoever calls it checks the rules (stamina, cooldown, status): main.js tryDash.
+  startDash(dist, dur) {
+    const k = this.keys;
+    let fx = (k[KEYS.forward] ? 1 : 0) - (k[KEYS.back] ? 1 : 0), sx = (k[KEYS.right] ? 1 : 0) - (k[KEYS.left] ? 1 : 0);
+    if (!fx && !sx) fx = 1;
+    const len = Math.hypot(fx, sx); fx /= len; sx /= len;
+    const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw), d = this.dashS;
+    d.dx = -sin * fx + cos * sx; d.dz = -cos * fx - sin * sx; d.dist = dist; d.dur = dur; d.t = 0; d.on = true;
+  }
+  get dashing() { return this.dashS.on; }
+
   // Advance by real elapsed seconds, in fixed steps so movement is frame-rate independent.
   update(dt, floor) {
     this.acc = Math.min(this.acc + dt, 0.1);
@@ -105,10 +119,18 @@ class Player {
     const wx = (-sin * fx + cos * sx) * speed;
     const wz = (-cos * fx - sin * sx) * speed;
 
-    // ease velocity toward the target so starts and stops feel weighty
-    const a = 1 - Math.exp(-(this.slippery ? this.slipRate : 14) * STEP);       // on ice you barely steer or stop
-    this.vx += (wx - this.vx) * a;
-    this.vz += (wz - this.vz) * a;
+    const ds = this.dashS;
+    if (ds.on) {                                          // a dash overrides walking: speed 2 x dist / dur at the start, easing to 0 (the area under it is dist)
+      ds.t += STEP;
+      const u = (ds.t - STEP * 0.5) / ds.dur;
+      if (u >= 1) ds.on = false; else { const v = ds.dist / ds.dur * 2 * (1 - u); this.vx = ds.dx * v; this.vz = ds.dz * v; }
+    }
+    if (!ds.on) {
+      // ease velocity toward the target so starts and stops feel weighty
+      const a = 1 - Math.exp(-(this.slippery ? this.slipRate : 14) * STEP);       // on ice you barely steer or stop
+      this.vx += (wx - this.vx) * a;
+      this.vz += (wz - this.vz) * a;
+    }
 
     const nx = this.x + this.vx * STEP;
     if (!Player.wallHit(floor, nx, this.z, this.radius)) this.x = nx; else this.vx = 0;

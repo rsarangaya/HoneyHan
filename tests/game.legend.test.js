@@ -56,8 +56,9 @@ run("Ian's Hog, Aj's Bust and AK's Dumbass", async ({ open, check }) => {
     const wand = makeItem({ type: 'wand', kind: 'bust' });
     out.name = itemName(wand); out.charges = wand.charges; out.legendary = WANDS.bust.legendary;
     out.inOrdinaryRolls = (() => { const r = makeRng(5), seen = new Set(); for (let i = 0; i < 400; i++) seen.add(rollWandKind(r)); return seen.has('bust'); })();
-    const setup = type => { T.reset(); game.inv.equip.weapon = wand; game.cb.stamina = 100; const e = T.guard(7, 'toward', true, type); e.hp = e.maxHp = 500; return e; };
-    const fire = async until => { game.cb.press = true; const ok = await T.until(until, 5000); game.cb.press = false; await T.until(() => !game.cb.atk, 2000); await T.sleep(450); return ok; };
+    const arm = w => { game.inv.pack = game.inv.pack.filter(i => i.type !== 'wand'); game.inv.pack.push(w); game.inv.assignQuick(0, w); game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 }); game.cb.zap = null; };   // wands are zapped from quickslot 1
+    const setup = type => { T.reset(); arm(wand); game.cb.stamina = 100; const e = T.guard(7, 'toward', true, type); e.hp = e.maxHp = 500; return e; };
+    const fire = async until => { game.cb.zap = null; game.cb.stamina = 100; game.inv.use(0); const ok = await T.until(until, 5000); await T.until(() => !game.cb.zap, 3000); await T.sleep(450); return ok; };
     // a goblin: stuck at once, even while alerted and hunting you, and it stays put
     let e = setup();
     out.stuck = await fire(() => e.st.has('stuck')); out.chargesLeft = wand.charges;
@@ -70,7 +71,7 @@ run("Ian's Hog, Aj's Bust and AK's Dumbass", async ({ open, check }) => {
     // a second bust on it does nothing new but still costs a charge
     const before = wand.charges; await fire(() => wand.charges < before); out.second = wand.charges;
     // nothing pushes it: the force wand does not move a stuck enemy
-    const fw = makeItem({ type: 'wand', kind: 'force' }); game.inv.equip.weapon = fw; const px = e.x, pz = e.z;
+    const fw = makeItem({ type: 'wand', kind: 'force' }); arm(fw); const px = e.x, pz = e.z;
     await fire(() => fw.charges < 5);
     out.forceMoved = Math.hypot(e.x - px, e.z - pz);
     // a dagger sneak kill still works on it, and a corpse is left
@@ -78,14 +79,14 @@ run("Ian's Hog, Aj's Bust and AK's Dumbass", async ({ open, check }) => {
     game.cb.press = true; out.killed = await T.until(() => e.dead, 4000); game.cb.press = false;
     // an elite and the boss shrug it off
     for (const type of ['bouncer', 'brute']) {
-      game.inv.equip.weapon = wand; wand.charges = 3; const b = setup(type); game.inv.equip.weapon = wand;
+      wand.charges = 3; const b = setup(type);
       await fire(() => wand.charges < 3); out['elite_' + type] = b.st.has('stuck');
     }
-    { const b = setup(); b.boss = true; game.inv.equip.weapon = wand; wand.charges = 3; await fire(() => wand.charges < 3); out.boss = b.st.has('stuck'); }
+    { const b = setup(); b.boss = true; arm(wand); wand.charges = 3; await fire(() => wand.charges < 3); out.boss = b.st.has('stuck'); }
     // an archer glued in place still shoots (it just cannot move)
     out.eliteFlags = ['bouncer', 'brute', 'warden', 'librarian', 'fungbrute', 'captain', 'iceknight'].every(t => ENEMY_TYPES[t].elite) && !ENEMY_TYPES.goblin.elite;
     // single target: a neighbour is not glued
-    { game.inv.equip.weapon = wand; wand.charges = 3; const a = setup(), n = T.guard(7.6, 'toward', true); n.hp = n.maxHp = 500; await fire(() => wand.charges < 3); out.neighbour = n.st.has('stuck'); out.target = a.st.has('stuck') || n.st.has('stuck'); }
+    { wand.charges = 3; const a = setup(), n = T.guard(7.6, 'toward', true); n.hp = n.maxHp = 500; await fire(() => wand.charges < 3); out.neighbour = n.st.has('stuck'); out.target = a.st.has('stuck') || n.st.has('stuck'); }
     // recharge works on it
     wand.charges = 0; const rw = makeItem({ type: 'rechargewand' }); game.inv.pack.push(rw); game.inv.recharge(rw, wand); out.recharged = wand.charges;
     return out;

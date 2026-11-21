@@ -3,13 +3,13 @@
 const DEFAULT_KEYS = {
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   sprint: 'ShiftLeft', crouch: 'KeyC', interact: 'KeyE', inventory: 'Tab',
-  attack: 'Mouse0', block: 'Mouse2',
+  attack: 'Mouse0', block: 'Mouse2', dash: 'KeyQ',
   slot1: 'Digit1', slot2: 'Digit2', slot3: 'Digit3', slot4: 'Digit4',
 };
 const CONTROL_LABELS = [
   ['forward', 'Move forward'], ['back', 'Move back'], ['left', 'Move left'], ['right', 'Move right'],
   ['sprint', 'Sprint (hold)'], ['crouch', 'Crouch (hold)'], ['interact', 'Interact, search, open (hold)'],
-  ['attack', 'Attack'], ['block', 'Block and parry (hold)'], ['inventory', 'Inventory'],
+  ['attack', 'Attack'], ['block', 'Block and parry (hold)'], ['dash', 'Dash (costs stamina)'], ['inventory', 'Inventory'],
   ['slot1', 'Quickslot 1'], ['slot2', 'Quickslot 2'], ['slot3', 'Quickslot 3'], ['slot4', 'Quickslot 4'],
 ];
 const KEYS_STORE = 'honeyhan-controls-1';

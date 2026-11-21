@@ -22,6 +22,8 @@ const TUNE = {
   stageHpScale: 0.35, stageDmgScale: 0.20, stageBossHp: 0.5, stageBossDmg: 0.2, finalBossHp: 3.0, finalBossDmg: 1.8, stageLootDepth: 1.5,
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,
+  exhaustedAtkMul: 0.4,               // below a weapon's stamina cost you can still attack, but the swing, draw, bash recovery and zap recovery run at this speed (x2.5 time); stamina never goes below 0
+  dashStam: 25, dashDist: 6, dashTime: 0.18, dashCd: 1.2, dashNoise: 10, dashFov: 9,   // the dash (js/main.js tryDash): stamina, metres, seconds, cooldown, noise metres, and the FOV kick in degrees
   respawnMin: 60, respawnSpan: 60,    // a killed guard is replaced after respawnMin + rnd * respawnSpan seconds (js/main.js updateRespawn)
   respawnMinDist: 24,                 // metres: a replacement appears at least this far from you (and out of sight)
   roomCapTiles: 15,                   // a room holds max(2, floor(area in tiles / this)) enemies at spawn (js/enemytypes.js spreadEnemies)

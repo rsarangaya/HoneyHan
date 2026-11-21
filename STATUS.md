@@ -111,6 +111,11 @@ Read `DESIGN.md` for the full design. At the end of each work block, update this
     - Run both after every change.
   - Checked: both test files pass. Not checked: how guard spacing feels in a real fight (a ring of guards round you may now be easier to read and block, or may box you in), boss spacing in the arena.
 
+## Exhaustion, dash, wand quickslots, stuck guards (2026-11-21)
+- Done: attacking, bow draw, bash and zaps work at low stamina at x2.5 time (never below 0, EXHAUSTED hint, red bar flash); dash on Q (TUNE.dashStam/Dist/Time/Cd/Noise/Fov, cooldown bar, glossary card); wands are quickslot consumables (inv.use sets zapReq, main.js zapWand, off-hand viewmodel, no wand can be wielded, fixWeapon migrates); wand visuals are pooled (wandFxBolt/wandImpact/wandRing in js/wands.js, shared geometry, bolts face their flight), enemy status marks (Z, star, flake, goo, rage); guards glide round props, skip blocked path nodes and hop to a free spot when stuck (js/enemy.js goTo). Tuning key is now prototype-test-tune-34.
+- Tests: tests/game.dash.test.js, game.wandfx.test.js, game.stuck.test.js (new); game.magic and game.legend updated for quickslot wands.
+- Open: screenshots of bolts mid-flight are hard to catch under software rendering (38 m/s); wand visuals checked by tests plus still frames. Candles and urns were never solid (r <= 0.3); the real traps were solid circles on unblocked tiles (hearths, NPCs).
+
 ## Branch `impatience` (2026-11-09): build order steps 2 to 8, built in one go, none of it play-tested by a real player
 Run `node tests/run-all.js` after every change (about 1.5 minutes: Node unit tests, then the browser tests `tests/game.*.test.js`, which share `tests/lib.js` and run with `?norender=1`, a switch that skips drawing and keeps all the game logic). Run them one after another, not in parallel (the timing checks fail under CPU contention).
 

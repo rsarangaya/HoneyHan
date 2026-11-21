@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const ctx = vm.createContext({ console, Math });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/wands.js'), 'utf8'), ctx, { filename: 'js/wands.js' });
-const { WANDS, WAND, RAGE, newWand, rechargedTo, nearestOther, rageVictims } = vm.runInContext('({ WANDS, WAND, RAGE, newWand, rechargedTo, nearestOther, rageVictims })', ctx);
+const { WANDS, WAND, RAGE, newWand, rechargedTo, nearestOther, rageVictims, WFX_STYLE } = vm.runInContext('({ WANDS, WAND, RAGE, newWand, rechargedTo, nearestOther, rageVictims, WFX_STYLE })', ctx);
 let fails = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? '  (' + detail + ')' : ''}`); if (!ok) fails++; };
 
@@ -23,5 +23,6 @@ check('nearest other can skip kinds', nearestOther(me, [me, a, b], 20, o => o ==
 check('rage reaches the living non-boss enemies in range', (() => { const v = rageVictims([a, b, c, d, e(2, 2, { boss: true }), e(13, 0), e(15, 0)], 0, 0); return v.length === 4 && v.includes(a) && v.includes(c) && !v.includes(d); })());
 check('rage radius is exclusive of the far', rageVictims([e(14.5, 0)], 0, 0).length === 0 && rageVictims([e(13.9, 0)], 0, 0).length === 1);
 check('rage numbers are sane', RAGE.dur >= 8 && RAGE.noise >= RAGE.radius && RAGE.charges >= 1);
+check('every wand kind has a bolt look and an impact style', Object.keys(WANDS).every(k => WFX_STYLE[k] && WFX_STYLE[k].flash > 0 && WFX_STYLE[k].life > 0));
 console.log(fails ? `${fails} failed` : 'all passed');
 process.exit(fails ? 1 : 0);

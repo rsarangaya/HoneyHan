@@ -468,7 +468,7 @@ function pruneThemeTextures() {
 
 function buildFloor() {
   wallKinds = new Map();
-  knock.m = 0; bossLanesClear(); bossPuddlesClear(); bossFlamesClear();   // no knockback, ice lane, ale puddle or flame patch carries over a floor change or restart
+  knock.m = 0; player.dashS.on = false; bossLanesClear(); bossPuddlesClear(); bossFlamesClear();   // no knockback, ice lane, ale puddle or flame patch carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -900,7 +900,7 @@ function setDev(on) {
 }
 
 // ---- combat: stamina, melee attacks, block and parry (numbers live in combat.js) ----
-const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, rageCd: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
+const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, bashSlow: false, rageCd: 0, zap: null, dashCd: 0, dashReq: false, exhT: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
@@ -913,16 +913,25 @@ function mark(text, color = '#fff') {
   addLog(/KILL/.test(text) ? text : 'Hit: ' + text.toLowerCase(), color);
 }
 
+// Exhaustion: with less stamina than an action costs you can still do it, only slowly (TUNE.exhaustedAtkMul of the normal speed, so x2.5 the time).
+// The action takes what is left (stamina never goes below 0) and the regen delay still starts. The stamina bar flashes red and 'EXHAUSTED' shows.
+const tiredFor = cost => !dev.on && cb.stamina < cost;
+function exhaustedHint() {
+  cb.exhT = 0.7;
+  const m = document.getElementById('hitmark'); m.textContent = 'EXHAUSTED'; m.style.color = '#ff6a4a'; m.style.opacity = 1; markTimer = 0.6;
+}
+
 function startAttack() {
   if (cb.eat) { cb.eat = null; flash('Stopped eating'); return; }
   const w = wstats();
   if (w.ranged) return startDraw(w);
   if (cb.block && shield()) return bash();            // a shield bash: attack while blocking
   if (isLimp(inv.equip.weapon)) { if (!cb.atk && cb.limpMsg <= 0) { flash("Ian's Hog has gone limp. It needs a Recharge Wand."); cb.limpMsg = 1.2; } return; }
-  if (cb.atk || cb.block || inv.swapT > 0 || pst.has('stun') || (cb.stamina < w.stam && !dev.on)) return;
-  spend(w.stam); hunger.fight = 3;
-  if (w.wand) { cb.atk = { t: 0, hit: true }; castWand(w); return; }   // a wand fires at once; the swing timer is just its recovery
-  cb.atk = { t: 0, hit: false };
+  if (cb.atk || cb.block || cb.zap || inv.swapT > 0 || pst.has('stun')) return;
+  const tired = tiredFor(w.stam);
+  spend(w.stam); hunger.fight = 3;                    // (spend stops at 0)
+  cb.atk = { t: 0, hit: false, slow: tired };
+  if (tired) exhaustedHint();
 }
 
 function playerHit() {
@@ -991,8 +1000,10 @@ function blockStats() {
   return { parryWin: Math.max(w.parryWin, SHIELD.parryWin), cost: SHIELD.cost / TIERS[sh.tier].mul, legs: true };
 }
 function bash() {
-  if (cb.bashCd > 0 || cb.eat || (cb.stamina < SHIELD.bashStam && !dev.on)) return;
-  spend(SHIELD.bashStam); cb.bashCd = SHIELD.bashCd; cb.bash = 0.25; loud(SHIELD.noise);
+  if (cb.bashCd > 0 || cb.eat) return;
+  const tired = tiredFor(SHIELD.bashStam);
+  spend(SHIELD.bashStam); cb.bashCd = SHIELD.bashCd / (tired ? TUNE.exhaustedAtkMul : 1); cb.bash = 0.25; cb.bashSlow = tired; loud(SHIELD.noise);   // a tired bash lands as hard but recovers slowly
+  if (tired) exhaustedHint();
   const t = findMeleeTarget(player, eyeY(), enemies, floor, SHIELD.bashReach);
   if (!t) return;
   const e = t.e, sh = inv.equip.offhand;
@@ -1005,25 +1016,34 @@ function bash() {
   mark(stunned ? 'BASH +STUN' : 'BASH', '#7fe8ff');
 }
 
-// ---- wands: attack fires a bolt that ignores armor and hit zones; a charge per cast, and the wand breaks at 0 ----
-function castWand(w) {
-  const it = inv.equip.weapon, W = WANDS[it.kind];
+// ---- wands: a consumable zapped from its quickslot (the weapon in hand stays). The bolt flies at the crosshair, ignores armor and hit zones; a charge per zap, and the wand breaks at 0 ----
+function zapWand(it) {
+  if (!inv.find(it.id)) return;
+  if (inSafe) { if (performance.now() - safeMsgT > 4000) { safeMsgT = performance.now(); flash('No one fights in the safe room.'); } return; }
+  if (cb.eat) { cb.eat = null; flash('Stopped eating'); return; }
+  if (cb.zap || cb.draw || pst.has('stun')) return;
+  if (it.charges <= 0) { flash(`The ${WANDS[it.kind].name} is empty. A Recharge Wand would fill it.`); return; }
+  const tired = tiredFor(WAND.stam);
+  spend(WAND.stam); hunger.fight = 3; cb.atk = null; cb.block = false;
+  cb.zap = { t: 0, dur: WAND.cd, slow: tired, kind: it.kind };           // the off-hand zap animation and recovery (updateViewmodel)
+  if (tired) exhaustedHint();
+  castWand(it);
+}
+function castWand(it) {
+  const W = WANDS[it.kind];
   const cp = Math.cos(player.pitch), dx = -Math.sin(player.yaw) * cp, dy = Math.sin(player.pitch), dz = -Math.cos(player.yaw) * cp;
-  const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * WAND.speed, vy: dy * WAND.speed, vz: dz * WAND.speed, gravity: 0, life: WAND.range / WAND.speed, owner: 'player', kind: 'wand', wand: it.kind, stuck: false, mesh: makeBoltMesh(W.color) };
-  a.mesh.position.set(a.x, a.y, a.z);
-  group.add(a.mesh); arrows.push(a);
+  const m = wandFxBolt(group, it.kind);                                    // a pooled bolt, turned to face its flight direction once
+  const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * WAND.speed, vy: dy * WAND.speed, vz: dz * WAND.speed, gravity: 0, life: WAND.range / WAND.speed, owner: 'player', kind: 'wand', wand: it.kind, stuck: false, wfx: true, mesh: m };
+  m.position.set(a.x, a.y, a.z); m.lookAt(a.x + dx, a.y + dy, a.z + dz);
+  arrows.push(a);
   loud(W.noise);
   discover('wand:' + it.kind, W.name);
   if (--it.charges <= 0) breakWand(it);
   else if (it.charges === 1) flash(`The ${W.name} is nearly spent (1 charge).`);
 }
 function breakWand(w) {
-  const best = inv.pack.filter(i => i.type === 'weapon').sort((a, b) => weaponStats(b).dmg - weaponStats(a).dmg)[0];
-  if (best) { inv.equipItem(best); inv.remove(w); }                          // equipItem put the wand in the pack: it is gone
-  else inv.equip.weapon = makeItem({ type: 'weapon', base: 'dagger', tier: 0 });
-  inv.quick = inv.quick.map(id => id === w.id ? null : id);
-  cb.atk = null;
-  flash(`The ${WANDS[w.kind].name} crumbles to dust.` + (best ? '' : ' You pull out a dagger.'));
+  inv.remove(w);                                                            // gone from the pack and its quickslot; the weapon in hand was never touched
+  flash(`The ${WANDS[w.kind].name} crumbles to dust.`);
 }
 function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
   const killed = e.hurt(dmg * (e.bs ? bossTakeMul(e, 'body') : 1), player);
@@ -1032,11 +1052,14 @@ function hurtByWand(e, dmg) {                                                 //
 }
 function applyWand(kind, e) {
   const W = WANDS[kind], tag = s => { discover('status:' + s, STATUS[s].name); };
+  const cy = Math.max(0.3, Math.min(1.5, (e.T.height || 1.7) * 0.6 * (e.scaleK || 1))) + (e.alt || 0);   // about its chest
+  wandImpact(group, kind, e.x, cy, e.z);                                      // (a flash on the target; lightning adds one on the arc below)
   if (kind === 'fire') { hurtByWand(e, W.dmg); mark(`FIRE ${W.dmg}`, '#ff9a3a'); }
   else if (kind === 'frost') { if (!hurtByWand(e, W.dmg) && e.addStatus('slow', W.slow)) tag('slow'); mark('FROST +SLOW', '#7fd8ff'); }
   else if (kind === 'lightning') {
     if (!hurtByWand(e, W.dmg) && e.addStatus('stun', W.stun)) tag('stun');
     const o = nearestOther(e, enemies, W.chain);
+    if (o) wandImpact(group, 'lightning', o.x, Math.max(0.3, Math.min(1.5, (o.T.height || 1.7) * 0.6 * (o.scaleK || 1))) + (o.alt || 0), o.z, 0.7);
     if (o && !hurtByWand(o, W.chainDmg) && o.addStatus('stun', W.chainStun)) tag('stun');
     mark(o ? 'LIGHTNING ARCS' : 'LIGHTNING +STUN', '#ffe84a');
   } else if (kind === 'force') {
@@ -1052,6 +1075,7 @@ function applyWand(kind, e) {
       e.rp = 0;
     }
     hurtByWand(e, W.dmg + (hitWall ? W.wallDmg : 0));
+    wandRing(group, 'force', e.x, e.z, hitWall ? 2.6 : 1.8, 0.35);                  // a shock ring where it lands
     mark(hitWall ? 'FORCE: SLAMMED' : 'FORCE', '#c58aff');
   } else if (kind === 'bust') {
     if (e.elite) mark('TOO BIG TO STICK', '#aaa');                                // elites and bosses shrug it off
@@ -1064,7 +1088,7 @@ function applyWand(kind, e) {
 const SPEAK = typeof speechSynthesis !== 'undefined' && !params.has('mute') && !params.has('norender') ? speechSynthesis : null;   // ?mute=1 or the test mode (?norender=1) silences the voice lines
 function playRage(it) {
   if (cb.rageCd > 0) { flash('The recorder is still rewinding.'); return; }
-  cb.rageCd = RAGE.cd; loud(RAGE.noise);
+  cb.rageCd = RAGE.cd; loud(RAGE.noise); wandRing(group, 'rage', player.x, player.z, RAGE.radius, 0.7);   // the shout rolls out as a red ring
   const victims = rageVictims(enemies, player.x, player.z).filter(e => e.enrage(RAGE.dur, player.x, player.z));
   discover('item:rage', "Hanahan's Rage");
   try { if (SPEAK) { SPEAK.cancel(); const u = new SpeechSynthesisUtterance(RAGE_LINES[Math.floor(Math.random() * RAGE_LINES.length)]); u.pitch = 0.55; u.rate = 1.15; SPEAK.speak(u); } } catch (err) {}
@@ -1150,9 +1174,10 @@ const arrows = [];          // flying and stuck arrows
 function startDraw(w) {
   if (cb.draw || inv.swapT > 0 || pst.has('stun') || cb.eat) return;
   if (inv.arrows <= 0 && !dev.on) { flash('No arrows'); return; }
-  if (cb.stamina < w.stam && !dev.on) return;
+  const tired = tiredFor(w.stam);
   spend(w.stam); hunger.fight = 3;
-  cb.draw = { t: 0 };
+  cb.draw = { t: 0, slow: tired };                    // a tired draw takes x2.5 as long
+  if (tired) exhaustedHint();
 }
 function fireArrow(frac) {
   if (inSafe) return;
@@ -1172,8 +1197,9 @@ function stickArrow(a, hitEnemy) {
   if (!hitEnemy && a.px !== undefined) { a.x = a.px; a.z = a.pz; }                     // lie in front of the wall, not inside it
   a.y = 0.05; a.mesh.position.set(a.x, 0.05, a.z); a.mesh.rotation.set(0, Math.atan2(a.dirx || 0, a.dirz || 1), 0);
 }
-const dropArrowMesh = a => { if (a.pool) bossFxRelease(a.mesh); else group.remove(a.mesh); };   // a boss shot's mesh goes back to its pool
+const dropArrowMesh = a => { if (a.pool) bossFxRelease(a.mesh); else if (a.wfx) wandFxRelease(a.mesh); else group.remove(a.mesh); };   // a boss shot's mesh goes back to its pool
 function updateArrows(dt) {
+  wandFxUpdate(group, dt);                                                          // impact flashes and the shock ring fade out
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     if (a.stuck) {
@@ -1193,9 +1219,10 @@ function updateArrows(dt) {
     }
     if (a.kind === 'wand') {                                                       // a wand bolt: no drop, no recovery, hits anything alive
       const ev = stepArrow(a, dt, floor, enemies, player);
-      a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
+      a.life -= dt; a.mesh.position.set(a.x, a.y, a.z); wandBoltAnim(a.mesh, gameT);
       if (ev && ev.type === 'hit') applyWand(a.wand, ev.e);
-      if (ev || a.life <= 0) { group.remove(a.mesh); arrows.splice(i, 1); }
+      else if (ev) wandImpact(group, a.wand, a.px === undefined ? a.x : a.px, a.y, a.pz === undefined ? a.z : a.pz, 0.6);   // it fizzles against a wall or the floor
+      if (ev || a.life <= 0) { wandFxRelease(a.mesh); arrows.splice(i, 1); }
       continue;
     }
     const sp = Math.hypot(a.vx, a.vz) || 1; a.dirx = a.vx / sp; a.dirz = a.vz / sp;
@@ -1422,12 +1449,24 @@ function groundHit(e, mv, zone, full, facing, w, nx, nz) {
   if (mv.knock) applyKnock(nx, nz, mv.knock);
 }
 function moveStatus(mv) { if (pst.apply(mv.status, mv.statusDur)) { discover('status:' + mv.status, STATUS[mv.status].name); addLog(STATUS[mv.status].name + '!', STATUS[mv.status].color); } }
+// Dash: a short stamina-costing slide (TUNE.dashDist metres in TUNE.dashTime seconds) along your movement keys, forward when standing, to close on archers and casters.
+// player.startDash does the sliding through the player's own wall and prop collision (never through a wall, door, prop or guard). No i-frames: it is fair, not a dodge.
+// Refused while stunned, dazed, crippled to a crawl, eating, drawing a bow, mid-knockback or already dashing, and on cooldown. Allowed in the safe room and in dev mode. It is loud.
+function tryDash() {
+  if (state !== 'play' || cb.dashCd > 0 || cb.eat || cb.draw || knock.m > 0 || player.dashS.on || pst.has('stun') || pst.has('daze') || pst.moveMul() < 0.3) return false;
+  if (!dev.on && cb.stamina < TUNE.dashStam) { cb.exhT = 0.5; return false; }          // too tired: the bar flashes
+  spend(TUNE.dashStam); cb.dashCd = TUNE.dashCd;
+  player.startDash(TUNE.dashDist, TUNE.dashTime);
+  loud(TUNE.dashNoise);
+  return true;
+}
 // Knockback: a short eased slide (about a quarter second) of `metres` along (dx, dz), stepped through the player's own collision (walls and props), so it never carries you
 // through a wall: a blocked step slides along the wall or ends the push. One shared state, no allocation.
 const knock = { dx: 0, dz: 0, m: 0, t: 0, dur: 0.25, done: 0 };
 function applyKnock(dx, dz, metres) {
   let d = Math.hypot(dx, dz); if (!(metres > 0) || inSafe) return;
   if (d < 1e-6) { dx = Math.sin(player.yaw); dz = Math.cos(player.yaw); d = 1; }   // dead centre of the blast (a dragon landing on you): back the way you face
+  player.dashS.on = false;                                                           // a shove ends a dash
   knock.dx = dx / d; knock.dz = dz / d; knock.m = metres; knock.t = 0; knock.done = 0; knock.dur = 0.2 + 0.03 * metres;
 }
 function stepKnock(dt) {
@@ -1524,8 +1563,13 @@ function updateCombat(dt) {
   if (cb.bashCd > 0) cb.bashCd -= dt;
   if (cb.rageCd > 0) cb.rageCd -= dt;
   if (cb.limpMsg > 0) cb.limpMsg -= dt;
+  if (cb.dashCd > 0) cb.dashCd -= dt;
+  if (cb.exhT > 0) cb.exhT -= dt;
+  if (cb.dashReq) { cb.dashReq = false; tryDash(); }
   if (inv.rageReq) { playRage(inv.rageReq); inv.rageReq = null; }
-  if (cb.bash > 0) cb.bash -= dt;
+  if (inv.zapReq) { const z = inv.zapReq; inv.zapReq = null; zapWand(z); }
+  if (cb.zap && (cb.zap.t += dt * (cb.zap.slow ? TUNE.exhaustedAtkMul : 1)) >= cb.zap.dur) cb.zap = null;
+  if (cb.bash > 0) cb.bash -= dt * (cb.bashSlow ? TUNE.exhaustedAtkMul : 1);
   if (cb.press) {
     cb.press = false;
     if (!inSafe || cb.eat) startAttack();                                                    // in the safe room an attack does nothing (but still stops a meal)
@@ -1533,7 +1577,7 @@ function updateCombat(dt) {
   }
   if (cb.draw) {                                    // drawing the bow: slow, release to fire, block cancels
     const w = wstats();
-    cb.draw.t += dt; player.speedMul *= 0.4;
+    cb.draw.t += dt * (cb.draw.slow ? TUNE.exhaustedAtkMul : 1); player.speedMul *= 0.4;
     if (!w.ranged || inv.swapT > 0 || cb.eat || pst.has('stun') || cb.want) cb.draw = null;
     else if (!player.keys[KEYS.attack]) {
       const frac = Math.min(1, cb.draw.t / w.draw);
@@ -1546,11 +1590,11 @@ function updateCombat(dt) {
   }
   if (cb.atk) {
     const w = wstats();
-    cb.atk.t += dt;
+    cb.atk.t += dt * (cb.atk.slow ? TUNE.exhaustedAtkMul : 1);
     if (!cb.atk.hit && cb.atk.t >= w.dur * w.hitAt) { cb.atk.hit = true; playerHit(); }
     if (cb.atk.t >= w.dur) cb.atk = null;
   }
-  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !cb.eat && !wstats().ranged && !wstats().wand && (cb.stamina > 0 || dev.on);
+  const canBlock = cb.want && !cb.atk && inv.swapT <= 0 && !pst.has('stun') && !cb.eat && !cb.zap && !wstats().ranged && (cb.stamina > 0 || dev.on);
   if (canBlock) { if (!cb.block) { cb.block = true; cb.blockT = 0; } else cb.blockT += dt; } else cb.block = false;
 
   if (markTimer > 0) { markTimer -= dt; if (markTimer <= 0) document.getElementById('hitmark').style.opacity = 0; }
@@ -1568,8 +1612,8 @@ function freeAhead() {
 }
 
 // first-person weapon: rest, swing, block and swap poses
-const vm = { id: null, tier: -1, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null };
-camera.add(vm.group); camera.add(vm.shield);
+const vm = { id: null, tier: -1, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null, wand: new THREE.Group(), wandKind: null };
+camera.add(vm.group); camera.add(vm.shield); camera.add(vm.wand); vm.wand.visible = false;
 function buildShieldModel(it) { return buildShieldMesh(it.tier | 0); }   // shared round-shield geometry, tier-coloured face (js/combat.js)
 function updateViewmodel(dt) {
   const wkey = inv.weapon + (isLimp(inv.equip.weapon) ? ':limp' : '');                // a limp Ian's Hog is a different model
@@ -1587,13 +1631,23 @@ function updateViewmodel(dt) {
   }
   vm.shield.visible = !!sh;
   if (sh) {
-    const bashK = cb.bash > 0 ? Math.sin((1 - cb.bash / 0.25) * Math.PI) : 0;
+    const bashK = cb.bash > 0 ? Math.sin((1 - cb.bash / 0.25) * Math.PI) : 0;   // (a tired bash plays slower: cb.bash counts down at the exhausted speed)
     const tx = cb.block ? -0.1 : -0.42, ty = cb.block ? -0.2 : -0.4, tz = (cb.block ? -0.62 : -0.68) - 0.3 * bashK;
     const k2 = 1 - Math.exp(-16 * dt), sp = vm.shield.position;
     sp.x += (tx - sp.x) * k2; sp.y += (ty - sp.y) * k2; sp.z += (tz - sp.z) * k2;
     vm.shield.rotation.y += ((cb.block ? 0.05 : 0.4) - vm.shield.rotation.y) * k2;
   }
+  // the zap: the wand comes up in the off hand (left), jabs forward at the crosshair and lowers again over WAND.cd; the weapon dips a little meanwhile
+  const zp = cb.zap && !inv.swapT ? Math.min(1, cb.zap.t / cb.zap.dur) : -1;
+  if (zp >= 0) {
+    if (vm.wandKind !== cb.zap.kind) { while (vm.wand.children.length) vm.wand.remove(vm.wand.children[0]); vm.wand.add(buildWeaponModel('wand:' + cb.zap.kind, 0)); vm.wandKind = cb.zap.kind; }
+    const up = Math.sin(Math.min(1, zp * 1.6) * Math.PI * 0.5) * (1 - Math.max(0, (zp - 0.6) / 0.4) ** 2), jab = Math.sin(Math.min(1, zp / 0.45) * Math.PI);   // up fast, down at the end
+    vm.wand.visible = true;
+    vm.wand.position.set(-0.3 + 0.2 * up, -0.75 + 0.4 * up, -0.55 - 0.3 * jab);
+    vm.wand.rotation.set(-0.3 - 0.95 * up, 0, 0.1 * (1 - up));
+  } else if (vm.wand.visible) vm.wand.visible = false;
   let x = 0.38, y = -0.5, z = -0.7, rx = -0.15, rz = 0.15;
+  if (zp >= 0) y -= 0.12 * Math.sin(zp * Math.PI);
   if (spear) { x = 0.32; y = -0.62; z = -0.5; rx = limp ? -0.85 : -1.2; rz = 0.04; }   // a spear is held pointing forward, a limp one sags
   if (cb.draw) { const f = Math.min(1, cb.draw.t / wstats().draw); x = 0.2; y = -0.38; z = -0.8 + 0.18 * f; rx = 0.05; rz = 0.02; }   // the bow is raised and the string drawn back
   if (cb.block) { x = 0.05; y = -0.36; z = -0.62; rx = -0.05; rz = 0; }
@@ -1632,7 +1686,7 @@ function damage(n) {
   if (dev.on) return;
   inv.hp = Math.max(0, inv.hp - n);
   if (inv.hp <= 0) {
-    state = 'dead'; knock.m = 0;
+    state = 'dead'; knock.m = 0; player.dashS.on = false;
     document.exitPointerLock();
     hud.overlayText.innerHTML = `<h1>You died on stage ${stage}, floor ${floorNum}</h1><p>Click to start a new run.</p>`;
     hud.overlay.style.display = 'flex';
@@ -1800,7 +1854,9 @@ function updateHud() {
   if (boss) setStyle('bossFill', 'width', Math.max(0, boss.hp / boss.maxHp * 100) + '%');
   setStyle('hpFill', 'width', (inv.hp / inv.maxHp * 100) + '%');
   setStyle('stamFill', 'width', (cb.stamina / STAMINA_MAX * 100) + '%');
-  setStyle('stamFill', 'background', cb.canSprint ? '#4cc36a' : '#c9a23a');
+  setStyle('stamFill', 'background', cb.exhT > 0 && ((cb.exhT * 8) | 0) % 2 === 0 ? '#e0453a' : cb.stamina < 25 && !dev.on ? '#d7822a' : cb.canSprint ? '#4cc36a' : '#c9a23a');   // flashes red when you try something tired; orange while exhausted (an action there is slow)
+  setStyle('dashFill', 'width', (cb.dashCd > 0 ? (1 - cb.dashCd / TUNE.dashCd) * 100 : 100) + '%');   // the dash cooldown under the stamina bar
+  setStyle('dashFill', 'background', cb.dashCd > 0 ? '#6a7a8a' : cb.stamina >= TUNE.dashStam || dev.on ? '#7fd8ff' : '#8a5a4a');
   setStyle('hungerFill', 'width', hunger.v + '%');
   setStyle('hungerFill', 'background', HUNGER_COLOR[hunger.stage]);
   if (frameCount % 3 !== 0) return;                    // the text part builds strings: 20 times a second is plenty
@@ -1814,7 +1870,7 @@ function updateHud() {
   const arm = ['head', 'body', 'legs'].map(z => `${z[0].toUpperCase()}${Math.round(inv.armorRed(z) * 100)}`).join(' ');
   const buffs = Object.entries(inv.buffs).map(([k, t]) => `${k} ${Math.ceil(t)}s`)
     .concat(pst.list().map(([k, t]) => `<span style="color:${STATUS[k].color}">${STATUS[k].name} ${Math.ceil(t)}s</span>`)).join(' &middot; ');
-  const line = `<span style="color:${itemColor(w)}">${itemName(w)}${w.type === 'wand' ? ` (${w.charges})` : w.base === 'spear' ? (isLimp(w) ? ' (LIMP)' : ` (${w.charges} kills left)`) : ''}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
+  const line = `<span style="color:${itemColor(w)}">${itemName(w)}${w.base === 'spear' ? (isLimp(w) ? ' (LIMP)' : ` (${w.charges} kills left)`) : ''}</span>${inv.equip.offhand ? ` + <span style="color:${itemColor(inv.equip.offhand)}">${itemName(inv.equip.offhand)}</span>${wstats().ranged ? ' (stowed)' : ''}` : ''}${inv.swapT > 0 ? ' (swapping)' : ''} &middot; Armor ${arm}% &middot; Arrows ${inv.arrows}/${QUIVER_MAX} &middot; Gold ${inv.gold} &middot; Pack ${inv.pack.length}/${PACK_MAX}${hunger.stage === 'fed' ? '' : ` &middot; <span style="color:#e08a2a">${hunger.stage[0].toUpperCase() + hunger.stage.slice(1)}</span>`}${buffs ? '<br>' + buffs : ''}`;
   const key = slots + line + inv.hp;
   if (key === hudKey) return;
   hudKey = key;
@@ -1834,7 +1890,7 @@ function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU mem
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
-  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear(); bossPuddlesClear(); bossFlamesClear();
+  arrows.forEach(dropArrowMesh); arrows.length = 0; wandFxClear(group); bossTeleHide(); bossLanesClear(); bossPuddlesClear(); bossFlamesClear();
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnQ };
   scene.remove(group);
 }
@@ -2168,6 +2224,7 @@ addEventListener('keyup', e => { player.keys[e.code] = false; if (e.code === KEY
 // Attack and block can be bound to a key or a mouse button, so both go through here.
 function pressAction(code) {
   if (code === KEYS.attack) cb.press = true;
+  if (code === KEYS.dash) cb.dashReq = true;
   if (code === KEYS.block) cb.want = true;
 }
 addEventListener('blur', () => { player.keys = {}; cb.want = false; });
@@ -2208,6 +2265,7 @@ function updateAssist(under, mt) {
 }
 
 let last = performance.now(), frameNo = 0, dazeOn = false, frameCount = 0;
+const BASE_FOV = 75; let fovNow = BASE_FOV;
 const perfStats = { logic: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
 function frame(now) {
   const dt = (now - last) / 1000; last = now; const tl0 = performance.now();
@@ -2252,6 +2310,8 @@ function frame(now) {
     checkShopSight();
     if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) hud.msg.style.opacity = 0; }
   }
+  const fk = player.dashS.on ? 1 : 0, fovT = BASE_FOV + TUNE.dashFov * fk;               // a short FOV kick while dashing, eased in and out
+  if (fovNow !== fovT) { fovNow += (fovT - fovNow) * (1 - Math.exp(-(fk ? 30 : 10) * dt)); if (Math.abs(fovT - fovNow) < 0.02) fovNow = fovT; camera.fov = fovNow; camera.updateProjectionMatrix(); }
   camera.position.set(player.x, eyeY(), player.z);
   camera.rotation.set(player.pitch, player.yaw, 0);
   if (group && group.userData.sky) group.userData.sky.position.copy(camera.position);   // the sky dome rides along with the camera

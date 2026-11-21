@@ -160,7 +160,6 @@ const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
-  if (it.type === 'wand') return { wand: true, ranged: false, dmg: 0, stam: WAND.stam, noise: WANDS[it.kind].noise, dur: WAND.cd, hitAt: 99, reach: 0, sneak: 1, parryWin: 0, blockCost: 0, spd: 1, atkSpd: 1 };
   const b = WSTATS[it.base];
   if (it.base === 'spear') return { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd), limp: it.charges <= 0 };
   return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
@@ -185,7 +184,7 @@ function itemLines(it) {
     return [`Cuts ${Math.round(a.red * 100)}% of damage to the ${ARMOR_ZONE[it.slot]}`,
       a.noise ? `Makes you ${a.noise} m louder when moving` : 'Silent'];
   }
-  if (it.type === 'wand') return [WANDS[it.kind].desc, `Charges ${it.charges}/${WANDS[it.kind].charges}. Breaks at 0.`, `Stamina ${WAND.stam} per cast, noise ${WANDS[it.kind].noise} m`, 'Equip it like a weapon and attack to fire. Ignores armor and hit zones. A recharge wand tops it up.'].concat(WANDS[it.kind].legendary ? ['One of a kind: only one exists per run.'] : []);
+  if (it.type === 'wand') return [WANDS[it.kind].desc, `Charges ${it.charges}/${WANDS[it.kind].charges}. Breaks at 0.`, `Noise ${WANDS[it.kind].noise} m. Zapped, not wielded: assign it to a quickslot (1 to 4) and press that key to fire it at the crosshair while you keep your weapon in hand.`, 'Ignores armor and hit zones. A recharge wand tops it up.'].concat(WANDS[it.kind].legendary ? ['One of a kind: only one exists per run.'] : []);
   if (it.type === 'rechargewand') return [it.full ? 'Refills a wand completely, then crumbles.' : `Restores ${WAND.rechargeGain} charges to a wand, then crumbles.`, 'Also stiffens a limp Ian\'s Hog. Works on an empty wand too. Use it from a quickslot (it picks your held wand, or the emptiest in the pack) or choose a wand in the inventory.'];
   if (it.type === 'rage') return ['Plays a recording of Hanahan talking mad smack. Enemies get angry and ragebaited into attacking each other.', `Enemies within ${RAGE.radius} m fight each other for ${RAGE.dur} s, then come looking for you. Bosses ignore it. Very loud (${RAGE.noise} m).`, `Plays left: ${it.charges}. The recorder breaks after the last.`];
   if (it.type === 'shield') return [`Block costs ${Math.round(SHIELD.cost / TIERS[it.tier].mul)} stamina (less at higher tiers)`, `Parry window ${SHIELD.parryWin} s`, `Covers leg sweeps: only ${Math.round(SHIELD.legsTake * 100)}% of the hit gets through and no slow`, `Bash: attack while blocking. Stuns for ${SHIELD.bashStun} s and shoves, ${SHIELD.bashStam} stamina`, 'Lets a dagger block properly. Stowed while a bow is out.'];
@@ -310,12 +309,13 @@ class Inventory {
     this.swapT = 0;
     this.buffs = {};                                      // name -> seconds left
     this.rageReq = null;                                  // Hanahan's Rage: main.js plays it
+    this.zapReq = null;                                   // a wand to zap from its quickslot: main.js fires it (the equipped weapon stays in hand)
     this.eatReq = null;                                   // food the player wants to eat; main.js starts the eating
     this.stamBonus = 0;                                   // permanent stamina regen bonus for the run (shrine bargain), as a fraction
     this.refillStamina = false;                           // set by the vigor potion, read by main
   }
 
-  get weapon() { const w = this.equip.weapon; return w.type === 'wand' ? 'wand:' + w.kind : w.base; }         // base id, so WSTATS lookups still work
+  get weapon() { return this.equip.weapon.base; }         // base id, so WSTATS lookups still work
 
   find(id) { return this.pack.find(i => i.id === id) || null; }
   quickItem(i) { const it = this.quick[i] && this.find(this.quick[i]); if (!it) this.quick[i] = null; return it || null; }
@@ -348,13 +348,23 @@ class Inventory {
 
   // Equip from the pack. The item that was in that slot goes back to the pack, in the same spot.
   equipItem(it) {
-    const slot = it.type === 'weapon' || it.type === 'wand' ? 'weapon' : it.slot;
+    const slot = it.type === 'weapon' ? 'weapon' : it.slot;      // a wand has no slot: it is a consumable for a quickslot, never the wielded weapon
     const idx = this.pack.indexOf(it);
     if (idx < 0 || !slot) return;
     const old = this.equip[slot];
     this.quick = this.quick.map(id => id === it.id ? null : id);
     this.equip[slot] = it;
     if (old) this.pack[idx] = old; else this.pack.splice(idx, 1);
+  }
+  // A wand can never be the wielded weapon: one found there (an old state) goes to the pack and the best weapon in the pack (else a dagger) takes over.
+  fixWeapon() {
+    const w = this.equip.weapon;
+    if (w && w.type !== 'wand') return false;
+    const best = this.pack.filter(i => i.type === 'weapon').sort((a, b) => weaponStats(b).dmg - weaponStats(a).dmg)[0];
+    if (best) { this.pack.splice(this.pack.indexOf(best), 1); this.equip.weapon = best; }
+    else this.equip.weapon = makeItem({ type: 'weapon', base: 'dagger', tier: 0 });
+    if (w) this.pack.push(w);
+    return true;
   }
   unequip(slot) {
     const it = this.equip[slot];
@@ -386,7 +396,8 @@ class Inventory {
   use(i) {
     const it = this.quickItem(i);
     if (!it || this.swapT > 0) return '';
-    if (it.type === 'weapon' || it.type === 'wand') {
+    if (it.type === 'wand') { this.zapReq = it; return ''; }                    // zapped from the slot: the weapon in hand stays
+    if (it.type === 'weapon') {
       const old = this.equip.weapon;
       this.equipItem(it);
       this.quick[i] = old.id;
@@ -434,6 +445,7 @@ class Inventory {
   armorNoise() { return ARMOR_SLOTS.reduce((n, s) => n + (this.equip[s] ? armorStats(this.equip[s]).noise : 0), 0); }
 
   update(dt) {
+    if (this.equip.weapon.type === 'wand') this.fixWeapon();
     if (this.swapT > 0) this.swapT = Math.max(0, this.swapT - dt);
     for (const k in this.buffs) if ((this.buffs[k] -= dt) <= 0) delete this.buffs[k];
   }

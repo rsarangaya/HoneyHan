@@ -58,7 +58,7 @@ const invUI = (() => {
   // How a pack item compares to what you are wearing or holding.
   function compare(it) {
     if (it.type === 'weapon') {
-      const a = weaponStats(it), b = weaponStats(inv.equip.weapon.type === 'wand' ? { type: 'weapon', base: 'dagger', tier: 0 } : inv.equip.weapon);
+      const a = weaponStats(it), b = weaponStats(inv.equip.weapon);
       if (a.ranged || b.ranged) return a.ranged && b.ranged ? `vs equipped: damage ${a.dmg - b.dmg >= 0 ? '+' : ''}${(a.dmg - b.dmg).toFixed(1)}` : 'A bow is a different style: slow, ranged, uses arrows.';
       const d = a.dmg - b.dmg;
       return `vs equipped: damage ${d >= 0 ? '+' : ''}${d.toFixed(1)}, swing ${a.dur >= b.dur ? '+' : ''}${(a.dur - b.dur).toFixed(2)} s`;
@@ -92,7 +92,7 @@ const invUI = (() => {
       const btn = (act, label) => `<button data-act="${act}">${label}</button>`;
       let buttons = '';
       if (fromPack) {
-        if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield' || it.type === 'wand') buttons += btn('equip', 'Equip');
+        if (it.type === 'weapon' || it.type === 'armor' || it.type === 'shield') buttons += btn('equip', 'Equip');
         if (it.type === 'rage') buttons += btn('play', 'Play it');
         if (it.type === 'rechargewand') {                                              // pick which wand to recharge
           const wands = [inv.equip.weapon, ...inv.pack].filter(rechargeable);
@@ -130,7 +130,7 @@ const invUI = (() => {
     note = '';
     if (a === 'close') return close();
     if (!it) return;
-    if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' || it.type === 'wand' ? 'weapon' : it.slot }; }
+    if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' ? 'weapon' : it.slot }; }
     else if (a === 'unequip') { if (inv.unequip(sel.slot)) sel = null; else note = 'Pack is full.'; }
     else if (a === 'drink') { note = inv.drink(it); if (!inv.find(it.id)) sel = null; }
     else if (a === 'play') { inv.rageReq = it; sel = null; return close(); }

@@ -34,6 +34,8 @@
   #flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(transparent 40%, #c00a 100%); opacity: 0; transition: opacity .35s; }
   #stam { width: 200px; height: 5px; margin: -2px auto 6px; background: #0008; border: 1px solid #fff5; }
   #stamFill { height: 100%; background: #4cc36a; }
+  #dash { width: 200px; height: 3px; margin: -4px auto 6px; background: #0008; border: 1px solid #fff4; }
+  #dashFill { height: 100%; width: 100%; background: #7fd8ff; }
   #hunger { width: 200px; height: 4px; margin: -3px auto 6px; background: #0008; border: 1px solid #fff5; }
   #hungerFill { height: 100%; width: 100%; background: #d9a441; }
   #noise { display: block; width: 24px; height: 16px; margin: -2px auto 4px; color: #888; }
@@ -79,6 +81,7 @@
 <div class="hud" id="stats">
   <div id="hp"><div id="hpFill"></div></div>
   <div id="stam"><div id="stamFill"></div></div>
+  <div id="dash" title="Dash"><div id="dashFill"></div></div>
   <div id="hunger" title="Hunger"><div id="hungerFill"></div></div>
   <svg id="noise" data-l="0" viewBox="0 0 24 16" title="Noise: enemies can hear you"><title>Noise: enemies can hear you</title><circle class="d" cx="5" cy="8" r="2.2"/><path class="a a1" d="M9 5.5Q11 8 9 10.5"/><path class="a a2" d="M13 3.5Q16.5 8 13 12.5"/><path class="a a3" d="M17 1.5Q22 8 17 14.5"/></svg>
   <div id="slots"></div>

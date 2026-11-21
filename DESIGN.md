@@ -201,7 +201,7 @@ Rare affixed weapons can add an extra proc (for example a bleeding mace).
 Rules: take the strongest active movement effect, do not multiply stacks. Short immunity after cripple so axes cannot chain it. Same rules for the player and enemies.
 
 ## 7. Wands
-No mana or spell system. A wand is an item with one fixed effect and limited charges, fired with LMB.
+No mana or spell system. A wand is a consumable with one fixed effect and limited charges. It lives in the pack, is assigned to a quickslot and zapped from there at the crosshair (off-hand zap animation, 0.5 s recovery) while the equipped weapon stays in hand. A wand can never be the wielded weapon.
 - One effect per wand: fire bolt, frost (slow), lightning (stun), force blast (knockback), sleep or freeze (silent setup for a sneak kill), and so on.
 - Magic damage ignores armor (mostly). Wands ignore hit zones to stay the simple, limited easy button.
 - Each wand has its own noise level (frost near silent, lightning very loud).
@@ -417,3 +417,8 @@ Still open:
 - Whether guards react to found bodies.
 - Whether any theme should be excluded from being picked until the player has beaten another (for unlock pacing).
 - How to keep a single theme from feeling repetitive over five floors (more room variety, floor modifiers, new enemy types introduced per floor).
+
+## Exhaustion and the dash (2026-11-21)
+- Below an action's stamina cost you can still attack, draw a bow, bash or zap, at 40% speed (TUNE.exhaustedAtkMul, so x2.5 time). Stamina never goes below 0; the regen delay still applies. The stamina bar flashes red and EXHAUSTED shows.
+- Dash (default key Q, rebindable): 6 m in 0.18 s along the movement keys (forward when standing), 25 stamina, 1.2 s cooldown (thin bar under the stamina bar), loud (10 m), small FOV kick, no i-frames. It slides through the normal collision, so it stops at walls, doors, props and guards. Refused while stunned, dazed, crippled to a crawl, eating, drawing a bow, knocked back or on cooldown.
+- Guards glide round round props instead of stopping, skip path nodes lying under a prop or NPC, and when stuck hop to the nearest free spot instead of the tile centre.
