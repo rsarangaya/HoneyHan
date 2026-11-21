@@ -604,6 +604,7 @@ function buildFloor() {
   propObjs.forEach(o => group.add(o.mesh));
   floor.solids = [{ x: sx, z: sz, r: 1.5 }, ...propObjs.filter(o => !o.p.mimic).map(o => ({ x: o.x, z: o.z, r: o.r }))];   // what guards cannot walk through (a mimic is a body of its own): stairwell, props, furniture
   if (floor.up) floor.solids.push({ x: (floor.up.x + 0.5) * TILE, z: (floor.up.y + 0.5) * TILE, r: 1.5 });   // and the stairs up
+  for (const d of floor.decor) d.shrine = !!(d.kind === 'altar' && floor.quest && floor.quest.type === 'shrine' && floor.quest.altar.x === d.x && floor.quest.altar.y === d.y);   // the shrine's altar looks different (violet orb) from a plain one
   decorObjs = floor.decor.map(makeDecor);
   for (const o of decorObjs) {
     group.add(o.mesh);
@@ -627,6 +628,8 @@ function buildFloor() {
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
   for (const b of enemies) if (b.boss) { nameTag(b, b.def.name, b.def.color); if (b.bm) b.tag.position.y = b.bm.tagY; }                // every boss has its name over its head
+  decorObjs.forEach((o, i) => { o.src = floor.decor[i]; });
+  for (const o of decorObjs) if (o.kind === 'altar' && !o.src.shrine) propObjs.push({ p: { kind: 'prayer', x: o.src.x, y: o.src.y, opened: !!o.src.prayed, src: o.src }, mesh: new THREE.Group(), x: o.x, z: o.z, r: 0, lid: null, mats: [] });   // a plain altar: hold E to pray once (pray)
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   floor.prints = theme.mechanic.prints && !floor.boss ? buildPrints() : null;
@@ -1565,22 +1568,15 @@ function freeAhead() {
 }
 
 // first-person weapon: rest, swing, block and swap poses
-const vm = { id: null, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null };
+const vm = { id: null, tier: -1, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null };
 camera.add(vm.group); camera.add(vm.shield);
-function buildShieldModel(it) {
-  const g = new THREE.Group(), c = new THREE.Color(TIERS[it.tier].color);
-  const add = (w, h, d, col, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: col })); b.position.set(x, y, z); g.add(b); };
-  add(0.42, 0.56, 0.05, 0x5a3a20, 0, 0, 0);                                    // wooden board
-  add(0.36, 0.5, 0.02, c.getHex(), 0, 0, -0.03);                                // tier-coloured face
-  add(0.1, 0.1, 0.06, 0xb8bcc4, 0, 0, -0.05);                                   // boss
-  add(0.42, 0.04, 0.06, 0xb8bcc4, 0, 0.27, -0.02); add(0.42, 0.04, 0.06, 0xb8bcc4, 0, -0.27, -0.02);   // rims
-  return g;
-}
+function buildShieldModel(it) { return buildShieldMesh(it.tier | 0); }   // shared round-shield geometry, tier-coloured face (js/combat.js)
 function updateViewmodel(dt) {
   const wkey = inv.weapon + (isLimp(inv.equip.weapon) ? ':limp' : '');                // a limp Ian's Hog is a different model
-  if (vm.id !== wkey) {
+  const wtier = (inv.equip.weapon && inv.equip.weapon.tier) | 0;
+  if (vm.id !== wkey || vm.tier !== wtier) {                                          // (models share their geometry and materials: dropping the old one frees nothing and leaks nothing)
     if (vm.model) vm.group.remove(vm.model);
-    vm.model = buildWeaponModel(wkey); vm.group.add(vm.model); vm.id = wkey;
+    vm.model = buildWeaponModel(wkey, wtier); vm.group.add(vm.model); vm.id = wkey; vm.tier = wtier;
   }
   const spear = inv.weapon === 'spear', limp = isLimp(inv.equip.weapon);
   const sh = shield();                                     // the off-hand shield, raised while blocking, thrust forward on a bash
@@ -1613,7 +1609,7 @@ function updateViewmodel(dt) {
   // would reach past the nearest obstacle (a swing reaches much farther than the rest pose).
   const pull = Math.max(0, Math.min(1.3, (cb.atk ? 1.9 : 0.95) - freeAhead()));
   z += pull; y -= pull * 0.15; rx += pull * 0.5;
-  if (limp) { const t = performance.now() / 1000; rz += Math.sin(t * 1.7) * 0.05; rx += Math.sin(t * 1.1) * 0.03; }   // it dangles and sways
+  if (limp && vm.model.userData.joints) { limpStep(dt, player.yaw, player.pitch, player.vx, player.vz, camera.position.y); limpApply(vm.model); }   // it flops: a soft chain driven by how you move and turn
   const g = vm.group;
   g.position.x += (x - g.position.x) * k; g.position.y += (y - g.position.y) * k; g.position.z += (z - g.position.z) * k;
   g.rotation.x += (rx - g.rotation.x) * k; g.rotation.z += (rz - g.rotation.z) * k;
@@ -1704,9 +1700,18 @@ function watchedSearch() {
   if (n) { flash('A stallkeeper saw that!'); addLog('A stallkeeper saw you rifle that and is coming to look.', '#ffa040'); discover('item:crowd', 'Market crowd'); }
 }
 const SEARCH_NOISE = { chest: 3, vaultchest: 3, barrel: 4, rubble: 4, pantry: 3, door: 5 };   // metres, heard when the search finishes
+// An ordinary altar: one prayer heals a little. Unhurt, the blessing is kept for later (nothing is used up).
+const PRAYER = { heal: 12 };   // HP
+function pray(o) {
+  discover('item:altar', 'Altars');
+  if (inv.hp >= inv.maxHp) { flash("The altar's warmth finds nothing to mend. Come back when you are hurt."); return; }
+  inv.hp = Math.min(inv.maxHp, inv.hp + PRAYER.heal); o.p.opened = true; if (o.p.src) o.p.src.prayed = true;
+  flash('You kneel and pray. A warm light closes your wounds.'); addLog('You prayed at an altar: +' + PRAYER.heal + ' HP.', '#ffd070');
+}
 function finishSearch(o, smashed) {
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
   if (o.p.kind === 'altar') { dealUI.open(o); return; }
+  if (o.p.kind === 'prayer') { pray(o); return; }
   if (o.p.kind === 'questnpc') { questTalk(o); return; }
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
@@ -1823,19 +1828,19 @@ scene.add(ambient);
 camera.add(torch);
 
 // The armory (a locked room) is on one floor of each stage, picked from the seed (planStage).
-let respawnT = Infinity, baseGuards = 0;
+let respawnQ = [], baseGuards = 0;   // respawnQ: seconds left on each pending replacement (one per kill), per floor
 
 function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU memory: geometry, materials and their textures
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
   arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear(); bossPuddlesClear(); bossFlamesClear();
-  floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
+  floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnQ };
   scene.remove(group);
 }
 function loadFloor(n, c) {
   floorNum = n; delete floorCache[n];
-  ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT } = c);
+  ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnQ } = c);
   scene.add(group);
   enemies.forEach(e => { e.cone.visible = dev.on; });
   Enemy.all = enemies; player.props = propObjs; player.mobs = enemies;
@@ -1876,6 +1881,7 @@ function generateAndEnter(n, arrive) {
   const final = stage === FINAL_STAGE, gn = final ? MAX_FLOOR : n;   // the final stage's one floor is generated as a floor 5 arena
   floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) });
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
+  spreadEnemies(floor, stageSeed, gn);                      // then spread them over their rooms (per-room cap, spaced spawns and patrol ends)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
   if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? null : THEME_BOSS[theme.name]; if (b) { if (tb) { b.dress = tb.dress; b.skin = tb.skin; } b.final = final; b.bossId = final ? 'final' : theme.id; } }   // each theme's boss has its own look (the final arena's is the dragon: js/bossmodels.js)
   floor.waterSlow = theme.mechanic.kind === 'puddle' ? theme.mechanic.TUNE.enemySlow : 0;   // the Tavern's flooded patches slow guards too (js/enemy.js goTo)
@@ -1895,7 +1901,7 @@ function generateAndEnter(n, arrive) {
   if (arrive) arriveBy(arrive); else player.place(floor);
   updateCulling(player, cullChunks, propObjs, enemies);
   baseGuards = floor.enemies.length;
-  respawnT = n >= 3 && !floor.boss ? 35 + gameRng() * 35 : Infinity;   // from floor 3 on, guards keep turning up (not in the boss arena)
+  respawnQ = [];                                      // replacements for killed guards (updateRespawn)
   floorBanner(n);
 }
 
@@ -1921,22 +1927,48 @@ function changeFloor(n, dir) {
   hunger.fight = 0;
 }
 
-// Floors 3 and deeper: every 35 to 70 seconds a guard appears in a room you cannot see, up to 1.5x the floor's guard count.
+// Respawns, on every floor but the boss arena: each kill of an ordinary guard (a native, pack rat, wolf; not a mimic, summon, quest target or escaped thief)
+// queues a timer of respawnMin + rnd * respawnSpan seconds (respawnQ, kept per floor). A due timer spawns one replacement walking a normal unaware patrol,
+// only while fewer than baseGuards enemies live, in a room that takes spawns (js/enemytypes.js spawnRoom), is not the player's, is under its cap, is out of line of
+// sight and respawnMinDist metres away, and not within 6 m of another enemy. No room fits: retry in 8 s. (This replaces the old floor 3+ trickle.)
 function updateRespawn(dt) {
-  if (floorNum < 3 || floor.boss) return;
-  respawnT -= dt;
-  if (respawnT > 0) return;
-  respawnT = 35 + gameRng() * 35;
-  if (enemies.filter(e => !e.dead && !e.T.mimic).length >= Math.ceil(baseGuards * 1.5)) return;
-  const open = floor.rooms.filter(r => !r.locked && r.theme !== 'shop');
-  const homes = open.filter((r, i) => r !== floor.rooms[0]
-    && Math.hypot((r.cx + 0.5) * TILE - player.x, (r.cy + 0.5) * TILE - player.z) > 24
-    && !hasLOS(floor, player.x, player.z, (r.cx + 0.5) * TILE, (r.cy + 0.5) * TILE));
-  if (!homes.length) { respawnT = 8; return; }
-  const pick = arr => arr[Math.floor(gameRng() * arr.length)];
-  const a = roomPoint(floor, pick(homes), Math.floor(gameRng() * 8)), b = roomPoint(floor, pick(open), Math.floor(gameRng() * 8));
-  const e = new Enemy({ x: a.x, y: a.y, route: [a, b], seed: (gameRng() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, gameRng) }, floor);
-  e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
+  if (floor.boss) return;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (!e.dead || e.rq) continue;
+    e.rq = true;                                      // counted once, whatever happens to the body
+    if (!e.boss && !e.T.mimic && !e.minion && !e.escaped && !e.spec.mini && !e.spec.qguard && e.type !== 'sackthief') respawnQ.push(TUNE.respawnMin + gameRng() * TUNE.respawnSpan);
+  }
+  for (let i = respawnQ.length - 1; i >= 0; i--) {
+    respawnQ[i] -= dt;
+    if (respawnQ[i] > 0) continue;
+    if (trySpawnGuard()) respawnQ.splice(i, 1); else respawnQ[i] = 8;
+  }
+}
+function trySpawnGuard() {
+  let alive = 0; for (let i = 0; i < enemies.length; i++) { const e = enemies[i]; if (!e.dead && !e.T.mimic && !e.minion) alive++; }
+  if (alive >= baseGuards) return false;
+  const pRoom = roomOf(floor, player.tileX, player.tileY), minD2 = TUNE.respawnMinDist ** 2, w = floor.w;
+  const ok = floor.rooms.filter((r, i) => spawnRoom(r, i) && r !== pRoom && roomTiles(floor, r).length);
+  for (let n = ok.length; n > 0;) {                   // rooms in random order
+    const j = Math.floor(gameRng() * n), r = ok[j]; ok[j] = ok[--n]; ok[n] = r;
+    let held = 0; for (let i = 0; i < enemies.length; i++) { const e = enemies[i]; if (!e.dead && e.x >= r.x * TILE && e.x < (r.x + r.w) * TILE && e.z >= r.y * TILE && e.z < (r.y + r.h) * TILE) held++; }
+    const tiles = roomTiles(floor, r);
+    if (held >= roomCap(r) || !tiles.length) continue;
+    for (let t = 0; t < 10; t++) {
+      const c = tiles[Math.floor(gameRng() * tiles.length)], x = (c.x + 0.5) * TILE, z = (c.y + 0.5) * TILE;
+      if (floor.tiles[c.y * w + c.x] !== T_FLOOR || floor.blocked[c.y * w + c.x]) continue;
+      if ((x - player.x) ** 2 + (z - player.z) ** 2 <= minD2 || hasLOS(floor, player.x, player.z, x, z)) continue;
+      let near = false;
+      for (let i = 0; i < enemies.length && !near; i++) { const e = enemies[i]; near = !e.dead && (e.x - x) ** 2 + (e.z - z) ** 2 < 36; }
+      if (near) continue;
+      const others = ok.length > 1 ? ok.filter(q => q !== r) : [r], bt = roomTiles(floor, others[Math.floor(gameRng() * others.length)]), b = bt.length ? bt[Math.floor(gameRng() * bt.length)] : c;   // patrol on to a random spot in one of the other eligible rooms
+      const e = new Enemy({ x: c.x, y: c.y, route: [{ x: c.x, y: c.y }, { x: b.x, y: b.y }], seed: (gameRng() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, gameRng) }, floor);
+      e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
+      return true;
+    }
+  }
+  return false;
 }
 
 // A boss's summon (js/boss.js bossSummon): one enemy of `type` beside the boss, already alerted. false when there is no open spot.
@@ -2248,7 +2280,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get state() { return state; },
+  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

@@ -177,7 +177,7 @@ function assignEnemyTypes(f, seed, floorNum, themeName) {
         const fav = homes.filter(r => r.theme === roster.prefer[pt]), home = rng.pick(fav.length ? fav : homes);
         for (let k = 0; k < size; k++) {
           const a = roomPoint(f, home, k * 3 + p), b = roomPoint(f, home, k * 3 + p + 4);
-          f.enemies.push({ x: a.x, y: a.y, route: [a, b], seed: seedOf(), type: pt });
+          f.enemies.push({ x: a.x, y: a.y, route: [a, b], seed: seedOf(), type: pt, grp: floorNum * 100 + p * 10 + packTypes.indexOf(pt) });   // grp: which pack it belongs to (spreadEnemies keeps a pack in one room)
         }
       }
     }
@@ -197,6 +197,76 @@ function respawnType(themeName, floorNum, rnd) {
   if (!roster || rnd() > NATIVE_SHARE[Math.min(floorNum, 5) - 1]) return 'goblin';
   const solo = roster.commons.filter(t => !ENEMY_TYPES[t].pack);
   return solo[Math.floor(rnd() * solo.length)];
+}
+
+// ---- Spawn spread. Guards, packs and wolves start anywhere in a room's whole interior (not just the 3x3 block round its centre), with a per-room cap,
+// spawn points 2 tiles apart and patrol ends 3 tiles apart. spreadEnemies runs after assignEnemyTypes (own seeded rng, so nothing else shifts) and only moves
+// enemies: counts and types are untouched. The respawn system in js/main.js uses the same room rules (spawnRoom, roomCap, roomTiles). ----
+const spawnTune = (k, d) => typeof TUNE !== 'undefined' && TUNE[k] !== undefined ? TUNE[k] : d;
+const NO_SPAWN_THEMES = new Set(['shop', 'lair', 'cell', 'safe']);
+const spawnRoom = (r, i) => i > 0 && !r.locked && !NO_SPAWN_THEMES.has(r.theme);   // rooms[0] is the start room
+const roomCap = r => Math.max(2, Math.floor(r.w * r.h / spawnTune('roomCapTiles', 15)));   // enemies a room holds (a pack counts as 2, a wolf with its handler as 2)
+const ROOM_TILES = new WeakMap();
+// Open floor tiles of a room's whole interior (no props, none shared with another room). Cached per room; callers re-check blocked tiles at use.
+function roomTiles(f, r) {
+  let t = ROOM_TILES.get(r); if (t) return t;
+  t = []; const taken = new Set(f.props.map(p => p.y * f.w + p.x)), bad = f.rooms.filter(q => q !== r);   // (tiles shared with another room are left out, so every spawn tile belongs to exactly one room)
+  for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
+    const i = y * f.w + x;
+    if (f.tiles[i] !== T_FLOOR || f.blocked[i] || taken.has(i) || bad.some(q => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h)) continue;
+    t.push({ x, y });
+  }
+  ROOM_TILES.set(r, t); return t;
+}
+function spreadEnemies(f, seed, floorNum) {
+  if (f.boss || !f.rooms.length) return f;
+  const rng = makeRng(((seed ^ 0x5bd1e995) >>> 0) + floorNum * 7919), E = f.enemies;
+  const ok = f.rooms.filter((r, i) => spawnRoom(r, i) && roomTiles(f, r).length);
+  if (!ok.length) return f;
+  const wolfOf = new Map(); E.forEach(e => { if (e.handler !== undefined && E[e.handler]) wolfOf.set(E[e.handler], e); });
+  const units = [], packs = new Map();
+  for (const e of E) {                                    // a unit: one guard, a pack, or a handler with its wolf
+    if (e.boss || e.qguard || e.mini || e.handler !== undefined) continue;
+    if (e.grp !== undefined) { let u = packs.get(e.grp); if (!u) { u = { m: [], w: 2, pack: true }; packs.set(e.grp, u); units.push(u); } u.m.push(e); }
+    else if (wolfOf.has(e)) units.push({ m: [e, wolfOf.get(e)], w: 2, wolf: true });
+    else units.push({ m: [e], w: 1 });
+  }
+  const load = new Map(ok.map(r => [r, 0]));
+  for (const u of units.slice().sort((a, b) => b.w - a.w)) {   // a room (packs and wolves first: the big units fit worst): the one it had if it has space, else one with space
+    const m = u.m[0], home = roomOf(f, m.x, m.y);
+    let r = load.has(home) && load.get(home) + u.w <= roomCap(home) ? home : null;
+    if (!r) {
+      const open = ok.filter(q => load.get(q) + u.w <= roomCap(q));
+      r = open.length ? open[weightedIndex(rng, open.map(q => roomCap(q) - load.get(q)))] : ok.reduce((a, q) => load.get(q) < load.get(a) ? q : a, ok[0]);   // none has space: the emptiest
+    }
+    load.set(r, load.get(r) + u.w); u.room = r;
+  }
+  const spawns = [], wps = [], d2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+  const pick = (r, list, d) => {                          // a random tile of r at least d tiles from everything in list, relaxing d to 0 if the room is too small
+    const t = roomTiles(f, r), n = t.length; if (!n) return null;
+    const s = rng.int(0, n - 1);
+    for (let dd = d; dd >= 0; dd--) for (let j = 0; j < n; j++) { const c = t[(s + j) % n]; if (list.every(p => d2(p, c) >= dd * dd)) return c; }
+    return t[s];
+  };
+  for (const u of units) {
+    const home = u.room, pause = rng() * 6;
+    let dest = null;
+    if (!u.pack) {                                        // a patrol to another room; if the random pick is the home room, the nearest other one
+      dest = rng.pick(ok);
+      if (dest === home) dest = ok.filter(q => q !== home).sort((p, q) => Math.hypot(p.cx - home.cx, p.cy - home.cy) - Math.hypot(q.cx - home.cx, q.cy - home.cy))[0] || home;
+    }
+    u.m.forEach((e, k) => {
+      if (k > 0 && u.wolf) return;                        // the wolf copies its handler below
+      const a = pick(home, spawns, 2); spawns.push(a); wps.push(a);
+      const b = pick(dest || home, [a, ...wps], 3) || a; wps.push(b);
+      e.x = a.x; e.y = a.y; e.route = [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]; e.pause = pause;
+    });
+    if (u.wolf) {
+      const h = u.m[0], w = u.m[1], a = nearPoint(f, h.x, h.y, 0);
+      w.x = a.x; w.y = a.y; w.route = h.route.map(p => ({ ...p })); w.pause = pause;
+    }
+  }
+  return f;
 }
 
 // After the floor's enemies are built: point each wolf at its handler.

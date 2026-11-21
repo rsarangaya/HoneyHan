@@ -1,12 +1,13 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-32';   // bumped so old saved values don't override the new defaults (last: the Cinder Wyrm sections and the flight numbers)
+  const KEY = 'prototype-test-tune-33';   // bumped so old saved values don't override the new defaults (last: the Cinder Wyrm sections and the flight numbers)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurn', 1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
     ['Stages', TUNE, [['stageHpScale', 0.05], ['stageDmgScale', 0.05], ['stageBossHp', 0.05], ['stageBossDmg', 0.05], ['finalBossHp', 0.1], ['finalBossDmg', 0.1], ['stageLootDepth', 0.5]]],
     ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossWindMul', 0.05], ['bossReachMul', 0.05], ['bossAtkSpd', 0.05], ['bossWeaponTier', 1], ['bossLegendary', 0.01]]],
+    ['Respawn', TUNE, [['respawnMin', 5], ['respawnSpan', 5], ['respawnMinDist', 1], ['roomCapTiles', 1]]],
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1], ['parryRestore', 1], ['blockRefund', 0.05]]],
@@ -90,7 +91,7 @@ const tunePanel = (() => {
     mk('Give arrows', () => { inv.arrows = QUIVER_MAX; });
     mk('Give potions', () => { Object.keys(POTIONS).forEach(k => inv.add({ type: 'potion', kind: k, n: 1 })); });
     mk('Give keys', () => { floor.doors.forEach(d => { if (!inv.has('key', d.lock)) inv.add({ type: 'key', lock: d.lock, label: d.keyLabel }); }); });
-    mk('Spawn guard now', () => { respawnT = 0; });
+    mk('Spawn guard now', () => { respawnQ.push(0); });
     mk('Floor down', () => { if (floorNum < MAX_FLOOR && stage !== FINAL_STAGE) startFloor(floorNum + 1); else flash('Already on the last floor of this stage'); });
     mk('Floor up', () => { if (floorNum > 1) startFloor(floorNum - 1); else flash('Already on floor 1'); });
     mk('Stage down', () => { if (stage < FINAL_STAGE) startStage(stage + 1); else flash('Already on the final stage'); });

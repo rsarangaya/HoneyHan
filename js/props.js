@@ -58,6 +58,48 @@ function TR(parent, R, r, mat, x, y, z) {
   const g = cached(`tr${R}|${r}`, () => new THREE.TorusGeometry(R, r, 5, 18));
   const m = new THREE.Mesh(g, mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); parent.add(m); return m;
 }
+// Bakes many transformed copies of cached geometries into ONE BufferGeometry (build time only; a prop that needs one draw call). parts: [geometry, matrix, colour?]; vertex colours when any part has a colour.
+const _pm = { p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(), s: new THREE.Vector3() };
+const partM = (x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => new THREE.Matrix4().compose(_pm.p.set(x, y, z), _pm.q.setFromEuler(_pm.e.set(rx, ry, rz)), _pm.s.set(sx, sy, sz));
+function mergeParts(parts) {
+  let n = 0, col = false;
+  const gs = parts.map(([g, m, c]) => { const q = g.index ? g.toNonIndexed() : g.clone(); q.applyMatrix4(m); n += q.attributes.position.count; if (c) col = true; return q; });
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), cl = col ? new Float32Array(n * 3) : null; let o = 0;
+  gs.forEach((q, i) => {
+    const c = parts[i][2], k = q.attributes.position.count;
+    pos.set(q.attributes.position.array, o); nor.set(q.attributes.normal.array, o);
+    if (c) for (let v = 0; v < k; v++) { cl[o + v * 3] = c.r; cl[o + v * 3 + 1] = c.g; cl[o + v * 3 + 2] = c.b; }
+    o += k * 3; q.dispose();
+  });
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  if (cl) out.setAttribute('color', new THREE.BufferAttribute(cl, 3));
+  return out;
+}
+// Potion shelf: the whole rack (frame, shelves and every bottle) is one mesh with vertex colours. Round-bellied flasks and tall vials, each with a cork, a liquid colour per potion kind and, on some, a paper label.
+const BOTTLES = {
+  flask: [[0, 0], [0.06, 0.004], [0.08, 0.05], [0.07, 0.1], [0.028, 0.15], [0.026, 0.2], [0, 0.2]],
+  vial: [[0, 0], [0.03, 0], [0.032, 0.02], [0.032, 0.17], [0.024, 0.19], [0, 0.19]],
+};
+function potionRackGeo(rg, wood) {
+  const bt = k => cached('bt' + k, () => new THREE.LatheGeometry(BOTTLES[k].map(([r, h]) => new THREE.Vector2(r, h)), k === 'flask' ? 8 : 6));
+  const cork = cached('btcork', () => new THREE.CylinderGeometry(0.02, 0.026, 0.05, 6)), label = cached('btlabel', () => new THREE.CylinderGeometry(0.083, 0.083, 0.035, 8, 1, true)), box = cached('btbox', () => new THREE.BoxGeometry(1, 1, 1));
+  const W = new THREE.Color(wood), D = new THREE.Color(0x2a1c10), CORK = new THREE.Color(0x9a7a4a), PAPER = new THREE.Color(0xe8dcb8), cols = Object.values(POTIONS).map(q => new THREE.Color(q.color));
+  const parts = [], B = (w, h, d, x, y, z, c) => parts.push([box, partM(x, y, z, 0, 0, 0, w, h, d), c]);
+  B(1.7, 1.75, 0.12, 0, 0.875, -0.315, W.clone().multiplyScalar(0.7));                 // back board
+  B(0.08, 1.75, 0.42, -0.81, 0.875, -0.05, W); B(0.08, 1.75, 0.42, 0.81, 0.875, -0.05, W);   // sides
+  B(1.7, 0.08, 0.5, 0, 1.76, -0.05, W); B(1.64, 0.34, 0.42, 0, 0.17, -0.05, W.clone().multiplyScalar(0.85));   // cornice and base cabinet
+  for (let row = 0; row < 3; row++) {
+    const top = 0.375 + row * 0.5;
+    B(1.64, 0.05, 0.42, 0, top - 0.025, -0.05, D);                                    // shelf board
+    for (let i = 0; i < 6; i++) {
+      const kind = rg() < 0.55 ? 'flask' : 'vial', sy = 0.9 + rg() * 0.3, h = (kind === 'flask' ? 0.2 : 0.19) * sy, x = -0.65 + i * 0.26 + (rg() - 0.5) * 0.04, z = -0.07 + (rg() - 0.5) * 0.08, c = cols[Math.floor(rg() * cols.length)];
+      parts.push([bt(kind), partM(x, top, z, 0, 0, 0, 1, sy, 1), c]);
+      parts.push([cork, partM(x, top + h + 0.012, z), CORK]);
+      if (kind === 'flask' && rg() < 0.5) parts.push([label, partM(x, top + 0.06 * sy, z, 0, 0, 0, 1, sy, 1), PAPER]);
+    }
+  }
+  return mergeParts(parts);
+}
 const BOOK_COLORS = [0x6a2a2a, 0x2a4a6a, 0x3a6a3a, 0x6a5a2a, 0x5a2a6a, 0x4a3a2a, 0x7a4a2a, 0x2a5a5a];
 const BARREL = [[0.0, 0], [0.3, 0], [0.35, 0.12], [0.4, 0.4], [0.4, 0.55], [0.35, 0.83], [0.3, 0.95], [0.0, 0.95]];   // a bulged barrel
 
@@ -89,12 +131,16 @@ function makeProp(p) {
   if (p.kind === 'chest' || p.kind === 'vaultchest') {
     // five grades (js/loot.js CHEST_NAMES): plain wood, iron bands, silver trim, purple and gold, a glowing golden hoard
     const vault = p.kind === 'vaultchest', t = vault ? 2 : p.tier | 0, L = vault ? { body: 0x3a3a4a, lid: 0x4a4a5c, trim: 0xc9a23a } : CHEST_LOOK[t], s = vault ? 1.18 : 1;
-    const bodyM = mat(L.body), lidM = mat(L.lid), trim = new THREE.MeshLambertMaterial({ color: L.trim, emissive: L.glow || 0x2a2008 }); o.mats.push(trim);
+    const bodyM = mat(L.body), lidM = mat(L.lid), trim = new THREE.MeshLambertMaterial({ color: L.trim, emissive: L.glow || 0x2a2008, side: THREE.DoubleSide }); o.mats.push(trim);
+    lidM.side = THREE.DoubleSide;                                                                                              // the dome is a half cylinder: seen from inside or behind (lid open) its back faces must draw
+    const lining = mat(0x2a1a10);
     RB(inner, 1.0 * s, 0.5 * s, 0.65 * s, bodyM, 0, 0.25 * s, 0);
     for (const x of [-0.3, 0.3]) RB(inner, (t === 1 ? 0.16 : 0.1) * s, 0.53 * s, 0.69 * s, trim, x * s, 0.26 * s, 0);          // bands round the body
     const pivot = new THREE.Group(); pivot.position.set(0, 0.5 * s, -0.325 * s);                                              // the lid hinges on the back edge
     const lid = new THREE.Mesh(cached('chestlid', () => new THREE.CylinderGeometry(0.34, 0.34, 1.04, 16, 1, false, 0, Math.PI)), lidM);
     lid.rotation.z = Math.PI / 2; lid.scale.set(0.62 * s, 1 * s, 1 * s); lid.position.set(0, 0, 0.325 * s); pivot.add(lid);   // a half cylinder: a domed lid
+    const floorPlate = new THREE.Mesh(cached('chestlidfloor', () => new THREE.BoxGeometry(1.04, 0.03, 0.68)), lining); floorPlate.scale.setScalar(s); floorPlate.position.set(0, 0.002, 0.325 * s); pivot.add(floorPlate);   // the lid's flat underside, so the dome is a closed solid from every angle
+    const cavity = new THREE.Mesh(cached('chestcavity', () => new THREE.BoxGeometry(0.9, 0.02, 0.5)), lining); cavity.scale.setScalar(s); cavity.position.set(0, 0.5 * s + 0.004, 0); inner.add(cavity);   // the dark hollow of the open chest (hidden under the closed lid)
     for (const x of [-0.3, 0.3]) { const band = new THREE.Mesh(cached('chestlidband', () => new THREE.CylinderGeometry(0.352, 0.352, 0.1, 16, 1, false, 0, Math.PI)), trim); band.rotation.z = Math.PI / 2; band.scale.set(0.62 * s, 1 * s, 1 * s); band.position.set(x * s, 0, 0.325 * s); pivot.add(band); }
     if (t >= 1) for (const x of [-0.4, -0.2, 0.2, 0.4]) SP(inner, 0.06, 0.06, 0.06, trim, x * s, 0.34 * s, 0.335 * s);        // studs along the front
     RB(inner, 0.14 * s, 0.17 * s, 0.05, trim, 0, 0.45 * s, 0.34 * s);                                                          // lock plate
@@ -140,18 +186,9 @@ function makeProp(p) {
       B(inner, 0.6, 0.08, 0.6, mat(wood), 0, 0.04, -0.1);
     }
   } else if (p.kind === 'potions') {
-    // brewery shelf crowded with bottles in every potion colour
-    B(inner, 1.7, 1.7, 0.45, mat(wood), 0, 0.85, -0.15);
-    const cols = Object.values(POTIONS).map(q => q.color);
-    for (let row = 0; row < 3; row++) {
-      B(inner, 1.6, 0.05, 0.5, mat(0x2a1c10), 0, 0.35 + row * 0.5, -0.1);
-      for (let i = 0; i < 6; i++) {
-        const c = new THREE.Color(cols[Math.floor(rg() * cols.length)]);
-        const b = new THREE.MeshLambertMaterial({ color: c, emissive: c.clone().multiplyScalar(0.35) }); o.mats.push(b);
-        C(inner, 0.065, 0.08, 0.2 + rg() * 0.08, b, -0.65 + i * 0.26, 0.48 + row * 0.5, 0.0, 8);
-        C(inner, 0.025, 0.025, 0.07, mat(0x8a7a5a), -0.65 + i * 0.26, 0.62 + row * 0.5, 0.0, 6);
-      }
-    }
+    // brewery shelf: one merged mesh (see potionRackGeo); its material is darkened with the rest when the shelf is emptied
+    const rm = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x1e1814 }); o.mats.push(rm);
+    inner.add(new THREE.Mesh(potionRackGeo(rg, wood), rm));
   } else if (p.kind === 'pantry') {
     // food shelf: bread, cheese, apples and hanging sausages
     B(inner, 1.7, 1.7, 0.45, mat(wood), 0, 0.85, -0.15);
@@ -767,7 +804,8 @@ function makeDecor(d) {
     case 'altar': {
       RB(inner, 1.5, 0.85, 0.8, stone, 0, 0.43, 0);
       RB(inner, 1.7, 0.1, 0.95, dstone, 0, 0.9, 0);
-      RB(inner, 0.5, 0.02, 0.95, lam(0x8a2a2a), 0, 0.96, 0);                                           // runner
+      RB(inner, 0.5, 0.02, 0.95, lam(d.shrine ? 0x5a2a8a : 0x8a2a2a), 0, 0.96, 0);                    // runner (violet on the shrine's altar, the one that strikes a bargain)
+      if (d.shrine) { SP(inner, 0.17, 0.17, 0.17, glow(0xc8a0ff), 0, 1.5, 0); TR(inner, 0.24, 0.012, glow(0xc8a0ff), 0, 1.5, 0); TR(inner, 0.3, 0.008, glow(0x8a5ae8), 0, 1.5, 0); }   // a floating violet orb in two rings
       for (const x of [-0.6, 0.6]) { C(inner, 0.04, 0.045, 0.3, bone, x, 1.12, 0, 6); flame(inner, x, 1.3, 0); }
       LA(inner, [[0, 0], [0.06, 0], [0.025, 0.07], [0.03, 0.14], [0.07, 0.2], [0.0, 0.2]], lam(0xc9a23a, 0x2a2008), 0, 0.95, 0.1, 10);   // goblet
       SP(inner, 0.18, 0.3, 0.18, lam(0xc9a23a, 0x2a2008), 0, 1.12, -0.2);                              // small idol

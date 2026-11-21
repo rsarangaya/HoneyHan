@@ -112,7 +112,8 @@ const PROP_INFO = {
   vaultchest:{ label: 'Open vault chest', time: 1.2 },
   door:      { label: 'Unlock door',      time: 0.6 },
   merchant:  { label: 'Trade with the merchant', time: 0.35 },
-  altar:     { label: 'Kneel at the altar', time: 0.5 },
+  altar:     { label: "Kneel at the violet altar: hear the shrine's bargain (you may decline)", time: 0.5 },   // the shrine's altar (js/quests.js)
+  prayer:    { label: 'Pray at the altar (a small blessing, once)', time: 0.8 },              // an ordinary altar: a one-time prayer (main.js pray)
   questnpc:  { label: 'Talk', time: 0.4 },                                  // the wanted-guard quest-giver (js/quests.js gives the live label)
 };
 

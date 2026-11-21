@@ -192,7 +192,7 @@ class Enemy {
     this.yaw = (spec.seed % 628) / 100;
     this.state = 'unaware'; this.aware = 0;
     this.last = null; this.path = []; this.pk = ''; this.rp = 0; this.smT = 0;
-    this.wait = 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
+    this.wait = spec.pause || 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0;
     this.seen = false;
     this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
     this.healCd = 3; this.healFx = 0; this.cast = null; this.castTarget = null;   // shaman: heals wounded allies
