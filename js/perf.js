@@ -4,7 +4,7 @@
 //   bakeMeshes: a creature's parts are merged inside each animated group (legs, arms, torso and head), so it still animates.
 //   updateCulling: chunks, props and creatures beyond the fog (nothing is visible past about 35 m) are not drawn.
 //   adaptive resolution: if the frame rate drops, the render resolution does, and recovers when it can.
-const PERF = { chunk: 24, cull: 38 };
+const PERF = { chunk: 24, cull: 38, arena: 60, floorBoss: false };
 
 
 // Merge items [{ g, cnt, mat4, color }] (cnt = vertices after un-indexing) into one geometry with position, normal and vertex colour,
@@ -107,19 +107,55 @@ function bakeMeshes(root, skip, ctx) {
 
 // Hide what is past the fog. chunks: from mergeStatic. Called every few frames and on arrival.
 function updateCulling(player, chunks, props, enemies) {
-  const px = player.x, pz = player.z, R = PERF.cull, R2 = R * R, RC = (R + PERF.chunk * 0.71) ** 2;
+  const px = player.x, pz = player.z, R = PERF.floorBoss ? Math.max(PERF.cull, PERF.arena) : PERF.cull, R2 = R * R, RC = (R + PERF.chunk * 0.71) ** 2;   // a boss floor (one big arena) always draws out to PERF.arena metres, and a boss itself is never culled
   for (const c of chunks) { const dx = c.x - px, dz = c.z - pz; c.group.visible = dx * dx + dz * dz < RC; }
   for (const o of props) { if (o.mesh && !o.gone) { const dx = o.x - px, dz = o.z - pz; o.mesh.visible = dx * dx + dz * dz < R2; } }
-  for (const e of enemies) { const dx = e.x - px, dz = e.z - pz; e.mesh.visible = dx * dx + dz * dz < R2; }
+  for (const e of enemies) { const dx = e.x - px, dz = e.z - pz; e.mesh.visible = e.boss || dx * dx + dz * dz < R2; }
 }
 
-// Adaptive resolution: watch the average frame time and trade pixels for frame rate.
-const quality = { max: Math.min(window.devicePixelRatio || 1, 1.5), cur: Math.min(window.devicePixelRatio || 1, 1.5), acc: 0, n: 0 };
+// Adaptive quality: watch the frame time over about a second and trade detail for frame rate, in stages. Judged against the display's own rate: the baseline
+// is the best window average of the last 10 s (clamped 4 to 34 ms), so a 144, 60 or 30 Hz display at its natural rate never degrades. Slow (over 26 ms and over
+// 1.6x the baseline, or over 38 ms whatever the baseline) steps down one stage per window: level 1, level 2 (shorter draw distance with denser fog so the cut is not seen,
+// fewer torch lights, far creatures not animated, a slower minimap), then the pixel ratio. Back within 1.15x of the baseline for two windows steps back up
+// (pixel ratio first); a step up that fails within 6 windows blocks stepping up again for 12. Spikes (a frame over 0.1 s: pause, tab away, floor build) are left out.
+// mode: 'auto', 'low' (level 2 always) or 'high' (never reduced); saved in localStorage (try/catch). No allocations: the table and the ring are built once.
+const QLEVELS = [{ cull: 38, torches: 4, mini: 3 }, { cull: 30, torches: 2, mini: 6 }, { cull: 24, torches: 1, mini: 6 }];
+const QSLOW = 26, QABS = 38, QWIN = 1, QSPIKE = 0.1;
+const QKEY = 'honeyhan-quality', QRING = new Float64Array(10);
+const quality = { max: Math.min(window.devicePixelRatio || 1, 1.5), cur: Math.min(window.devicePixelRatio || 1, 1.5), acc: 0, n: 0, t: 0, fast: 0, skip: 0, level: 0, mode: 'auto', cull: 38, torches: 4, mini: 3, fogK: 1, bn: 0, bi: 0, hold: 0, sinceUp: 99, base: 16.7 };
+function setQualityLevel(l) {
+  const q = QLEVELS[quality.level = l];
+  PERF.cull = quality.cull = q.cull; quality.torches = q.torches; quality.mini = q.mini; quality.fogK = QLEVELS[0].cull / q.cull;
+}
+function qualitySettle() { quality.acc = quality.n = quality.t = quality.fast = 0; quality.skip = 1; }   // a floor change: the next window is not a measurement
+function setQualityMode(m, apply) {
+  quality.mode = m; qualitySettle(); quality.bn = quality.bi = quality.hold = 0; quality.sinceUp = 99;
+  try { localStorage.setItem(QKEY, m); } catch (e) { }
+  if (m === 'low') { setQualityLevel(2); quality.cur = Math.min(quality.max, 1); } else { setQualityLevel(0); quality.cur = quality.max; }
+  if (apply) apply(quality.cur);
+}
+try { const m = localStorage.getItem(QKEY); if (m === 'low' || m === 'high') quality.mode = m; } catch (e) { }
+if (quality.mode !== 'auto') setQualityMode(quality.mode, null);
 function adaptQuality(dt, apply) {
-  if (dt > 0.25) return;                                   // a hiccup (a tab switch, a floor change) is not the frame rate
-  quality.acc += dt; quality.n++;
-  if (quality.n < 90) return;
-  const avg = quality.acc / quality.n * 1000; quality.acc = 0; quality.n = 0;
-  if (avg > 26 && quality.cur > 0.6) { quality.cur = Math.max(0.6, quality.cur - 0.2); apply(quality.cur); }
-  else if (avg < 15 && quality.cur < quality.max) { quality.cur = Math.min(quality.max, quality.cur + 0.2); apply(quality.cur); }
+  if (dt > QSPIKE || quality.mode !== 'auto') return;      // a hiccup is not the frame rate
+  quality.acc += dt; quality.n++; quality.t += dt;
+  if (quality.t < QWIN) return;
+  const avg = quality.acc / quality.n * 1000; quality.acc = 0; quality.n = 0; quality.t = 0;
+  QRING[quality.bi] = avg; quality.bi = (quality.bi + 1) % 10; if (quality.bn < 10) quality.bn++;
+  let base = 1e9; for (let i = 0; i < quality.bn; i++) if (QRING[i] < base) base = QRING[i];
+  base = quality.base = Math.min(34, Math.max(4, base));
+  quality.sinceUp++;
+  if (quality.skip) { quality.skip = 0; return; }          // the window right after a change is still settling
+  if (quality.hold > 0) quality.hold--;
+  if (avg > QSLOW && (avg > base * 1.6 || avg > QABS)) {
+    quality.fast = 0;
+    if (quality.sinceUp < 6) quality.hold = 12;            // we stepped up and it was too much: stay down a while
+    if (quality.level < 2) { setQualityLevel(quality.level + 1); apply(quality.cur); quality.skip = 1; }
+    else if (quality.cur > 0.6) { quality.cur = Math.max(0.6, quality.cur - 0.2); apply(quality.cur); quality.skip = 1; }
+  } else if (avg <= base * 1.15 + 0.5) {
+    if (++quality.fast < 2 || quality.hold > 0) return;    // hysteresis: two windows near the baseline in a row
+    quality.fast = 0;
+    if (quality.cur < quality.max) { quality.cur = Math.min(quality.max, quality.cur + 0.2); apply(quality.cur); quality.skip = 1; quality.sinceUp = 0; }
+    else if (quality.level > 0) { setQualityLevel(quality.level - 1); apply(quality.cur); quality.skip = 1; quality.sinceUp = 0; }
+  } else quality.fast = 0;
 }

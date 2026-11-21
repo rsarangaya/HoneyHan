@@ -452,7 +452,7 @@ function freeMaterial(m) { if (m.userData.shared) return; if (m.map && !(m.map.u
 // floor of it is left (pruneThemeTextures, after a stage change).
 // The wall, floor and ceiling materials are shared the same way (a floor that is rebuilt would otherwise free the shader programs
 // and compile them again on its first frame).
-const themeTex = new Map();
+const themeTex = new Map(); let pinTheme = null;
 function themeTexture(kind, make) {
   const key = theme.name + '|' + kind;
   let t = themeTex.get(key); if (!t) { t = make(); t.userData = { shared: true }; themeTex.set(key, t); }
@@ -461,12 +461,18 @@ function themeTexture(kind, make) {
 const sharedLams = new Map();   // plain lit materials of the stairs, shared by every floor
 function sharedLam(c) { let m = sharedLams.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); m.userData.shared = true; sharedLams.set(c, m); } return m; }
 function pruneThemeTextures() {
-  const live = new Set([theme.name]);
+  const live = new Set([theme.name]); if (pinTheme) live.add(pinTheme);   // pinTheme: the next stage's theme, its textures built ahead on the boss floor
   for (const k of Object.keys(stageCaches)) if (Object.keys(stageCaches[k]).length) live.add((+k === FINAL_STAGE ? FINAL_THEME : stageThemes[k - 1]).name);
   for (const [key, t] of themeTex) if (!live.has(key.split('|')[0])) { t.dispose(); themeTex.delete(key); }   // (a material's map is its own entry, so disposing both is fine)
 }
 
+// The three big canvas textures of the current theme (the slow part of a theme's first floor); warmTheme builds them ahead in idle time.
+const themeWallTex = () => themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
+const themeFloorTex = () => themeTexture('floor', () => { const t = TEX_GENERATORS.floor[theme.tex.floor](theme.pal.floor); t.repeat.set(1 / TILE, 1 / TILE); return t; });
+const themeCeilTex = () => themeTexture('ceil', () => TEX_GENERATORS.ceil[theme.tex.ceil](theme.pal.ceil));
+function applyFog() { if (scene.fog) scene.fog.density = theme.fog.density * (PERF.floorBoss ? 1 : quality.fogK); }   // (a boss arena always draws out to PERF.arena m, so its fog stays as it is)   // a shorter draw distance (js/perf.js quality level) gets denser fog, so the cut is not seen
 function buildFloor() {
+  PERF.floorBoss = !!floor.boss;
   wallKinds = new Map();
   knock.m = 0; player.dashS.on = false; bossLanesClear(); bossPuddlesClear(); bossFlamesClear();   // no knockback, ice lane, ale puddle or flame patch carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
@@ -487,7 +493,7 @@ function buildFloor() {
     for (let dy = -1; dy <= 1 && !touches; dy++) for (let dx = -1; dx <= 1; dx++) if (!solid(x + dx, y + dy)) { touches = true; break; }
     if (touches) wallPos.push([x, y]);
   }
-  const wallTex = themeTexture('wall', () => TEX_GENERATORS.wall[theme.tex.wall](theme.pal.wall));
+  const wallTex = themeWallTex();
   const round = theme.wallStyle !== 'box' && WALL_GEO[theme.wallStyle] ? theme.wallStyle : null;   // 'shrub' | 'tree' | 'rock': lumpy blobs, no boxes
   const m = new THREE.Matrix4(), wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0), tint = new THREE.Color();
   const wallMesh = (list, mat, kind, extra = 0) => {     // one InstancedMesh per wall material: at most 2 (plus the safe room's) draws. extra: spare instances at the end (the Library's sliding shelves)
@@ -540,10 +546,10 @@ function buildFloor() {
   hole.moveTo(stairBox.x0, -stairBox.z0); hole.lineTo(stairBox.x0, -stairBox.z1);
   hole.lineTo(stairBox.x1, -stairBox.z1); hole.lineTo(stairBox.x1, -stairBox.z0);
   floorShape.holes.push(hole);
-  const floorTex = themeTexture('floor', () => { const t = TEX_GENERATORS.floor[theme.tex.floor](theme.pal.floor); t.repeat.set(1 / TILE, 1 / TILE); return t; });
+  const floorTex = themeFloorTex();
   const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), themeTexture('floormat', () => new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 })));
   fl.rotation.x = -Math.PI / 2;
-  const ceilMat = () => themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: themeTexture('ceil', () => TEX_GENERATORS.ceil[theme.tex.ceil](theme.pal.ceil)), shininess: 2, specular: 0x050505 }));
+  const ceilMat = () => themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: themeCeilTex(), shininess: 2, specular: 0x050505 }));
   group.add(fl);
   if (theme.sky) {   // open air: no ceiling plane, one unlit sky dome that follows the camera (frame loop; shared geometry, material and texture, never disposed per floor)
     const sky = new THREE.Mesh(themeTexture('skygeo', () => new THREE.SphereGeometry(60, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)),
@@ -636,6 +642,7 @@ function buildFloor() {
   scene.add(group);
   scene.background = new THREE.Color(theme.pal.fog);
   scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density);
+  applyFog();
 }
 
 // ---- Frozen Chapel footprints: the last 8 steps you took in the snow, one merged quad mesh over a ring buffer (no allocation after the floor is built).
@@ -861,11 +868,11 @@ function buildTorches() {
 }
 const nearT = new Array(4).fill(null), nearD = new Float64Array(4);   // the nearest lights, nearest first (reused: no per-call arrays or sort)
 function updateTorches(now) {
-  let cnt = 0;
+  let cnt = 0; const K = quality.torches;               // 4 lights, fewer at the lower quality levels (the spare lights stay in the scene at intensity 0: the shader never changes)
   for (let i = 0; i < torchPts.length; i++) {
     const t = torchPts[i], d = (t.lx - player.x) ** 2 + (t.lz - player.z) ** 2;
-    if (cnt === 4 && d >= nearD[3]) continue;
-    let j = cnt < 4 ? cnt++ : 3;                       // insertion into the sorted top 4
+    if (cnt === K && d >= nearD[K - 1]) continue;
+    let j = cnt < K ? cnt++ : K - 1;                   // insertion into the sorted top K
     while (j > 0 && nearD[j - 1] > d) { nearD[j] = nearD[j - 1]; nearT[j] = nearT[j - 1]; j--; }
     nearD[j] = d; nearT[j] = t;
   }
@@ -1900,6 +1907,7 @@ function loadFloor(n, c) {
   scene.add(group);
   enemies.forEach(e => { e.cone.visible = dev.on; });
   Enemy.all = enemies; player.props = propObjs; player.mobs = enemies;
+  PERF.floorBoss = !!floor.boss; applyFog(); qualitySettle();
   updateCulling(player, cullChunks, propObjs, enemies);
 }
 // Put the player beside the stairs they came by: 'down' = came down, so appear by the stairs up; 'up' = came up, by the stairs down.
@@ -1930,12 +1938,36 @@ function startFloor(n) {
   else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
 const bossMsg = () => stage === FINAL_STAGE ? 'The final chamber, open to the night sky. Something huge sleeps on the dais. One healing potion hides along the walls.' : 'The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.';
+// Staged floor build, the safe part: in idle time while you play floor n, floor n + 1's tile layout is generated (generateFloor is deterministic from the seed
+// and these options, and touches no shared state but its own, so when it runs changes nothing) and the next stage's big textures are built one per idle slice.
+// The result is used once, only if its key still matches, and dropped on any stage or floor jump. The gameplay rng is seeded on entry exactly as before.
+let pregen = null, idleGen = 0;
+const floorGenArgs = n => { const final = stage === FINAL_STAGE; return [stageSeed, final ? MAX_FLOOR : n, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) }]; };
+const genKey = a => a[0] + '|' + a[1] + '|' + JSON.stringify(a[2]);
+const busyNow = () => { if (perfStats.dt > 0.02) return true; for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead && enemies[i].state === 'alerted') return true; return false; };   // a slow frame or a fight: not the moment to generate
+const idle = (fn, g, tries = 0) => {
+  const run = d => { if (g !== idleGen) return; if (tries < 3 && busyNow() && !(d && d.didTimeout)) return idle(fn, g, tries + 1); fn(); };   // (three tries, then the safety timeout: it runs anyway)
+  if (window.requestIdleCallback) requestIdleCallback(run, { timeout: tries ? 1500 : 4000 }); else setTimeout(run, 150);
+};
+function takeFloor(n) {                                  // the pre-generated layout if there is one for exactly this floor, else generated now
+  const a = floorGenArgs(n), p = pregen; pregen = null;
+  return p && p.key === genKey(a) ? p.floor : generateFloor(a[0], a[1], a[2]);
+}
+function prefetchNext(n) {
+  const g = ++idleGen; pregen = null; pinTheme = null;                    // a new floor: whatever was pending is stale
+  if (stage === FINAL_STAGE) return;
+  if (n < MAX_FLOOR) idle(() => { const a = floorGenArgs(n + 1), t0 = performance.now(); pregen = { key: genKey(a), floor: generateFloor(a[0], a[1], a[2]) }; perfStats.pregenMs = performance.now() - t0; }, g);
+  else {                                                 // the boss floor: build the next stage's textures ahead, one per idle slice
+    const nt = stage + 1 === FINAL_STAGE ? FINAL_THEME : stageThemes[stage]; pinTheme = nt.name;
+    for (const mk of [themeWallTex, themeFloorTex, themeCeilTex]) idle(() => { const keep = theme; theme = nt; try { mk(); } finally { theme = keep; } }, g);
+  }
+}
 function generateAndEnter(n, arrive) {
   clearBombs();
   gameRng = makeRng(((stageSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
   floorNum = n;
   const final = stage === FINAL_STAGE, gn = final ? MAX_FLOOR : n;   // the final stage's one floor is generated as a floor 5 arena
-  floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) });
+  floor = takeFloor(n);
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   spreadEnemies(floor, stageSeed, gn);                      // then spread them over their rooms (per-room cap, spaced spawns and patrol ends)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
@@ -1959,6 +1991,8 @@ function generateAndEnter(n, arrive) {
   baseGuards = floor.enemies.length;
   respawnQ = [];                                      // replacements for killed guards (updateRespawn)
   floorBanner(n);
+  qualitySettle();
+  prefetchNext(n);
 }
 
 // Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
@@ -2139,7 +2173,7 @@ function useStage(s) {
   prisonerRun = prisonerRuns[s] || null;
   for (const l of torchLights) l.color.setHex(theme.pal.light);
   torch.color.setHex(theme.pal.light);
-  scene.background = new THREE.Color(theme.pal.fog); scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density);
+  scene.background = new THREE.Color(theme.pal.fog); scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density); applyFog();
   hud.theme.textContent = theme.name;
 }
 // Memory: at most 6 floors stay cached. Going down into stage cur keeps only the previous stage's boss floor (its safe room); climbing keeps the stage you left on its floor 1.
@@ -2165,7 +2199,7 @@ function changeStage(s, dir) {
   flash(s === FINAL_STAGE ? 'The final stage. Something ancient sleeps under the open sky.' : dir === 'up' ? `You climb back up to stage ${s}: ${theme.name}, the safe room.` : `Stage ${s} of ${STAGES}: ${theme.name}. ${floor.boss ? '' : 'Find the stairs.'}`);
   allyArrive();
   hunger.fight = 0;
-  pruneThemeTextures();                                // free the textures of themes with no floor left
+  pinTheme = null; pruneThemeTextures();               // free the textures of themes with no floor left (the pinned next theme is the current one now)
 }
 // The stairs in the safe room lead to the next stage; after the last stage (the final boss) the run is over.
 function enterNextStage() { if (stage < FINAL_STAGE) changeStage(stage + 1, 'down'); else finishRun(); }
@@ -2175,7 +2209,7 @@ function startStage(s) {
   s = Math.max(1, Math.min(FINAL_STAGE, s | 0));
   for (const k of Object.keys(stageCaches)) { disposeCache(stageCaches[k]); delete stageCaches[k]; }
   allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
-  useStage(s); startFloor(1); pruneThemeTextures();
+  useStage(s); pinTheme = null; startFloor(1); pruneThemeTextures();
 }
 function finishRun() {
   state = 'won';
@@ -2264,11 +2298,12 @@ function updateAssist(under, mt) {
   if (hearRing.scale.x !== hearR) hearRing.scale.set(hearR, 1, hearR);
 }
 
+function qualityApply(r) { applyFog(); if (renderer.getPixelRatio() !== r) { renderer.setPixelRatio(r); resize(); } }
 let last = performance.now(), frameNo = 0, dazeOn = false, frameCount = 0;
 const BASE_FOV = 75; let fovNow = BASE_FOV;
-const perfStats = { logic: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
+const perfStats = { logic: 0, dt: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
 function frame(now) {
-  const dt = (now - last) / 1000; last = now; const tl0 = performance.now();
+  const dt = (now - last) / 1000; last = now; perfStats.dt = dt; const tl0 = performance.now();
   if (state === 'play') {
     player.update(dt, floor);
     inv.update(dt);
@@ -2329,18 +2364,18 @@ function frame(now) {
   frameCount++;
   if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);
   if (frameCount % 2 === 0) updateTorches(now);                  // the lights drift slowly: every other frame is plenty
-  if (frameCount % 3 === 0) { if (state === 'play' && theme.mechanic.kind === 'brush') updateBrush(); drawMinimap(3); }                      // and the minimap three times a second per 9 frames, not every frame
+  if (frameCount % quality.mini === 0) { if (state === 'play' && theme.mechanic.kind === 'brush') updateBrush(); drawMinimap(quality.mini); }                      // and the minimap three times a second per 9 frames, not every frame
   updateHud();
   perfStats.logic = perfStats.logic * 0.95 + (performance.now() - tl0) * 0.05;
   if (hearRing.visible && state !== 'play') hearRing.visible = false;
-  if (!params.has('norender')) { renderer.render(scene, camera); if (state === 'play') adaptQuality(dt, r => { renderer.setPixelRatio(r); resize(); }); }   // ?norender=1: tests skip the (software) drawing and keep all the game logic
+  if (!params.has('norender')) { renderer.render(scene, camera); if (state === 'play') adaptQuality(dt, qualityApply); }   // ?norender=1: tests skip the (software) drawing and keep all the game logic
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; },
+  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, quality, qualityApply, setQualityMode: m => setQualityMode(m, qualityApply), adaptQuality, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

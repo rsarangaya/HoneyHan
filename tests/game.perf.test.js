@@ -128,5 +128,56 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     return { ornate: targetInfo(o), wooden: targetInfo(w), tierColor: TIERS[3].color };
   });
   check('the chest prompt names its grade, and better chests take longer', /Ornate Chest/.test(prompt.ornate.label) && /Wooden Chest/.test(prompt.wooden.label) && prompt.ornate.time > prompt.wooden.time, JSON.stringify([prompt.ornate, prompt.wooden]));
+
+  // 7. Adaptive quality stages, judged against the display's own rate: steady 144 / 60 / 30 Hz never degrades; a 2 s hitch is ignored; sustained slowness steps down one stage at a time
+  // and recovers when frames return to the baseline; one fast window does not step back up. Mode Low pins level 2, High pins level 0; the choice is saved.
+  const qa = await page.evaluate(async () => {
+    game.startFloor(2); await T.sleep(80);
+    const Q = game.quality, out = {}, feed = (dt, sec) => { const n = Math.round(sec / dt); for (let i = 0; i < n; i++) game.adaptQuality(dt, game.qualityApply); };
+    const snap = () => ({ level: Q.level, cull: PERF.cull, torches: Q.torches, mini: Q.mini, ratio: renderer.getPixelRatio(), fog: scene.fog.density });
+    const same = (a, b) => a.level === b.level && a.ratio === b.ratio;
+    game.setQualityMode('auto'); const base = snap(); out.base = base; out.themeFog = theme.fog.density;
+    out.steady = {};
+    for (const [name, dt] of [['144', 1 / 144], ['60', 1 / 60], ['30', 1 / 30]]) { game.setQualityMode('auto'); feed(dt, 30); out.steady[name] = same(snap(), base); }
+    game.setQualityMode('auto'); feed(1 / 60, 15); feed(0.3, 2); feed(1 / 60, 10); out.hitch = same(snap(), base);   // a 2 s hitch (frames of 0.3 s: floor build, tab away) is left out
+    game.setQualityMode('auto'); feed(1 / 60, 12);
+    out.log = [];
+    feed(0.04, 1.05); out.log.push(Q.level); feed(0.04, 1.05); out.log.push(Q.level); feed(0.04, 1.05); out.log.push(Q.level);   // level 1, settling, level 2
+    const s2 = snap(); out.s2 = s2;
+    feed(0.04, 3.2); out.px = snap().ratio;
+    game.draw(); let lit = 0; for (const l of torchLights) if (l.intensity > 0) lit++; out.lit = lit;
+    feed(1 / 60, 1.05); out.noFlap = snap().level === s2.level && snap().ratio === out.px;                     // one window back at the baseline: nothing steps up yet
+    feed(1 / 60, 30); out.end = snap(); out.max = Q.max;
+    game.setQualityMode('low'); out.low = snap(); out.saved = localStorage.getItem('honeyhan-quality');
+    game.setQualityMode('high'); out.high = snap();
+    game.setQualityMode('auto'); out.auto = snap();
+    return out;
+  });
+  check('steady 144, 60 and 30 Hz frame times never degrade quality (judged against the display rate)', qa.steady['144'] && qa.steady['60'] && qa.steady['30'], JSON.stringify(qa.steady));
+  check('a 2 s hitch (spike frames) is ignored', qa.hitch);
+  check('sustained 40 ms frames lower quality one stage at a time (level 1, settling, level 2)', JSON.stringify(qa.log) === '[1,1,2]', JSON.stringify(qa.log));
+  check('level 2: draw distance 24 m, 1 torch light, minimap every 6th frame, fog denser by the same ratio', qa.s2.cull === 24 && qa.s2.torches === 1 && qa.s2.mini === 6 && Math.abs(qa.s2.fog - qa.themeFog * 38 / 24) < 1e-6, JSON.stringify(qa.s2));
+  check('still slow at level 2: the pixel ratio drops too, and only one torch light is lit', qa.px < qa.base.ratio && qa.lit <= 1, 'ratio ' + qa.base.ratio + ' -> ' + qa.px + ', lit ' + qa.lit);
+  check('one window back at the baseline does not step back up (no flapping)', qa.noFlap);
+  check('frames back at the baseline restore everything (pixel ratio, level 0, 38 m, 4 torches, original fog)', qa.end.level === 0 && qa.end.cull === 38 && qa.end.torches === 4 && qa.end.mini === 3 && Math.abs(qa.end.ratio - qa.max) < 1e-9 && Math.abs(qa.end.fog - qa.themeFog) < 1e-9, JSON.stringify(qa.end));
+  check('Low pins level 2 and is saved; High pins level 0; Auto starts at level 0', qa.low.level === 2 && qa.saved === 'low' && qa.high.level === 0 && qa.high.ratio === qa.max && qa.auto.level === 0);
+
+  // 8. Bosses and their arena are never culled, even at the lowest quality level.
+  const bc = await page.evaluate(async () => {
+    const out = {};
+    game.setQualityMode('low');
+    for (const [name, go] of [['stage 1 boss floor', () => game.startFloor(5)], ['final stage', () => game.startStage(FINAL_STAGE)]]) {
+      go(); await T.sleep(80);
+      const boss = game.enemies.find(e => e.boss), P = game.player;
+      P.x = Math.min(game.floor.w * TILE - 2, boss.x + 40); P.z = boss.z; game.draw();
+      const far = propObjs.filter(o => o.mesh && !o.gone && o.r > 0 && Math.hypot(o.x - P.x, o.z - P.z) > 26 && Math.hypot(o.x - P.x, o.z - P.z) < 50);
+      out[name] = { boss: !!boss, bossVisible: boss.mesh.visible, dist: Math.hypot(boss.x - P.x, boss.z - P.z), far: far.length, farVisible: far.filter(o => o.mesh.visible).length, fog: scene.fog.density, themeFog: theme.fog.density };
+    }
+    game.startStage(1); game.startFloor(2); await T.sleep(60); out.regular = { floorBoss: PERF.floorBoss, cull: PERF.cull };
+    game.setQualityMode('auto');
+    return out;
+  });
+  for (const [k, v] of Object.entries(bc)) if (v.boss !== undefined) check('at level 2 the boss and the arena props stay drawn on the ' + k, v.boss && v.bossVisible && v.farVisible === v.far && Math.abs(v.fog - v.themeFog) < 1e-9, JSON.stringify(v));
+  check('an ordinary floor is not a boss floor (24 m cull at level 2)', !bc.regular.floorBoss && bc.regular.cull === 24, JSON.stringify(bc.regular));
   await page.close();
 });

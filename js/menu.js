@@ -134,7 +134,8 @@ const pauseMenu = (() => {
     const row = (act, label, on, txt) => `<div class="row"><span>${label}</span><button data-act="${act}" class="${on ? 'listen' : ''}">${txt}</button></div>`;
     return `<div class="note">Easy only unlocks two aids. Damage, enemy senses and everything else stay the same. You can switch any time.</div>
       ${row('diffN', 'Normal', !assist.easy, assist.easy ? 'Choose' : 'Chosen')}${row('diffE', 'Easy (assists)', assist.easy, assist.easy ? 'Chosen' : 'Choose')}
-      ${assist.easy ? row('aVis', 'Show enemy vision zones', assist.vision, assist.vision ? 'On' : 'Off') + row('aHear', 'Show hearing range (walking, not crouched)', assist.hearing, assist.hearing ? 'On' : 'Off') : '<div class="row dim"><span>Enemy vision zones and hearing range: Easy only</span></div>'}`;
+      ${assist.easy ? row('aVis', 'Show enemy vision zones', assist.vision, assist.vision ? 'On' : 'Off') + row('aHear', 'Show hearing range (walking, not crouched)', assist.hearing, assist.hearing ? 'On' : 'Off') : '<div class="row dim"><span>Enemy vision zones and hearing range: Easy only</span></div>'}
+      ${row('qual', 'Graphics quality (Auto lowers detail only when the frame rate drops; Low always; High never)', true, quality.mode === 'auto' ? 'Auto' : quality.mode === 'low' ? 'Low' : 'High')}`;
   }
   function diffLabel() { const b = document.getElementById('welcomeDiff'); if (b) b.textContent = 'Difficulty: ' + (assist.easy ? 'Easy (assists)' : 'Normal'); }
   function setDiff(easy) { assist.easy = easy; assist.save(); diffLabel(); }
@@ -193,6 +194,7 @@ const pauseMenu = (() => {
     else if (t.dataset.act === 'resume') return close();
     else if (t.dataset.act === 'diffN') setDiff(false);
     else if (t.dataset.act === 'diffE') setDiff(true);
+    else if (t.dataset.act === 'qual') setQualityMode(quality.mode === 'auto' ? 'low' : quality.mode === 'low' ? 'high' : 'auto', qualityApply);
     else if (t.dataset.act === 'aVis') { assist.vision = !assist.vision; assist.save(); }
     else if (t.dataset.act === 'aHear') { assist.hearing = !assist.hearing; assist.save(); }
     render();

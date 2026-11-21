@@ -1099,6 +1099,7 @@ class Enemy {
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;
       return;
     }
+    if (quality.level && !m.visible && !this.boss) { this.hitT = Math.max(0, this.hitT - dt); this.healFx = Math.max(0, this.healFx - dt); return; }   // adaptive quality: a creature past the draw distance is not animated (js/perf.js)
     if (this.bm) this.bm.pose(this, dt);
     else if (this.quad) this.poseQuad(dt);
     else {
