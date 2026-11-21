@@ -96,9 +96,9 @@ run('Weapon models, floppy spear, chest lids, potion shelf', async ({ open, chec
       lid.children.forEach(m => { if (!m.isMesh) return; const t = m.geometry.type; if (t === 'CylinderGeometry' && m.geometry.parameters.thetaLength < 4) { dome++; if (m.material.side !== THREE.DoubleSide) out.bad.push(label + ' dome single sided'); } if (t === 'BoxGeometry' && m.geometry.parameters.width > 1) plate++; });
       out.n++; if (!dome || !plate) out.bad.push(label + ` dome ${dome} plate ${plate}`);
     };
-    for (const kind of ['chest', 'vaultchest']) for (let t = 0; t < 5; t++) for (const locked of [false, true]) { const o = makeProp({ kind, tier: t, seed: 4 + t, x: 1, y: 1, locked, yaw: 0 }); lidOk(o.lid, `${kind}${t}${locked ? 'L' : ''}`); }
+    for (const kind of ['chest', 'vaultchest']) for (let t = 0; t < 5; t++) for (const locked of [false, true]) { const o = makeProp({ kind, tier: t, seed: 4 + t, x: 1, y: 1, locked, yaw: 0 }, true); lidOk(o.lid, `${kind}${t}${locked ? 'L' : ''}`); }
     const e = new Enemy({ x: 3, y: 3, route: [{ x: 3, y: 3 }, { x: 3, y: 3 }], seed: 1, type: 'mimic', tier: 3 }, game.floor); lidOk(e.lid, 'mimic');
-    const o = makeProp({ kind: 'chest', tier: 2, seed: 9, x: 1, y: 1, yaw: 0 }); out.bands = o.lid.children.filter(m => m.isMesh && m.geometry.type === 'CylinderGeometry').every(m => m.material.side === THREE.DoubleSide);
+    const o = makeProp({ kind: 'chest', tier: 2, seed: 9, x: 1, y: 1, yaw: 0 }, true); out.bands = o.lid.children.filter(m => m.isMesh && m.geometry.type === 'CylinderGeometry').every(m => m.material.side === THREE.DoubleSide);
     return out;
   });
   check('every chest tier, vault chest, locked chest and the mimic have a double-sided dome and a flat underside plate on the lid', c.bad.length === 0 && c.n === 21, c.bad.slice(0, 4).join(' | ') + ' n=' + c.n);

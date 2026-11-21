@@ -101,10 +101,10 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   // 6. Props are round: barrels are lathes with hoops, chests have domed lids, and the five chest grades look different.
   const props = await page.evaluate(() => {
     const out = { tiers: [] }, kinds = o => { const k = {}; o.mesh.traverse(c => { if (c.isMesh) k[c.geometry.type] = (k[c.geometry.type] || 0) + 1; }); return k; };
-    const barrel = makeProp({ kind: 'barrel', x: 3, y: 3, seed: 5, opened: false, yaw: 0 });
+    const barrel = makeProp({ kind: 'barrel', x: 3, y: 3, seed: 5, opened: false, yaw: 0 }, true);   // (raw: the parts, before they are baked)
     out.barrel = kinds(barrel);
     for (let t = 0; t <= 4; t++) {
-      const c = makeProp({ kind: 'chest', x: 3, y: 3, seed: 5, opened: false, yaw: 0, tier: t });
+      const c = makeProp({ kind: 'chest', x: 3, y: 3, seed: 5, opened: false, yaw: 0, tier: t }, true);
       let body = null; c.mesh.traverse(m => { if (m.isMesh && !body) body = m.material.color.getHex(); });
       out.tiers.push({ t, lid: !!c.lid, body, kinds: kinds(c), mats: c.mats.length });
     }
@@ -118,6 +118,37 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   check('every chest has a hinged lid, and the five grades have different bodies', props.tiers.every(t => t.lid) && new Set(props.tiers.map(t => t.body)).size === 5, props.tiers.map(t => t.body.toString(16)).join(' '));
   check('a chest lid is a half cylinder (domed)', props.tiers.every(t => (t.kinds.CylinderGeometry || 0) >= 1));
   check('the golden chest has an aura and the wooden one does not', (props.tiers[4].kinds.ConeGeometry || 0) >= 1 && !props.tiers[0].kinds.ConeGeometry);
+  // 6a. Props are baked: a prop is a few meshes (it was 13 to 23 for a chest, 12 for a rack, 19 for a pantry), the lid still hinges, a searched prop still dims.
+  const baked = await page.evaluate(() => {
+    const n = o => { let k = 0; o.mesh.traverse(m => { if (m.isMesh) k++; }); return k; }, out = {};
+    for (const [key, p] of [['chest', { kind: 'chest', tier: 0 }], ['chest4', { kind: 'chest', tier: 4, locked: true }], ['vault', { kind: 'vaultchest' }], ['barrel', { kind: 'barrel' }], ['rack', { kind: 'rack', seed: 2 }], ['pantry', { kind: 'pantry' }], ['rubble', { kind: 'rubble' }]]) out[key] = n(makeProp(Object.assign({ x: 3, y: 3, seed: 5, opened: false, yaw: 0 }, p)));
+    const c = makeProp({ kind: 'chest', tier: 1, x: 3, y: 3, seed: 5, yaw: 0 }); let dbl = 0, single = 0; c.lid.traverse(m => { if (m.isMesh) (m.material.side === THREE.DoubleSide ? dbl++ : single++); });
+    const b = makeProp({ kind: 'barrel', x: 3, y: 3, seed: 5, yaw: 0 }), before = b.mats[0].color.getHex(); markOpened(b);
+    const m = makeProp({ kind: 'chest', tier: 1, x: 3, y: 3, seed: 5, yaw: 0 }, true);
+    return { out, lid: !!c.lid, lidDouble: dbl, lidSingle: single, dims: b.mats.length === 1 && b.mats[0].color.getHex() < before, rawMesh: n(m) };
+  });
+  check('a chest bakes to at most 7 meshes, a barrel to 1, a rack to 3, a pantry and a rubble heap to 1', baked.out.chest <= 7 && baked.out.chest4 <= 8 && baked.out.vault <= 7 && baked.out.barrel === 1 && baked.out.rack <= 3 && baked.out.pantry === 1 && baked.out.rubble === 1, JSON.stringify(baked.out));
+  check('a baked chest keeps its hinged lid, every lid part is double sided (no see-through dome), and the raw (mimic) chest stays in parts', baked.lid && baked.lidSingle === 0 && baked.lidDouble >= 1 && baked.rawMesh > 10, JSON.stringify(baked));
+  check('a searched-out barrel still dims (its one plain material)', baked.dims, '');
+  // 6a2. Every lootable kind shows it was searched: plain props dim through materials of their own (no shared material is touched), a chest opens its lid; and a rebuilt floor keeps that look.
+  const dim = await page.evaluate(async () => {
+    const out = {}, lum = o => { let s = 0, shared = 0; o.mesh.traverse(m => { if (m.isMesh) { s += m.material.color.r + m.material.color.g + m.material.color.b + (m.material.emissive ? m.material.emissive.r + m.material.emissive.g + m.material.emissive.b : 0); if (m.material.userData.shared) shared++; } }); return { s, shared }; };
+    for (const kind of ['barrel', 'rack', 'pantry', 'rubble', 'potions']) {
+      let worst = 1, shared = 0;
+      for (let sd = 1; sd <= 4; sd++) { const o = makeProp({ kind, x: 3, y: 3, seed: sd, yaw: 0 }), a = lum(o); markOpened(o); const b = lum(o); worst = Math.min(worst, 1 - b.s / a.s); shared = Math.max(shared, a.shared); if (kind !== 'barrel') {} }
+      out[kind] = { drop: +worst.toFixed(2), shared };
+    }
+    const c = makeProp({ kind: 'chest', tier: 1, x: 3, y: 3, seed: 5, yaw: 0 }); markOpened(c); out.chest = c.lid.rotation.x;
+    game.startFloor(1); await T.sleep(60);
+    const ps = game.floor.props.filter(p => !p.mimic && p.kind !== 'chest' && p.kind !== 'vaultchest');
+    for (const p of game.floor.props) p.opened = true;
+    buildFloor(); await T.sleep(30);
+    const dimmed = propObjs.filter(o => o.p.kind !== 'door' && o.p.kind !== 'decor' && o.p.opened && !o.p.mimic && o.lid === null && o.mats.length).map(o => o.mats[0].color.getHex() < 0x7f7f7f * 0x010101 || o.mats[0].color.r < 1);
+    out.rebuilt = { n: ps.length, dimmed: dimmed.length, all: dimmed.every(Boolean), lids: propObjs.filter(o => o.lid && !o.p.mimic).every(o => o.lid.rotation.x < -1) };
+    return out;
+  });
+  check('every plain lootable (barrel, rack, pantry, rubble, potion shelf) dims by at least 30% when searched out, using only its own materials', ['barrel', 'rack', 'pantry', 'rubble', 'potions'].every(k => dim[k].drop >= 0.3 && (k === 'potions' || dim[k].shared === 0)) && dim.chest < -1, JSON.stringify(dim));
+  check('a rebuilt floor keeps searched-out props looking searched out (dimmed, lids open)', dim.rebuilt.dimmed > 0 && dim.rebuilt.all && dim.rebuilt.lids, JSON.stringify(dim.rebuilt));
   const boxy = ['table', 'bed', 'hearth', 'cauldron', 'sacks', 'statue', 'urn', 'altar', 'crates', 'barrels', 'bookshelf'].filter(k => props[k].round <= props[k].box * 0.15 && props[k].round < 3);
   check('furniture is built from rounded pieces (no piece is mostly plain boxes)', boxy.length === 0, 'still boxy: ' + boxy.join(', '));
 
@@ -179,5 +210,20 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   });
   for (const [k, v] of Object.entries(bc)) if (v.boss !== undefined) check('at level 2 the boss and the arena props stay drawn on the ' + k, v.boss && v.bossVisible && v.farVisible === v.far && Math.abs(v.fog - v.themeFog) < 1e-9, JSON.stringify(v));
   check('an ordinary floor is not a boss floor (24 m cull at level 2)', !bc.regular.floorBoss && bc.regular.cull === 24, JSON.stringify(bc.regular));
+
+  // 9. Visual-audit fixes: the stairs are merged (no loose step meshes), every door style is a few meshes, a wand mark hides behind walls, the torch flame is a teardrop with a core.
+  const au = await page.evaluate(async () => {
+    game.startStage(2); game.startFloor(2); await T.sleep(100);
+    const loose = group.children.filter(o => o.isMesh && o.geometry.type === 'BoxGeometry').length;
+    const doors = {}; for (const st of Object.keys(DOOR_BUILDERS)) { const o = makeDoor({ style: st, x: 0, y: 0, axis: 'z', lock: 1, room: 0, keyLabel: 'k' }); let n = 0; o.mesh.traverse(m => { if (m.isMesh) n++; }); doors[st] = n; }
+    const e = game.enemies.find(x => !x.boss && !x.T.mimic) || game.enemies[0]; e.dormant = false;
+    e.st.apply('slow', 5); e.sync(0.016); const markTested = e.icon.material.depthTest;
+    e.st.clear('slow'); e.set('alerted'); e.sync(0.016); const awareSeen = e.icon.material.depthTest;
+    return { loose, doors, markTested, awareSeen, flame: TORCH_FLAME.type, core: !!TORCH_CORE };
+  });
+  check('the stairs and floor boxes are merged: no loose box meshes under the floor group', au.loose === 0, JSON.stringify(au));
+  check('every door style is at most 4 meshes (the plank door was 12)', Object.values(au.doors).every(n => n <= 4), JSON.stringify(au.doors));
+  check('a wand status mark is depth tested (hides behind walls); the awareness mark still shows through', au.markTested === true && au.awareSeen === false, JSON.stringify(au));
+  check('the torch flame is a lathe teardrop with a hot core', au.flame === 'LatheGeometry' && au.core, JSON.stringify(au));
   await page.close();
 });

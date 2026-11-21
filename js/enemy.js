@@ -561,7 +561,7 @@ class Enemy {
   // The mimic: the real chest model (makeProp in js/props.js) so it looks exactly like the chest it replaces, plus the tells and,
   // once awake, teeth and a tongue. Parts animate (the lid, the lunge), so it is never baked or merged into a static chunk.
   buildMimic(m) {
-    const o = makeProp({ kind: 'chest', tier: this.spec.tier | 0, seed: this.seed, x: 0, y: 0, yaw: 0 });
+    const o = makeProp({ kind: 'chest', tier: this.spec.tier | 0, seed: this.seed, x: 0, y: 0, yaw: 0 }, true);
     const inner = o.mesh.children[0]; o.mesh.remove(inner); inner.position.set(0, 0, 0);
     const body = this.body = new THREE.Group(); body.rotation.y = Math.PI; body.add(inner); m.add(body);   // the chest faces +z, an enemy faces -z
     this.lid = o.lid; this.mats = o.mats; this.baseEm = o.mats.map(x => x.emissive.getHex());
@@ -1149,6 +1149,7 @@ class Enemy {
     const sk = this.dead ? null : this.sleepT > 0 ? 'z' : this.rageT > 0 ? 'r' : this.stun > 0 || this.st.has('stun') ? 'x' : this.st.has('stuck') ? 'g' : this.st.has('slow') ? 'f' : null;   // a status mark (wands, Rage) shows instead of the awareness mark
     const show = sk !== null || this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;
+    this.icon.material.depthTest = !!sk;                                                                      // a wand or Rage mark hides behind walls; the awareness marks (?, !) still show through them
     if (sk) {
       const k = this.quad ? 1 / this.scaleK : 1;
       this.icon.material.map = ICONS[sk]; this.icon.material.opacity = 1;

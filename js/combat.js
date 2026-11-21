@@ -182,19 +182,23 @@ const WM_BUILD = {
   },
   wand() {
     return {
-      wood: [wp(wcyl(0.014, 0.022, 0.55, 7), 0, 0.22, 0)],
-      brass: [wp(wcyl(0.03, 0.03, 0.03, 8), 0, 0.0, 0), wp(wcyl(0.026, 0.026, 0.02, 8), 0, 0.12, 0), wp(new THREE.ConeGeometry(0.035, 0.08, 6), 0, 0.5, 0, Math.PI)],   // pommel band, a ring and a cup under the crystal
+      wood: [wp(wcyl(0.008, 0.014, 0.55, 7), 0, 0.22, 0)],                                   // a slim shaft
+      leather: [wp(gripGeo(0.018, -0.06, 0.1, 3), 0, 0, 0)],
+      brass: [wp(wcyl(0.02, 0.02, 0.022, 8), 0, -0.07, 0), wp(wcyl(0.017, 0.017, 0.014, 8), 0, 0.12, 0), wp(new THREE.ConeGeometry(0.026, 0.06, 6), 0, 0.5, 0, Math.PI)],   // pommel band, a ring and a cup under the crystal
     };
   },
   shield() {                                                                                // a round shield: faces -z (the model is turned by rotateX below)
     const face = new THREE.CylinderGeometry(0.09, 0.285, 0.06, 16), studs = [], cross = [];
-    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; studs.push(wp(wsph(0.018, 6, 4), Math.cos(a) * 0.2, 0.05, Math.sin(a) * 0.2)); }
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; studs.push(wp(wsph(0.018, 5, 3), Math.cos(a) * 0.2, 0.05, Math.sin(a) * 0.2)); }
     cross.push(wp(new THREE.BoxGeometry(0.56, 0.012, 0.045), 0, 0.058, 0), wp(new THREE.BoxGeometry(0.045, 0.012, 0.56), 0, 0.058, 0));
+    const seam = new THREE.BoxGeometry(0.008, 0.004, 0.5), strap = new THREE.BoxGeometry(0.24, 0.026, 0.06), brk = new THREE.BoxGeometry(0.03, 0.05, 0.05), rim = new THREE.TorusGeometry(0.288, 0.03, 5, 20);
+    // (what the player sees is the BACK: planks with dark seams, a steel-bound rim, a leather forearm strap and a grip bar on brackets)
     return {
       wood: [wp(wcyl(0.3, 0.3, 0.05, 16), 0, -0.025, 0)],
       accent: [wp(face, 0, 0.03, 0)],
-      steel: [wp(new THREE.TorusGeometry(0.29, 0.02, 5, 20), 0, 0.0, 0, Math.PI / 2), wp(wsph(0.085, 8, 5), 0, 0.055, 0, 0, 0, 0, 1, 0.55, 1)],   // rim and boss
-      dark: cross.concat([wp(new THREE.BoxGeometry(0.36, 0.03, 0.05), 0, -0.06, 0), wp(new THREE.BoxGeometry(0.05, 0.03, 0.2), 0, -0.06, 0)]),   // (and a hand strap behind)
+      steel: [wp(rim, 0, -0.02, 0, Math.PI / 2), wp(wsph(0.085, 8, 5), 0, 0.055, 0, 0, 0, 0, 1, 0.55, 1), wp(brk, -0.09, -0.065, 0.02), wp(brk, 0.09, -0.065, 0.02)],   // rims, boss and the grip's brackets
+      dark: cross.concat([wp(seam, -0.14, -0.052, 0), wp(seam, 0, -0.052, 0), wp(seam, 0.14, -0.052, 0)]),   // plank seams on the back
+      leather: [wp(strap, 0, -0.07, 0.15), wp(strap, 0, -0.07, -0.15), wp(wcyl(0.017, 0.017, 0.2, 6), 0, -0.085, 0.02, 0, 0, Math.PI / 2)],   // two straps and the grip bar
       brass: studs,
     };
   },
@@ -312,8 +316,8 @@ function buildWeaponModel(id, tier = 0) {
   } else if (id.startsWith('wand:')) {   // a wand with a glowing crystal in the wand's colour
     const kind = id.slice(5), c = new THREE.Color(WANDS[kind].color);
     wmMeshes(g, 'wand', tier);
-    const core = new THREE.Mesh(wgeo('wandcore', () => new THREE.OctahedronGeometry(0.05, 0)), wmMat('wcore' + kind, () => new THREE.MeshBasicMaterial({ color: c }))); core.position.y = 0.56; core.scale.set(0.8, 1.3, 0.8); g.add(core);
-    const halo = new THREE.Mesh(wgeo('wandhalo', () => new THREE.IcosahedronGeometry(0.085, 0)), wmMat('whalo' + kind, () => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.3, depthWrite: false }))); halo.position.y = 0.56; g.add(halo);
+    const core = new THREE.Mesh(wgeo('wandcore', () => new THREE.OctahedronGeometry(0.04, 0)), wmMat('wcore' + kind, () => new THREE.MeshBasicMaterial({ color: c }))); core.position.y = 0.55; core.scale.set(0.75, 1.35, 0.75); g.add(core);
+    const halo = new THREE.Mesh(wgeo('wandhalo', () => new THREE.IcosahedronGeometry(0.06, 1)), wmMat('whalo' + kind, () => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, depthWrite: false }))); halo.position.y = 0.55; halo.scale.set(0.9, 1.3, 0.9); g.add(halo);
     if (kind === 'bust') {                                                                  // drips of white goo
       const drips = wgeo('bustdrips', () => mergeParts([[wsph(0.045, 8, 6), partM(0.025, 0.42, 0.02)], [wsph(0.03, 8, 6), partM(0.025, 0.34, 0.02)], [wsph(0.022, 8, 6), partM(0.025, 0.27, 0.02)]]));
       g.add(new THREE.Mesh(drips, wmMat('white', () => new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 100 }))));

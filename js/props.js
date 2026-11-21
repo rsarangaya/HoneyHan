@@ -122,7 +122,8 @@ const CHEST_LOOK = [
 ];
 
 // ---- lootable props ----
-function makeProp(p) {
+// raw = true keeps every part a mesh of its own (the mimic animates and flashes them); otherwise the model is baked at build time (js/perf.js bakeMeshes): one mesh per kind of surface, the lid (o.lid) and the tell stay their own groups. A chest was 13 to 23 draw calls, a rack 12, a pantry 19.
+function makeProp(p, raw) {
   const inner = new THREE.Group();
   const o = { p, mesh: null, x: 0, z: 0, r: PROP_R[p.kind], lid: null, mats: [] };
   const mat = (c, em) => { const m = lam(c, em); o.mats.push(m); return m; };
@@ -132,8 +133,8 @@ function makeProp(p) {
     // five grades (js/loot.js CHEST_NAMES): plain wood, iron bands, silver trim, purple and gold, a glowing golden hoard
     const vault = p.kind === 'vaultchest', t = vault ? 2 : p.tier | 0, L = vault ? { body: 0x3a3a4a, lid: 0x4a4a5c, trim: 0xc9a23a } : CHEST_LOOK[t], s = vault ? 1.18 : 1;
     const bodyM = mat(L.body), lidM = mat(L.lid), trim = new THREE.MeshLambertMaterial({ color: L.trim, emissive: L.glow || 0x2a2008, side: THREE.DoubleSide }); o.mats.push(trim);
-    lidM.side = THREE.DoubleSide;                                                                                              // the dome is a half cylinder: seen from inside or behind (lid open) its back faces must draw
-    const lining = mat(0x2a1a10);
+    bodyM.side = THREE.DoubleSide; lidM.side = THREE.DoubleSide;                                                                                              // the dome is a half cylinder: seen from inside or behind (lid open) its back faces must draw
+    const lining = mat(0x2a1a10); lining.side = THREE.DoubleSide;                                                              // (body, lid and lining are all double-sided, so they bake into one mesh)
     RB(inner, 1.0 * s, 0.5 * s, 0.65 * s, bodyM, 0, 0.25 * s, 0);
     for (const x of [-0.3, 0.3]) RB(inner, (t === 1 ? 0.16 : 0.1) * s, 0.53 * s, 0.69 * s, trim, x * s, 0.26 * s, 0);          // bands round the body
     const pivot = new THREE.Group(); pivot.position.set(0, 0.5 * s, -0.325 * s);                                              // the lid hinges on the back edge
@@ -210,6 +211,12 @@ function makeProp(p) {
       s.scale.set(0.8 - i * 0.08, 0.5 + (i % 2) * 0.2, 0.8);
       s.rotation.set(i, i * 2, 0); inner.add(s);
     }
+  }
+  if (!raw && p.kind !== 'potions') {
+    if (!o.lid) for (const m of o.mats) if (m.emissive && m.emissive.getHex() && m.side === THREE.FrontSide && !m.transparent) { m.color.multiplyScalar(1.12); m.emissive.setHex(0); }   // (a plain prop has no hinged lid to show it was searched: all its parts must share the one dimmable material, so a faint emissive on steel is dropped)
+    const ctx = { flash: null }, skip = new Set(); if (o.lid) skip.add(o.lid); if (o.tell) skip.add(o.tell);
+    bakeMeshes(inner, skip, ctx); if (o.lid) bakeMeshes(o.lid, NO_SKIP, ctx); if (o.tell) bakeMeshes(o.tell, NO_SKIP, ctx);
+    o.mats = ctx.flash ? [ctx.flash] : [];                                        // the one plain material of this prop: dimmed when it is searched out (markOpened)
   }
   const pl = placeOnTile(inner, p.x, p.y, p.yaw !== undefined ? p.yaw : (p.seed % 4) * Math.PI / 2, p.kind === 'rubble' ? 0.3 : EDGE_SHIFT[p.kind] || 0);
   o.mesh = pl.mesh; o.x = pl.x; o.z = pl.z;
@@ -316,7 +323,7 @@ function makeDoor(dr) {
   (DOOR_BUILDERS[dr.style] || DOOR_BUILDERS.plank)(inner, dr);
   let leaf = null;
   if (dr.style === 'garden') { leaf = inner.userData.leaf; bakeMeshes(inner, new Set([leaf]), { flash: null }); bakeMeshes(leaf, NO_SKIP, { flash: null }); }   // the gate's leaf is its own group, so it can fold
-  else if (dr.style === 'cave' || dr.style === 'ice' || dr.style === 'spore' || dr.style === 'gate' || dr.style === 'hatch' || dr.style === 'shutter') bakeMeshes(inner, NO_SKIP, { flash: null });   // the many small parts merge into 2 or 3 meshes (js/perf.js)
+  else bakeMeshes(inner, NO_SKIP, { flash: null });   // every style (the plank door too: it was 12 meshes): the many small parts merge into 2 or 3 meshes (js/perf.js)
   const mesh = new THREE.Group();
   const x = (dr.x + 0.5) * TILE, z = (dr.y + 0.5) * TILE;
   mesh.add(inner); mesh.position.set(x, 0, z); mesh.rotation.y = dr.axis === 'x' ? Math.PI / 2 : 0;

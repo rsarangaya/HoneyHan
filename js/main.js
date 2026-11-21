@@ -562,7 +562,9 @@ function buildFloor() {
     group.add(ce);
   }
 
-  // stairwell: steps descending along +z into the hole, with side and end walls
+  // stairwell: steps descending along +z into the hole, with side and end walls. (Its steps, walls and the flight up are merged into a few meshes below, like the furniture.)
+  const stairRoots = [], stairFrom = group.children.length;
+  const asRoot = (from, x, z) => { const r = new THREE.Group(); r.position.set(x, 0, z); r.updateMatrixWorld(true); for (const m of group.children.slice(from)) if (m.isMesh) r.attach(m); return r; };   // the meshes added since `from`, re-parented under a root at the stairs (mergeStatic chunks and culls by the root's position)
   const stairMat = sharedLam(0x9a9284);
   const pitMat = sharedLam(0x1a1612);
   const len = STAIR_HALF_L * 2, wid = STAIR_HALF_W * 2, N = 7, rise = STAIR_DEPTH / N;
@@ -580,6 +582,7 @@ function buildFloor() {
   const endWall = new THREE.Mesh(new THREE.BoxGeometry(wid + 0.2, STAIR_DEPTH + 0.4, 0.1), pitMat);
   endWall.position.set(sx, -STAIR_DEPTH / 2 - 0.2, stairBox.z1 + 0.05);
   group.add(endWall);
+  stairRoots.push(asRoot(stairFrom, sx, sz));
   stairsLight = new THREE.PointLight(0xffe0a0, 0.35, 12);
   stairsLight.position.set(sx, 0.6, sz);
   group.add(stairsLight);
@@ -590,6 +593,7 @@ function buildFloor() {
     const st = floor.start, open = (x, y) => floor.tiles[y * w + x] === T_FLOOR || floor.tiles[y * w + x] === T_START;
     const dir = open(st.x, st.y + 1) && !floor.blocked[(st.y + 1) * w + st.x] ? 1 : -1;      // which side you step on from
     const ux = (st.x + 0.5) * TILE, uz = (st.y + 0.5) * TILE;
+    const upFrom = group.children.length;
     upBox = { x0: ux - STAIR_HALF_W, x1: ux + STAIR_HALF_W, z0: uz - STAIR_HALF_L, z1: uz + STAIR_HALF_L, dir };
     floor.up = { x: st.x, y: st.y, dir };
     const base = dir > 0 ? upBox.z1 : upBox.z0, steps = 6, ulen = STAIR_HALF_L * 2, uw = STAIR_HALF_W * 2;
@@ -603,11 +607,12 @@ function buildFloor() {
       const ch = new THREE.Mesh(new THREE.BoxGeometry(0.16, UP_RISE + 0.5, ulen), stoneMat); ch.position.set(ux + side * (STAIR_HALF_W + 0.08), (UP_RISE + 0.5) / 2, uz); group.add(ch);
     }
     const top = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.3, 0.3, 0.3), sharedLam(0x15120e)); top.position.set(ux, UP_RISE + 0.6, base - dir * ulen); group.add(top);   // a dark opening at the top
+    stairRoots.push(asRoot(upFrom, ux, uz));
     upLight = new THREE.PointLight(0xa8c8ff, 0.3, 9); upLight.position.set(ux, 1.8, uz); group.add(upLight);                // a cool light from above
   } else group.add(new THREE.PointLight(0xa8c8ff, 0, 9));  // an unlit stand-in: the lit materials' shader depends on the light count, so every floor keeps the same count (no recompile hitch on the first floor with stairs up)
 
-  propObjs = floor.props.map(p => { const o = makeProp(p); if (p.mimic) { o.mats.forEach(m => m.dispose()); o.mats = []; o.mesh = new THREE.Group(); } return o; });   // a mimic's chest is drawn by its enemy (below), so its prop is only the thing you search
-  propObjs.forEach(o => group.add(o.mesh));
+  propObjs = floor.props.map(p => { const o = makeProp(p, !!p.mimic); if (p.mimic) { o.mats.forEach(m => m.dispose()); o.mats = []; o.mesh = new THREE.Group(); } return o; });   // a mimic's chest is drawn by its enemy (below), so its prop is only the thing you search
+  propObjs.forEach(o => { group.add(o.mesh); if (o.p.opened && !o.p.mimic) markOpened(o); });   // (a searched-out prop looks searched out when its floor is built again)
   floor.solids = [{ x: sx, z: sz, r: 1.5 }, ...propObjs.filter(o => !o.p.mimic).map(o => ({ x: o.x, z: o.z, r: o.r }))];   // what guards cannot walk through (a mimic is a body of its own): stairwell, props, furniture
   if (floor.up) floor.solids.push({ x: (floor.up.x + 0.5) * TILE, z: (floor.up.y + 0.5) * TILE, r: 1.5 });   // and the stairs up
   for (const d of floor.decor) d.shrine = !!(d.kind === 'altar' && floor.quest && floor.quest.type === 'shrine' && floor.quest.altar.x === d.x && floor.quest.altar.y === d.y);   // the shrine's altar looks different (violet orb) from a plain one
@@ -620,7 +625,7 @@ function buildFloor() {
   if (floor.shop) buildShop();
   if (floor.safe) buildSafeRoom(walls.material, ceilMat());
   // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
-  cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell' && o.kind !== 'runes').map(o => o.mesh), group);   // (the rune circle and its mist stay separate: their shared materials pulse)
+  cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell' && o.kind !== 'runes').map(o => o.mesh).concat(stairRoots), group);   // (the rune circle and its mist stay separate: their shared materials pulse)
   const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null; group.userData.fxY = rune ? 0.2 : 0;   // the Final Chamber's rune circle (centre in metres)
   buildTorches();
   cullChunks.push(...mergeStatic(torchGroups, group));
@@ -816,7 +821,7 @@ function checkShopSight() {
 }
 
 let torchPts = [], torchGroups = [];
-const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6).translate(0, 0.2, 0), TORCH_FLAME = new THREE.ConeGeometry(0.1, 0.3, 6);
+const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6).translate(0, 0.2, 0), TORCH_FLAME = new THREE.LatheGeometry([[0, -0.15], [0.095, -0.04], [0, 0.26]].map(([r, y]) => new THREE.Vector2(r, y)), 6), TORCH_CORE = new THREE.ConeGeometry(0.05, 0.2, 5, 1, true).translate(0, -0.02, 0);   // a teardrop flame and a smaller hot core (both merged into the torch chunk: same shared unlit material, colour in the vertices)
 const TORCH_PLATE = new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8).rotateX(Math.PI / 2), TORCH_ARM = new THREE.CylinderGeometry(0.025, 0.025, 0.22, 5).rotateX(Math.PI / 2);   // wall bracket: a plate on the surface and an arm out to the torch
 const TORCH_POST = new THREE.CylinderGeometry(0.04, 0.06, 1.5, 6).translate(0, 0.75, 0), TORCH_FOOT = new THREE.CylinderGeometry(0.2, 0.22, 0.08, 8).translate(0, 0.04, 0), TORCH_BOWL = new THREE.CylinderGeometry(0.1, 0.06, 0.12, 6).translate(0, 1.56, 0);
 const TORCH = { lean: 0.5, embed: 0.05, heights: [0, -0.4, -0.8, -1.2], minSurf: 0.2, postOut: 1.1, tall: new Set(['banner', 'hearth', 'statue', 'rpillar', 'awning', 'counter', 'crowd']) };   // lean: rad the flame tilts out from the wall; heights: tried below the usual mount height when nothing is there
@@ -832,14 +837,14 @@ function torchBlocked(t) {
 // height it stands on a post from the floor. floor.torchMounts lists what was built ({ kind, x, y, z, nx, nz, surf }) for the tests.
 function buildTorches() {
   const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420 });
-  const fire = new THREE.MeshBasicMaterial({ color: 0xffa94a });
+  const fire = new THREE.MeshBasicMaterial({ color: 0xffa828 }), core = new THREE.MeshBasicMaterial({ color: 0xfff0a0 });
   torchGroups = []; torchPts = []; floor.torchMounts = [];
   for (const t of floor.torches) {
     if (torchBlocked(t)) continue;
     const base = floor.boss && !t.low ? 3.6 : 2.0, ox = -t.dx, oz = -t.dy, wcx = (t.x + t.dx + 0.5) * TILE, wcz = (t.y + t.dy + 0.5) * TILE;   // (ox, oz): out of the wall
     let surf = null, y = base;
     for (const dh of TORCH.heights) { const v = wallSurface(t.x + t.dx, t.y + t.dy, ox, oz, base + dh); if (v !== null && v >= TORCH.minSurf) { surf = v; y = base + dh; break; } }
-    const g = new THREE.Group(), flame = new THREE.Mesh(TORCH_FLAME, fire);
+    const g = new THREE.Group(), flame = new THREE.Mesh(TORCH_FLAME, fire), hot = new THREE.Mesh(TORCH_CORE, core);
     let lx, lz, ly;
     if (surf !== null) {
       const d = surf - TORCH.embed, x = wcx + ox * d, z = wcz + oz * d;
@@ -847,14 +852,14 @@ function buildTorches() {
       const plate = new THREE.Mesh(TORCH_PLATE, iron); plate.position.set(0, -0.2, 0.05);
       const arm = new THREE.Mesh(TORCH_ARM, iron); arm.position.set(0, -0.2, 0.16);
       const head = new THREE.Group(); head.position.set(0, -0.2, 0.27); head.rotation.x = TORCH.lean;                    // tilts about the axis along the wall, so the flame leans out
-      const stick = new THREE.Mesh(TORCH_STICK, iron); flame.position.y = 0.55; head.add(stick, flame);
+      const stick = new THREE.Mesh(TORCH_STICK, iron); flame.position.y = hot.position.y = 0.55; head.add(stick, flame, hot);
       g.add(plate, arm, head);
       lx = x + ox * 0.7; lz = z + oz * 0.7; ly = y + 0.2;
       floor.torchMounts.push({ kind: 'wall', x, y, z, nx: ox, nz: oz, surf, wx: wcx, wz: wcz });
     } else {
       const x = (t.x + 0.5) * TILE + t.dx * TORCH.postOut, z = (t.y + 0.5) * TILE + t.dy * TORCH.postOut;
       g.position.set(x, 0, z);
-      flame.position.y = 1.78; g.add(new THREE.Mesh(TORCH_POST, iron), new THREE.Mesh(TORCH_FOOT, iron), new THREE.Mesh(TORCH_BOWL, iron), flame);
+      flame.position.y = hot.position.y = 1.78; g.add(new THREE.Mesh(TORCH_POST, iron), new THREE.Mesh(TORCH_FOOT, iron), new THREE.Mesh(TORCH_BOWL, iron), flame, hot);
       lx = x; lz = z; ly = 1.9;
       floor.torchMounts.push({ kind: 'post', x, y: 0, z, nx: ox, nz: oz, surf: null, wx: wcx, wz: wcz });
     }
@@ -1620,7 +1625,7 @@ function freeAhead() {
 
 // first-person weapon: rest, swing, block and swap poses
 const vm = { id: null, tier: -1, group: new THREE.Group(), model: null, shield: new THREE.Group(), shieldId: null, wand: new THREE.Group(), wandKind: null };
-camera.add(vm.group); camera.add(vm.shield); camera.add(vm.wand); vm.wand.visible = false;
+camera.add(vm.group); camera.add(vm.shield); camera.add(vm.wand); vm.wand.visible = false; vm.shield.scale.setScalar(0.82);   // (the shield is held a little smaller so it is not a screen-filling disc)
 function buildShieldModel(it) { return buildShieldMesh(it.tier | 0); }   // shared round-shield geometry, tier-coloured face (js/combat.js)
 function updateViewmodel(dt) {
   const wkey = inv.weapon + (isLimp(inv.equip.weapon) ? ':limp' : '');                // a limp Ian's Hog is a different model
@@ -1655,6 +1660,7 @@ function updateViewmodel(dt) {
   } else if (vm.wand.visible) vm.wand.visible = false;
   let x = 0.38, y = -0.5, z = -0.7, rx = -0.15, rz = 0.15;
   if (zp >= 0) y -= 0.12 * Math.sin(zp * Math.PI);
+  if (inv.weapon === 'dagger') { y = -0.4; rx = -0.32; }   // a short blade is held higher and tipped up so it reads on screen
   if (spear) { x = 0.32; y = -0.62; z = -0.5; rx = limp ? -0.85 : -1.2; rz = 0.04; }   // a spear is held pointing forward, a limp one sags
   if (cb.draw) { const f = Math.min(1, cb.draw.t / wstats().draw); x = 0.2; y = -0.38; z = -0.8 + 0.18 * f; rx = 0.05; rz = 0.02; }   // the bow is raised and the string drawn back
   if (cb.block) { x = 0.05; y = -0.36; z = -0.62; rx = -0.05; rz = 0; }

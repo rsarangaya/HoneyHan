@@ -23,7 +23,7 @@ run('Torches hang on wall surfaces or stand on posts', async ({ open, check }) =
           if (n === 1 || n === 5) out.worstCalls = Math.max(out.worstCalls, game.renderInfo().calls);
         }
       }
-      let tris = 0, k = 0; for (const g of [TORCH_STICK, TORCH_FLAME, TORCH_PLATE, TORCH_ARM]) tris += g.index.count / 3; out.tpt = tris;
+      let tris = 0, k = 0; for (const g of [TORCH_STICK, TORCH_FLAME, TORCH_CORE, TORCH_PLATE, TORCH_ARM]) tris += (g.index ? g.index.count : g.attributes.position.count) / 3; out.tpt = tris;
       const geos = []; for (let i = 0; i < 3; i++) { game.startFloor(1); await T.sleep(40); geos.push(game.renderInfo().geos); } out.geos = geos;
       return out;
     });
@@ -37,6 +37,6 @@ run('Torches hang on wall surfaces or stand on posts', async ({ open, check }) =
   check('every post stands on the floor', tot.floating === 0);
   check('few torch spots are dropped (tall decor, doors)', tot.dropped < tot.torches * 0.1, `${tot.dropped} of ${tot.torches}`);
   check('draw calls stay under 260', tot.worstCalls < 260, tot.worstCalls + '');
-  check('a torch costs about 90 triangles', tot.maxTrisPerTorch <= 100, tot.maxTrisPerTorch + '');
+  check('a torch costs about 110 triangles (teardrop flame and core included)', tot.maxTrisPerTorch <= 115, tot.maxTrisPerTorch + '');
   check('rebuilding a floor leaks no geometry', tot.geos.every(g => g[1] === g[0] && g[2] === g[0]), JSON.stringify(tot.geos));
 });

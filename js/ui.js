@@ -25,6 +25,7 @@ const invUI = (() => {
     #invScreen .sum { margin-top: 10px; opacity: .8; font-size: 12px; }
     #invScreen .dim { opacity: .5; }
     #invScreen .icon { float: right; margin: 0 0 4px 8px; }
+    @media (max-width: 880px) { #invScreen .cols { grid-template-columns: 150px minmax(0, 1fr); gap: 10px; } #invScreen .cols > :nth-child(3) { grid-column: 1 / -1; } #invScreen .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } #invScreen .detail { min-height: 0; } }   /* a small window: the details panel drops below instead of running off the right edge */
   `;
   document.head.appendChild(css);
   const root = document.createElement('div');
