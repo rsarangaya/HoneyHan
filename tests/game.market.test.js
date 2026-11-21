@@ -94,6 +94,7 @@ run('Goblin Market and Final Chamber', async ({ open, check }) => {
     game.startStage(5); await T.sleep(250);
     const f = game.floor, P = game.player; out.themeName = theme.name; out.tex = theme.tex; out.boss = !!f.boss;
     out.kinds = {}; for (const d of f.decor) out.kinds[d.kind] = (out.kinds[d.kind] || 0) + 1;
+    out.sky = theme.sky; out.dome = !!group.userData.sky; out.chand = f.decor.filter(d => d.kind === 'chandelier').length; let ceilPlanes = 0; group.traverse(o => { if (o.isMesh && o.position.y === WALL_H && o.rotation.x === Math.PI / 2) ceilPlanes++; }); out.ceilPlanes = ceilPlanes;   // an open night sky: a dome that follows the camera, no ceiling plane, nothing hanging from one
     out.runes = f.runes; out.keysTx = [!!themeTex.get(theme.name + '|wall'), !!themeTex.get(theme.name + '|floor'), !!themeTex.get(theme.name + '|ceil')];
     const pil = propObjs.filter(o => o.kind === 'rpillar'); out.pillars = pil.length; out.pillarBlocks = pil.every(o => o.r >= 0.6);
     let runeMeshes = 0; group.traverse(o => { if (o.material === RUNE_MAT || o.material === MIST_MAT) runeMeshes++; }); out.runeMeshes = runeMeshes;
@@ -114,7 +115,7 @@ run('Goblin Market and Final Chamber', async ({ open, check }) => {
     out.worst = worst; out.calls = game.renderInfo().calls;
     return out;
   });
-  check('the Final Chamber has its own stone, obsidian floor and ceiling void, textures cached per theme, one wall draw', fw.themeName === 'The Final Chamber' && fw.boss && fw.tex.wall === 'voidstone' && fw.tex.floor === 'obsidian' && fw.tex.ceil === 'void' && fw.keysTx.every(Boolean) && fw.inst === 1, JSON.stringify([fw.tex, fw.keysTx, fw.inst]));
+  check('the Final Chamber has its own stone and obsidian floor under an open night sky (a sky dome, no ceiling plane, no chandeliers; the void ceiling texture is only for the safe room), textures cached per theme, one wall draw', fw.themeName === 'The Final Chamber' && fw.boss && fw.tex.wall === 'voidstone' && fw.tex.floor === 'obsidian' && fw.tex.ceil === 'void' && fw.sky === 'night' && fw.dome && fw.ceilPlanes === 0 && fw.chand === 0 && fw.keysTx.every(Boolean) && fw.inst === 1, JSON.stringify([fw.tex, fw.keysTx, fw.inst, fw.sky, fw.dome, fw.ceilPlanes, fw.chand]));
   check('rune pillars ring the arena (at least 14 of 22, blocking), with a dais and one rune circle', fw.pillars >= 14 && fw.pillarBlocks && fw.kinds.dais === 1 && fw.kinds.runes === 1 && fw.runes && fw.runeMeshes === 3, JSON.stringify([fw.pillars, fw.kinds, fw.runeMeshes]));
   check('the rune circle idles at about half glow, builds up in the warning and is fully lit in the flare', fw.calm[1] > 0.4 && fw.calm[1] < 0.65 && fw.warn[1] > fw.calm[1] + 0.1 && fw.warn[1] < 1 && fw.flare[1] === 1, JSON.stringify([fw.calm, fw.warn, fw.flare]));
   check('during a flare, standing inside the circle shows you up (x1.4 as far), calm or outside it does not', fw.calm[0] === 1 && fw.warn[0] === 1 && fw.flare[0] === 1.4 && fw.flareOutside === 1 && Math.abs(fw.seenIn - 1.4) < 1e-6 && fw.seenOut === 1 && fw.disc, JSON.stringify([fw.calm, fw.warn, fw.flare, fw.flareOutside, fw.seenIn, fw.seenOut, fw.disc]));

@@ -145,7 +145,7 @@ function separateBodies(enemies, player, floor) {
   collider.props = floor.solids;
   sepFloor = floor;
   const live = LIVE; live.length = 0;
-  for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead) live.push(enemies[i]);
+  for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead && !(enemies[i].alt > 1.2 && enemies[i].boss)) live.push(enemies[i]);   // (a flying boss up in the air is not in anyone's way)
   for (let pass = 0; pass < 2; pass++) {
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
       const a = live[i], b = live[j];
@@ -252,7 +252,7 @@ class Enemy {
     const metalFor = it => lam(it.tier >= 2 ? TIERS[it.tier].color : [0x6a4a2a, 0x8a8e96, 0x5a5e66][it.cls]);   // leather, iron, dark plate; rare+ gear is tinted by tier
     const m = this.mesh = new THREE.Group();
     m.rotation.order = 'YXZ';          // yaw first, so falling over tips backward
-    m.scale.setScalar(this.boss ? this.def.scale || BOSS_SCALE * (this.final ? TUNE.finalBossScale : 1) : this.T.scale || 0.92 + rg() * 0.2);
+    m.scale.setScalar(this.boss ? this.def.scale || BOSS_SCALE : this.T.scale || 0.92 + rg() * 0.2);
     this.scaleK = m.scale.x;
     if (this.bm) this.bm.build(this, m, lam);                                  // a non-biped boss (js/bossmodels.js): fills this.bd = { groups, skip }
     else if (this.T.model === 'float') this.buildFloat(m, lam);
@@ -441,7 +441,9 @@ class Enemy {
     }
     if (!SHADOW_GEO) { SHADOW_GEO = cachedGeo('shadow', () => new THREE.CircleGeometry(1, 20)); SHADOW_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }); SHADOW_MAT.userData.shared = true; }
     this.shadow = new THREE.Mesh(SHADOW_GEO, SHADOW_MAT);
-    this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar(this.bm && this.bm.shadow || (this.quad ? this.T.r * 1.5 : 0.5) * 1.25);
+    this.shadowR = this.bm && this.bm.shadow || (this.quad ? this.T.r * 1.5 : 0.5) * 1.25;   // the disc's radius on the floor (a flying boss's spreads with height)
+    this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar(this.shadowR);
+    if (this.bm && this.bm.flyShadow) { this.shadow.material = SHADOW_MAT.clone(); this.shadow.material.userData = {}; }   // its own material: the shadow fades with height
     this.shadow.renderOrder = 1; m.add(this.shadow);
     // Merge the parts inside each animated group (torso and head, each arm, each leg): about 60 meshes become about 25
     // per creature, and the pose code still moves the same groups.
@@ -452,6 +454,7 @@ class Enemy {
       else { bakeMeshes(this.upper, new Set(this.arms), ctx); for (const a of this.arms) bakeMeshes(a, this.keep ? new Set(this.keep) : NO_SKIP, ctx); }
       if (!this.bm) for (const l of this.legs) bakeMeshes(l, NO_SKIP, ctx);
       this.mats = ctx.flash ? [ctx.flash] : [];   // the flash material (a wisp, all glow, has none)
+      if (this.bm && this.bm.glow) this.baseEm = this.mats.map(() => this.bm.glow);   // a boss model that glows a little by itself (the dragon's embers) rests on this emissive
     }
     this.pose = [0, 0, 0, 0, 0];       // eased pose: [upper x, upper y, right arm x, left arm x, dip]
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: ICONS.q, transparent: true, depthTest: false }));
@@ -1025,7 +1028,10 @@ class Enemy {
   sync(dt) {
     const m = this.mesh;
     m.position.set(this.x, this.alt, this.z); m.rotation.y = this.yaw;
-    if (this.alt || this.altPrev) { this.shadow.position.y = (0.015 - this.alt) / this.scaleK; this.shadow.scale.setScalar((this.quad ? this.T.r * 1.5 : 0.5) * 1.25 * (1 + this.alt * 0.1)); }   // a flying boss: the shadow stays on the floor and spreads with height
+    if (this.alt || this.altPrev) {                                      // a flying boss: the shadow stays on the floor, spreads and fades with height
+      this.shadow.position.y = (0.015 - this.alt) / this.scaleK; this.shadow.scale.setScalar(this.shadowR * (1 + this.alt * 0.1));
+      if (this.bm && this.bm.flyShadow) this.shadow.material.opacity = 0.38 * Math.max(0.3, 1 - this.alt / 12);
+    }
     this.altPrev = this.alt;
     this.shadow.visible = !this.dead && !this.T.mimic;                   // a chest casts no disc: that would give a mimic away
     if (this.dead && this.T.mimic) { this.lid.rotation.x = -1.0; if (!this.teeth.visible) this.showTeeth(); return; }   // the mimic stays put, lid hanging open

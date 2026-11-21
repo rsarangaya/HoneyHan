@@ -104,10 +104,10 @@ const pauseMenu = (() => {
       card('enemy:brute', 'Brute', '#8a7a5a', ['A huge goblin with 3x health that hits twice as hard, slowly and with a long warning. Ordinary hits do not stagger it and a sneak attack is capped, but a parry still staggers it.', 'Sprinting outpaces it. Usually drops Rare or better equipment.']),
       card('enemy:bouncer', 'Bouncer', '#7d8672', ['Big, slow and hits hard, with a long warning. 2x the health.', 'Ordinary hits do not stagger it and a dagger cannot kill it in one stab (a sneak attack is capped). A parry still staggers it.', 'Always drops a piece of equipment (Uncommon or better) and some gold.']),
       ...stageThemes.map((t, i) => { const d = bossDefByTheme(t.name), n = bossNameFor(t.name); return card('enemy:boss:' + n, n, '#c0503a', bossCardLines(d, Math.round(TUNE.bossHp * d.hpMul * (1 + TUNE.stageBossHp * i))).map(l => l.replace('Boss of floor 5.', `Boss of floor 5 of stage ${i + 1} (${t.name}).`))); }),   // from BOSS_DEFS (js/boss.js)
-      card('enemy:boss:' + FINAL_BOSS.name, FINAL_BOSS.name, '#a060e0', [
-        `Placeholder final boss of stage 5. ${Math.round(TUNE.bossHp * BOSS_DEFS.final.hpMul * TUNE.finalBossHp)} HP, bigger than the stage bosses and hits ${TUNE.finalBossDmg}x as hard as the first one. The real fight is not designed yet.`,
-        'Moves: ' + BOSS_DEFS.final.moves.map(bossMoveText).join('; ') + '.',
-        'Killing it ends the run.']),
+      card('enemy:boss:' + BOSS_DEFS.final.name, BOSS_DEFS.final.name, BOSS_DEFS.final.color, [
+        `Final boss of stage 5. ${Math.round(TUNE.bossHp * BOSS_DEFS.final.hpMul * TUNE.finalBossHp)} HP (three times the first boss), and it hits ${TUNE.finalBossDmg}x as hard as the first one. ${BOSS_DEFS.final.blurb}`,
+        'Moves: ' + BOSS_DEFS.final.moves.filter(m => !m.chain).map(bossMoveText).join('; ') + '. When it takes off a shockwave buffets the ground round it, and its landing is another one.',
+        'Cannot be stunned or put to sleep; only a parry of its bite or claw staggers it. Killing it ends the run.']),
     ];
     const extra = Object.entries(ENEMY_TYPES).filter(([k, v]) => v.info).map(([k, v]) => card('enemy:' + k, v.name, '#c8c8c8', v.info));   // the other themes' natives
     return [...base, ...extra];

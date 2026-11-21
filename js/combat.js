@@ -17,9 +17,9 @@ const TUNE = {
   bossWindMul: 1.35, bossReachMul: 1.4, bossAtkSpd: 0.7, bossWeaponTier: 3,   // wind-up x (longer telegraph), reach x, own attack-speed stat, mace tier
   bossLegendary: 0.10,                // chance its guaranteed Epic drop upgrades to Legendary
   // Stages (js/main.js): per stage past the first, enemies get HP x (1 + stageHpScale) and damage x (1 + stageDmgScale) on top of the per-floor scaling;
-  // stage bosses HP x (1 + stageBossHp) and damage x (1 + stageBossDmg). The placeholder final boss is the stage 1 boss x finalBossHp / finalBossDmg, drawn finalBossScale times bigger.
+  // stage bosses HP x (1 + stageBossHp) and damage x (1 + stageBossDmg). The final boss (the Cinder Wyrm) is the stage 1 boss x finalBossHp / finalBossDmg.
   // stageLootDepth: loot, shop and chest tiers use floor + this x (stage - 1).
-  stageHpScale: 0.35, stageDmgScale: 0.20, stageBossHp: 0.5, stageBossDmg: 0.2, finalBossHp: 3.0, finalBossDmg: 1.8, finalBossScale: 1.25, stageLootDepth: 1.5,
+  stageHpScale: 0.35, stageDmgScale: 0.20, stageBossHp: 0.5, stageBossDmg: 0.2, finalBossHp: 3.0, finalBossDmg: 1.8, stageLootDepth: 1.5,
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,
   parryRestore: 30, blockRefund: 0.5,   // stamina a parry gives back, and the fraction of a normal block's cost that comes back (rewards blocking)

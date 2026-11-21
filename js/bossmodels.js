@@ -1,4 +1,4 @@
-// Boss models (BOSS2 to BOSS5 fill this in; the scarecrow, mushroom, lich, giant and werewolf are here): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
+// Boss models (the scarecrow, mushroom, lich, giant, werewolf and dragon are here): BOSS_MODELS[id] = { build(e, m, lam), pose(e, dt), tagY, iconY, shadow } for the non-biped bosses.
 // build adds the parts to the boss's mesh group m inside animated groups and sets e.bd = { groups, skip, g }: bakeMeshes merges each group on its own (skipping the other
 // animated groups nested in it), so a model is a handful of baked meshes however many parts it has. pose eases its channels each frame (e.bp, no allocation).
 // A def points at its entry with `model: id`. Units are local (the mesh is scaled by def.scale); the front is -z. The current cave boss is a dressed biped (Enemy.build).
@@ -383,5 +383,133 @@ BOSS_MODELS.werewolf = {
     g.head.rotation.x = p[5] - p[0] * 0.6; g.jaw.rotation.x = p[4];
     g.tail.rotation.y = p[7]; g.tail.rotation.x = 0.5 + p[0] * 0.5;
     const lw = 0.55 * (1 - d * 2); g.lL.rotation.x = sw * lw; g.lR.rotation.x = -sw * lw; g.lL.position.y = g.lR.position.y = 0.7 - d; g.lL.scale.y = g.lR.scale.y = ls;
+  },
+};
+
+// ---- Cinder Wyrm: a dragon of charcoal and ember (the final boss): a long neck, a horned head with a hinged jaw, bat wings with finger bones and a membrane, a spiked tail, four legs.
+// All groups sit in `rig` (the whole dragon pitches and banks; its shadow, tag and icon stay on `m`). Channels (eased, e.bp): 0 pitch (+ = nose up), 1 bank, 2 dip, 3 neck (+ = head back), 4 neck yaw, 5 head (+ = snout up),
+// 6 jaw open, 7 wing flap amplitude, 8 wing centre (+ = tips up), 9 wing sweep back, 10 wing fold, 11 tail yaw, 12 tail pitch, 13 leg tuck (+ = tucked up and back, - = reaching forward), 14 front-right claw raise, 15 its sweep,
+// then (not eased) 16 the flap clock and 17 the last walk clock. ----
+const DG_LAND = [0.03, 0, 0, 0.04, 0, 0, 0.04, 0, 0.9, 0.55, 1, 0, 0, 0, 0, 0];
+const DG_AIR = [-0.04, 0, 0, -0.2, 0, 0.05, 0.05, 0.55, 0.12, 0.1, 0, 0, 0, 1, 0, 0];
+const DG_SLEEP = [-0.06, 0, 0.3, -1.25, 0.3, -0.3, 0, 0, 0.9, 0.55, 1, 0.9, 0.2, 0, 0, 0];
+const DG_T = new Float32Array(16);
+// A tapered bone from (x0, y0, z0) to (x1, y1, z1): r0 wide at the start, r1 at the end.
+const bmLimb = (parent, mat, r0, r1, x0, y0, z0, x1, y1, z1) => {
+  const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, len = Math.hypot(dx, dy, dz) || 1e-3, q = (r1 / r0).toFixed(2);
+  const p = new THREE.Mesh(cachedGeo('limb' + q, () => new THREE.CylinderGeometry(+q, 1, 1, 6)), mat);
+  p.scale.set(r0, len, r0); p.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); p.quaternion.setFromUnitVectors(BM_UP, BM_DIR.set(dx, dy, dz).normalize()); parent.add(p); return p;
+};
+// Wing points (right wing, from the shoulder: x out, y up, z back): shoulder, elbow, wrist, four finger tips and the root of the trailing edge on the hip.
+const DG_W = { S: [0, 0, 0], EL: [0.9, 0.25, -0.28], W: [1.7, 0.4, -0.5], F1: [3.4, 0.2, -0.15], F2: [3.15, 0.1, 0.85], F3: [2.45, 0.05, 1.7], F4: [1.5, 0.05, 2.15], R: [0.4, -0.1, 1.55] };
+// A membrane panel (triangles of named points, mirrored for the left wing; 'F1~F2' is the notch between two finger tips, pulled in toward the wrist), drawn from both sides so it stays an ordinary front-faced mesh that bakes with the rest.
+const dgPanel = (key, s, tris) => cachedGeo(key + s, () => {
+  const v = [], P = DG_W, pt = n => { if (P[n]) return P[n]; const [a, b] = n.split('~'), A = P[a], B = P[b]; return [0, 1, 2].map(i => { const c = (A[i] + B[i]) / 2; return c + (P.W[i] - c) * 0.22; }); };
+  for (const t of tris) { const a = pt(t[0]), b = pt(t[1]), c = pt(t[2]); for (const q of [[a, b, c], [a, c, b]]) for (const r of q) v.push(r[0] * s, r[1], r[2]); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); return g;
+});
+BOSS_MODELS.dragon = {
+  tagY: 3.5, iconY: 3.1, shadow: 2.0, flyShadow: true, glow: 0x1a0c06,
+  build(e, m, lam) {
+    const ch = lam(0x3c3336), chL = lam(0x62504f), chD = lam(0x241d20), red = lam(0xb02e1c), ember = lam(0xf07a24), horn = lam(0xd8c4a0), claw = lam(0xeee2c8), tooth = lam(0xf6eed8), mem = lam(0xb82a22), memD = lam(0x7a1a18), mouthIn = lam(0x7a1818);
+    const eye = bmGlow(0xffb020), hot = bmGlow(0xff6a10), throat = bmGlow(0xff8a20);
+    const rig = bmGroup(m, 0, 0, 0), body = bmGroup(rig, 0, 1.1, 0.05), neck = bmGroup(rig, 0, 1.25, -1.0), head = bmGroup(neck, 0, 1.55, -0.9), jaw = bmGroup(head, 0, -0.17, -0.15);
+    head.scale.setScalar(1.3);                                                                              // a big head on that neck
+    const wL = bmGroup(rig, -0.5, 1.7, -0.55), wR = bmGroup(rig, 0.5, 1.7, -0.55), tail = bmGroup(rig, 0, 1.05, 1.1);
+    const lFL = bmGroup(rig, -0.62, 0.95, -0.75), lFR = bmGroup(rig, 0.62, 0.95, -0.75), lBL = bmGroup(rig, -0.62, 0.95, 0.85), lBR = bmGroup(rig, 0.62, 0.95, 0.85);
+    // body: deep chest, hips, shoulders, an ember belly, a ridge of spikes and glowing cracks down the back
+    ellPart(1.15, 1.0, 2.1, ch, 0, 0, 0, body); ellPart(1.2, 1.1, 1.1, ch, 0, 0.05, -0.62, body); ellPart(1.0, 0.9, 1.0, ch, 0, -0.02, 0.72, body);
+    for (const s of [-1, 1]) { ellPart(0.55, 0.55, 0.8, chL, s * 0.5, 0.28, -0.55, body); ellPart(0.5, 0.5, 0.7, chL, s * 0.46, 0.2, 0.75, body); }
+    ellPart(0.8, 0.5, 2.0, ember, 0, -0.34, -0.05, body); ellPart(0.55, 0.45, 0.25, hot, 0, -0.08, -1.12, body);
+    for (let i = 0; i < 8; i++) bmSpike(body, i % 2 ? red : chL, 0.1, 0.45 - Math.abs(i - 3) * 0.04, 0, 0.62, -0.9 + i * 0.28, 0, 1, 0.45);
+    for (const [x, z, r] of [[0.22, -0.25, 0.3], [-0.25, 0.1, -0.3], [0.2, 0.5, 0.2], [-0.2, -0.7, -0.2], [0.05, 0.85, 0]]) bmBox(0.05, 0.025, 0.36, hot, x, 0.47 - Math.abs(x) * 0.5, z, body, 0, r, 0);
+    // neck: four swelling segments rising and leaning forward, ember plates down the front, spikes down the back
+    const NK = [[0, 0, 0, 0.4], [0, 0.42, -0.3, 0.34], [0, 0.88, -0.52, 0.29], [0, 1.3, -0.72, 0.25]];
+    NK.forEach(([x, y, z, r], i) => {
+      ellPart(r * 2, r * 2, r * 2.3, ch, x, y, z, neck);
+      if (i) { const q = NK[i - 1]; bmLimb(neck, ch, q[3] * 0.95, r * 0.95, q[0], q[1], q[2], x, y, z); }
+      ellPart(r * 1.1, r * 1.5, r * 0.8, ember, x, y - 0.05, z - r * 0.75, neck);
+      bmSpike(neck, i % 2 ? chL : red, 0.07, 0.3, x, y + r * 0.85, z + r * 0.55, 0, 1, 0.8);
+    });
+    // head: skull and long snout, brow ridges, burning eyes and nostrils, swept-back horns, cheek spikes, teeth and a glowing throat
+    ellPart(0.5, 0.42, 0.72, ch, 0, 0, 0, head); ellPart(0.36, 0.26, 0.62, chL, 0, -0.08, -0.58, head); ellPart(0.4, 0.2, 0.3, chL, 0, -0.02, -0.82, head);
+    for (const s of [-1, 1]) {
+      bmBox(0.2, 0.07, 0.3, chD, s * 0.15, 0.17, -0.2, head, 0, 0, -s * 0.3); bmBox(0.1, 0.06, 0.13, eye, s * 0.2, 0.09, -0.24, head, 0, 0, -s * 0.2); bmBox(0.05, 0.04, 0.05, hot, s * 0.09, -0.02, -0.97, head);
+      bmSpike(head, horn, 0.12, 0.95, s * 0.2, 0.34, 0.5, s * 0.35, 0.55, 1.0); bmSpike(head, horn, 0.08, 0.5, s * 0.3, 0.12, 0.2, s, 0.15, 0.7);
+      bmSpike(head, horn, 0.07, 0.35, s * 0.27, -0.12, -0.05, s, -0.3, 0.3); bmSpike(head, horn, 0.06, 0.3, s * 0.16, 0.24, -0.35, s * 0.3, 1, -0.2);
+      for (let k = 0; k < 4; k++) bmSpike(head, tooth, 0.035, 0.16, s * 0.14, -0.24, -0.3 - k * 0.16, 0, -1, 0);
+      for (let k = 0; k < 3; k++) bmSpike(jaw, tooth, 0.03, 0.13, s * 0.1, 0.09, -0.18 - k * 0.17, 0, 1, 0);
+    }
+    bmBox(0.26, 0.02, 0.62, mouthIn, 0, -0.2, -0.52, head); bmBox(0.18, 0.02, 0.45, throat, 0, -0.19, -0.5, head); bmBox(0.16, 0.12, 0.04, throat, 0, -0.12, -0.2, head);
+    ellPart(0.34, 0.14, 0.7, chL, 0, -0.02, -0.38, jaw); bmBox(0.26, 0.02, 0.6, mouthIn, 0, 0.04, -0.38, jaw); bmSpike(jaw, horn, 0.06, 0.22, 0, -0.08, -0.72, 0, -0.5, -1);
+    // wings: shoulder joint, arm, four fingers with a claw at the wrist, a dark inner and a lighter outer membrane
+    const W = DG_W;
+    for (const [g, s] of [[wL, -1], [wR, 1]]) {
+      ellPart(0.42, 0.4, 0.5, chL, 0, 0, 0, g);
+      bmLimb(g, ch, 0.13, 0.1, 0, 0, 0, s * W.EL[0], W.EL[1], W.EL[2]); bmLimb(g, ch, 0.1, 0.08, s * W.EL[0], W.EL[1], W.EL[2], s * W.W[0], W.W[1], W.W[2]);
+      for (const f of ['F1', 'F2', 'F3', 'F4']) bmLimb(g, chL, 0.07, 0.03, s * W.W[0], W.W[1], W.W[2], s * W[f][0], W[f][1], W[f][2]);
+      bmSpike(g, claw, 0.07, 0.38, s * W.W[0], W.W[1] + 0.1, W.W[2] - 0.15, s * 0.2, 0.8, -1);
+      g.add(new THREE.Mesh(dgPanel('wi', s, [['S', 'W', 'R'], ['W', 'F4', 'R']]), memD));
+      g.add(new THREE.Mesh(dgPanel('wo', s, [['W', 'F1', 'F1~F2'], ['W', 'F1~F2', 'F2'], ['W', 'F2', 'F2~F3'], ['W', 'F2~F3', 'F3'], ['W', 'F3', 'F3~F4'], ['W', 'F3~F4', 'F4']]), mem));
+    }
+    // legs (four groups, they swing): thigh, shin, a big foot and three claws
+    for (const [g, big] of [[lFL, 0.9], [lFR, 0.9], [lBL, 1.1], [lBR, 1.1]]) {
+      ellPart(0.34 * big, 0.65, 0.42 * big, ch, 0, -0.22, 0, g); bmLimb(g, chL, 0.14 * big, 0.09, 0, -0.5, 0, 0, -0.85, -0.12);
+      ellPart(0.3, 0.15, 0.5, chD, 0, -0.93, -0.12, g);
+      for (const x of [-0.09, 0, 0.09]) bmSpike(g, claw, 0.04, 0.24, x, -0.97, -0.4, 0, -0.3, -1);
+    }
+    // tail: six tapering segments with spikes, ending in a horned spade
+    const TL = [[0, 0.15, 0.36], [-0.03, 0.75, 0.29], [-0.1, 1.35, 0.23], [-0.14, 1.95, 0.18], [-0.1, 2.5, 0.13], [-0.02, 3.0, 0.09]];
+    TL.forEach(([y, z, r], i) => { ellPart(r * 2, r * 1.9, r * 2.2 + 0.2, ch, 0, y, z, tail); bmSpike(tail, i % 2 ? chL : red, r * 0.5, r * 1.8, 0, y + r * 0.9, z, 0, 1, 0.5); });
+    bmSpike(tail, horn, 0.2, 0.7, 0, -0.02, 3.35, 0, 0, 1); for (const s of [-1, 1]) bmSpike(tail, horn, 0.1, 0.5, s * 0.22, -0.02, 3.05, s, 0, 0.5);
+    const all = [body, neck, head, jaw, wL, wR, tail, lFL, lFR, lBL, lBR];
+    e.bd = { groups: all, skip: new Set(all), g: { rig, body, neck, head, jaw, wL, wR, tail, lFL, lFR, lBL, lBR } };
+    e.bp = Array.from(DG_SLEEP).concat([0, 0]);
+  },
+  pose(e, dt) {
+    const g = e.bd.g, p = e.bp, T = DG_T, t = performance.now() * 0.001 + e.seed % 7, bs = e.bs, id = e.mv ? e.mv.id : '', air = bs.air && !e.dormant, sn = Math.sin(t * 1.2);
+    bmPhase(e);
+    let snap = false, rate = 0;
+    if (e.dormant) { T.set(DG_SLEEP); T[0] += 0.01 * sn; T[3] += 0.02 * sn; }                               // asleep on the dais: the head on the floor, wings folded, the tail curled
+    else if (air) { T.set(DG_AIR); T[1] = -bs.cw * 0.2; T[3] += 0.05 * sn; T[11] = 0.2 * Math.sin(t * 1.4); rate = 1.7; }   // flying: banking into the turn, wings beating
+    else { T.set(DG_LAND); T[3] += 0.06 * sn; T[11] = 0.1 * Math.sin(t * 0.9); T[6] += 0.03 * sn; }          // standing: wings folded, tail swaying, the jaw working
+    if (e.stun > 0 || bs.st === 'stagger') { T[0] = 0.2; T[3] = 0.9; T[5] = 0.5; T[6] = 0.9; T[10] = 0.4; }   // reeling: the head thrown back
+    else if (bs.st === 'phase') { T[0] = 0.2; T[3] = 0.75; T[5] = 0.5; T[6] = 1.2; T[7] = 0.5; T[8] = 0.3; T[9] = 0.1; T[10] = 0; rate = 2; }   // the roar
+    else if (bs.st === 'sweep') { T[3] = -0.5; T[5] = -0.15; T[6] = 1.0; T[0] = -0.08; }                  // fire sweep: the head low and forward, jaws wide
+    else if (bs.st === 'special' && id === 'strafe') { T[0] = -0.5; T[3] = -0.45; T[5] = -0.2; T[6] = 0.3; T[7] = 0.05; T[8] = 0; T[9] = 0.9; T[10] = 0.4; T[13] = -0.7; rate = 0; }   // the dive: swept back, claws reaching
+    else if (BM_PH) {
+      const k = BM_K, a = BM_PH === 1 ? 0 : 1;
+      if (id === 'bite') {                                                                                   // rears back, jaws wide, then the head drops and snaps shut
+        if (a === 0) { T[3] = bmLerp(T[3], 0.55, k); T[5] = 0.3 * k; T[6] = k; T[2] = 0.08 * k; } else { T[3] = bmLerp(0.55, -0.85, k); T[5] = -0.25; T[6] = bmLerp(1, 0, k); snap = true; }
+      } else if (id === 'claw') {                                                                            // the front claw cocked up and out, then raked across
+        if (a === 0) { T[0] = 0.22 * k; T[14] = 1.5 * k; T[15] = -0.6 * k; T[3] = 0.2 * k; T[4] = 0.3 * k; } else { T[0] = bmLerp(0.22, -0.05, k); T[14] = bmLerp(1.5, 0.3, k); T[15] = bmLerp(-0.6, 1.0, k); T[4] = bmLerp(0.3, -0.5, k); snap = true; }
+      } else if (id === 'tail') {                                                                            // the tail cocked to one side, then whipped round
+        if (a === 0) { T[11] = 1.2 * k; T[4] = -0.3 * k; T[1] = 0.1 * k; T[10] = 0.6; } else { T[11] = bmLerp(1.2, -1.4, k); T[4] = 0.4; snap = true; }
+      } else if (id === 'breath') {                                                                          // the chest swells, the head back and up, then the fire pours out
+        if (a === 0) { T[3] = bmLerp(T[3], 0.7, k); T[5] = 0.45 * k; T[6] = 1.1 * k; T[0] = 0.12 * k; } else { T[3] = bmLerp(0.7, -0.2, k); T[5] = bmLerp(0.45, -0.1, k); T[6] = 1.2; snap = true; }
+      } else if (id === 'buffet') {                                                                          // crouches and beats the wings open
+        rate = 2.6; if (a === 0) { T[2] = 0.3 * k; T[10] = bmLerp(1, 0, k); T[7] = 0.5 * k; T[8] = bmLerp(0.9, 0.5, k); T[9] = bmLerp(0.55, 0.1, k); } else { T[2] = -0.1; T[10] = 0; T[7] = 0.6; T[8] = -0.1; T[9] = 0.1; snap = true; }
+      } else if (id === 'strafe') {                                                                          // rears back and tilts down, wings swept for the dive
+        T[0] = -0.3 * k; T[3] = bmLerp(T[3], -0.2, k); T[6] = 0.5 * k; T[9] = bmLerp(T[9], 0.35, k); T[7] = 0.15; T[13] = bmLerp(T[13], -0.5, k); rate = 1.2;
+      } else if (id === 'volley') {                                                                          // the head back with a fireball in the throat, then thrown forward
+        if (a === 0) { T[3] = bmLerp(T[3], 0.55, k); T[5] = 0.35 * k; T[6] = 0.8 * k; } else { T[3] = bmLerp(0.55, -0.4, k); T[5] = -0.1; T[6] = bmLerp(0.8, 0.2, k); snap = true; }
+      } else if (id === 'sweep') {                                                                           // draws a breath, the head dropping to aim
+        T[3] = bmLerp(T[3], -0.5, k); T[5] = -0.15 * k; T[6] = 0.9 * k;
+      } else if (id === 'land') {                                                                            // gliding in: nose up, legs reaching, wings flared and beating hard
+        T[0] = 0.35 * k; T[13] = bmLerp(T[13], -0.6, k); T[3] = bmLerp(T[3], 0.3, k); T[7] = bmLerp(0.55, 0.85, k); T[8] = bmLerp(0.12, 0.05, k); rate = bmLerp(1.7, 2.6, k);
+      }
+    }
+    const k = snap ? 1 : 1 - Math.exp(-12 * dt);
+    for (let i = 0; i < 16; i++) p[i] += (T[i] - p[i]) * k;
+    p[16] += dt * rate * 6.2832;
+    const fl = p[8] + p[7] * Math.sin(p[16]), bob = air || id === 'buffet' ? 0.1 * Math.sin(p[16] + 1.3) : 0;
+    g.rig.rotation.x = p[0]; g.rig.rotation.z = p[1]; g.rig.position.y = bob - p[2];
+    g.neck.rotation.x = p[3]; g.neck.rotation.y = p[4]; g.head.rotation.x = p[5] - p[3] * 0.5; g.jaw.rotation.x = -p[6];
+    g.wR.rotation.z = fl; g.wL.rotation.z = -fl; g.wR.rotation.y = -p[9]; g.wL.rotation.y = p[9];
+    const fs = 1 - 0.6 * p[10], fz = 1 - 0.5 * p[10]; g.wR.scale.set(fs, 1, fz); g.wL.scale.set(fs, 1, fz);
+    g.tail.rotation.y = p[11]; g.tail.rotation.x = p[12];
+    const walk = Math.min(1, Math.abs(e.walkT - p[17]) / Math.max(dt, 1e-3) / 12) * (1 - Math.max(0, Math.min(1, p[13]))), sw = Math.sin(e.walkT * 0.28) * 0.45 * walk, lx = -0.9 * p[13]; p[17] = e.walkT;   // a gait only while it moves; tucked legs go back, reaching ones forward
+    g.lFL.rotation.x = sw + lx; g.lBR.rotation.x = sw + lx; g.lFR.rotation.x = -sw + lx + p[14]; g.lBL.rotation.x = -sw + lx; g.lFR.rotation.y = p[15];
+    const ls = 1 - 0.25 * Math.max(0, p[13]); g.lFL.scale.y = g.lFR.scale.y = g.lBL.scale.y = g.lBR.scale.y = ls;
   },
 };

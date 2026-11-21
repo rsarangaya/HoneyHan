@@ -798,6 +798,7 @@ for (let i = 0; i < 4; i++) if (per[i] < 25 || per[i] > 110) fail(`floor ${i + 1
           if (JSON.stringify([ff.tiles, ff.props, ff.torches, ff.stairs, ff.start, ff.safe, ff.enemies.find(e => e.boss)]) !== JSON.stringify([fb.tiles, fb.props, fb.torches, fb.stairs, fb.start, fb.safe, fb.enemies.find(e => e.boss)])) fail(fw, 'the arena differs from the usual boss arena');
           if (pil.length < 14) fail(fw, `${pil.length} rune pillars`);
           if (ff.decor.filter(d => d.kind === 'dais').length !== 1 || ff.decor.filter(d => d.kind === 'runes').length !== 1) fail(fw, 'want one dais and one rune circle');
+          if (ff.decor.some(d => d.kind === 'chandelier') || !fb.decor.some(d => d.kind === 'chandelier')) fail(fw, 'the final arena is under an open sky (no chandeliers) while the ordinary arena keeps them');
           if (pil.some(d => ff.tiles[d.y * ff.w + d.x] !== 1 || !ff.blocked[d.y * ff.w + d.x])) fail(fw, 'a pillar on a wall or not blocking');
           if (!touchable(ff, flood(ff, true), ff.stairs.x, ff.stairs.y) || ff.props.some(p => !touchable(ff, flood(ff, true), p.x, p.y))) fail(fw, 'pillars cut something off');
           if (fb.decor.some(d => d.kind === 'rpillar' || d.kind === 'dais' || d.kind === 'runes')) fail(fw, 'the ordinary arena got final chamber furniture');

@@ -1,6 +1,6 @@
 // Scene building, HUD, minimap, and the floor-to-floor loop.
 const MAX_FLOOR = 5;       // floors per stage: floorNum is the floor WITHIN the stage, and floor 5 is the stage's boss arena (with the safe room)
-const STAGES = 4, FINAL_STAGE = 5;   // 4 themed stages, then stage 5: one boss arena with the placeholder final boss
+const STAGES = 4, FINAL_STAGE = 5;   // 4 themed stages, then stage 5: one boss arena with the final boss, the Cinder Wyrm
 const params = new URLSearchParams(location.search);
 const runSeed = params.has('seed') ? (parseInt(params.get('seed'), 10) >>> 0) : (Math.random() * 4294967296) >>> 0;
 // Stage 1 keeps the theme the seed always picked; stages 2 to 4 take three other themes, shuffled from the seed (no repeats).
@@ -468,7 +468,7 @@ function pruneThemeTextures() {
 
 function buildFloor() {
   wallKinds = new Map();
-  knock.m = 0; bossLanesClear(); bossPuddlesClear();   // no knockback, ice lane or ale puddle carries over a floor change or restart
+  knock.m = 0; bossLanesClear(); bossPuddlesClear(); bossFlamesClear();   // no knockback, ice lane, ale puddle or flame patch carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
     group.traverse(freeObject);
@@ -614,7 +614,7 @@ function buildFloor() {
   if (floor.safe) buildSafeRoom(walls.material, ceilMat());
   // thousands of tiny meshes become a few merged ones per 12 m chunk (tripwire bells stay separate: they hide when rung)
   cullChunks = mergeStatic(decorObjs.filter(o => o.kind !== 'bell' && o.kind !== 'runes').map(o => o.mesh), group);   // (the rune circle and its mist stay separate: their shared materials pulse)
-  const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null;   // the Final Chamber's rune circle (centre in metres)
+  const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null; group.userData.fxY = rune ? 0.2 : 0;   // the Final Chamber's rune circle (centre in metres)
   buildTorches();
   cullChunks.push(...mergeStatic(torchGroups, group));
   enemies = floor.enemies.map(s => new Enemy(s, floor));
@@ -626,7 +626,7 @@ function buildFloor() {
   Enemy.all = enemies;
   linkHandlers(enemies);
   enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
-  for (const b of enemies) if (b.boss) { nameTag(b, b.def.tag || b.def.name, b.def.color); if (b.bm) b.tag.position.y = b.bm.tagY; }                // every boss has its name over its head (the placeholder final boss says what it is)
+  for (const b of enemies) if (b.boss) { nameTag(b, b.def.name, b.def.color); if (b.bm) b.tag.position.y = b.bm.tagY; }                // every boss has its name over its head
   questBuild(floor, { enemies, propObjs, decorObjs });                                  // the mini-boss's name tag, the shrine's altar spot, the wanted guard's tag and quest-giver, the sack thief
 
   floor.prints = theme.mechanic.prints && !floor.boss ? buildPrints() : null;
@@ -1090,14 +1090,22 @@ Enemy.burst = e => {
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
 function spawnEnemyShot(s) {
   const bk = BOSS_SHOT[s.kind], pm = bk ? bossFxAcquire(s.kind) : null;              // a boss's shot flies in a pooled mesh (js/boss.js); none free: no shot
-  if (bk && !pm) return;
-  const gravity = bk ? bk.g : s.kind === 'arrow' ? 4 : 0, tx = player.x, ty = eyeY() - 0.3, tz = player.z;
-  const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
-  const jitter = () => (gameRng() - 0.5) * 0.05 * dist / t;                       // a little inaccuracy
-  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, pool: !!pm, dmg: s.dmg || 1, mv: s.mv || null, mesh: pm || (s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind])) };
+  if (bk && !pm) return false;
+  const gravity = bk ? bk.g : s.kind === 'arrow' ? 4 : 0, tx = s.tx !== undefined ? s.tx : player.x, ty = s.time ? 0.05 : eyeY() - 0.3, tz = s.tz !== undefined ? s.tz : player.z;   // (a lobbed fireball: its own landing spot on the floor, s.time s from now)
+  const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = s.time || Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
+  const jitter = s.time ? () => 0 : () => (gameRng() - 0.5) * 0.05 * dist / t;   // a little inaccuracy (none for a fireball: its ring on the floor is exact)
+  const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, pool: !!pm, ring: s.ring === undefined ? -1 : s.ring, dmg: s.dmg || 1, mv: s.mv || null, mesh: pm || (s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind])) };
   if (s.fan) { const c = Math.cos(s.fan), n = Math.sin(s.fan), vx = a.vx; a.vx = vx * c - a.vz * n; a.vz = vx * n + a.vz * c; }   // a fan of shots: turn the velocity about the vertical axis
   a.mesh.position.set(a.x, a.y, a.z); if (!pm) group.add(a.mesh); arrows.push(a);
+  return true;
 }
+// A fireball landing (the Cinder Wyrm's volley): the ground burns there a moment, and anyone within the ring is hit like by any ground move (a block still hurts, knockback).
+function fireBurst(a) {
+  const mv = a.mv; bossFlameAdd(a.x, a.z, mv.r * 0.6, 1.5);
+  if (!a.from.dead && Math.hypot(a.x - player.x, a.z - player.z) <= mv.r + player.radius) resolveEnemyAttack(a.from, 'body', false, mv, a.dmg);
+}
+// Standing in a flame patch: bleed, refreshed while you stay.
+function flameBurn() { if (!pst.has('bleed')) { discover('status:bleed', STATUS.bleed.name); addLog('Burning: Bleed!', STATUS.bleed.color); } pst.apply('bleed', 3); }
 // An enemy shot (arrow, hex, thorn, curse, dart) that reached the player's ally first: arrows hurt by zone, the others apply their status.
 function allyShotHit(a, ev) {
   const al = ev.e, k = a.kind;
@@ -1173,7 +1181,8 @@ function updateArrows(dt) {
       const ev = stepArrow(a, dt, floor, enemies, player, Enemy.ally && Enemy.ally.floor === floor ? Enemy.ally : null);
       a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
       if (a.kind === 'arrow' || a.pool) { a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz); if (a.pool && BOSS_SHOT[a.kind].spin) a.mesh.rotateX(a.life * 14); }   // cleavers and bottles tumble
-      if (ev && ev.type === 'player') { enemyShotHit(a); if (a.mv && a.mv.puddle) bossPuddleAdd(a.x, a.z, a.mv); }
+      if (a.ring >= 0) { if (ev || a.life <= 0) { bossTeleOff(a.ring); if (ev && (ev.type === 'ground' || ev.type === 'player')) fireBurst(a); } }   // a fireball: its ring goes out, and the burst hits whoever is in it
+      else if (ev && ev.type === 'player') { enemyShotHit(a); if (a.mv && a.mv.puddle) bossPuddleAdd(a.x, a.z, a.mv); }
       else if (ev && ev.type === 'ally') allyShotHit(a, ev);
       else if (ev && ev.type === 'ground' && a.mv && a.mv.puddle) bottleLand(a);
       if (ev || a.life <= 0) { dropArrowMesh(a); arrows.splice(i, 1); }
@@ -1203,7 +1212,6 @@ function bossDefeated(e) {
   e.corpseDone = true;
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
   bossDead[stage] = true;
-  if (e.final) { flash('The Final Boss falls!'); clearTimeout(winTimer); winTimer = setTimeout(() => { if (state === 'play') finishRun(); }, 2500); return; }   // placeholder: the run ends
   const epic = rollEquipment(effFloor(), rng, {});
   epic.tier = rng() < TUNE.bossLegendary ? 4 : 3;
   const uniq = epic.tier === 4 ? rollUniqueGear(rng, rng() < 0.5) : null, bust = rollBust(rng, 0.12);    // a Legendary body may hold a one-of-a-kind piece
@@ -1213,6 +1221,7 @@ function bossDefeated(e) {
     p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
     mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
   });
+  if (e.final) { flash('The Cinder Wyrm falls! The chamber goes quiet.'); clearTimeout(winTimer); winTimer = setTimeout(() => { if (state === 'play') finishRun(); }, 2500); return; }   // its body stays (with its hoard); the run ends
   flash('The boss falls! Loot its body. A rumble shakes the arena: a hidden door in the north wall grinds open.');
   openSafeDoor();
 }
@@ -1414,7 +1423,8 @@ function moveStatus(mv) { if (pst.apply(mv.status, mv.statusDur)) { discover('st
 // through a wall: a blocked step slides along the wall or ends the push. One shared state, no allocation.
 const knock = { dx: 0, dz: 0, m: 0, t: 0, dur: 0.25, done: 0 };
 function applyKnock(dx, dz, metres) {
-  const d = Math.hypot(dx, dz); if (d < 1e-6 || !(metres > 0) || inSafe) return;
+  let d = Math.hypot(dx, dz); if (!(metres > 0) || inSafe) return;
+  if (d < 1e-6) { dx = Math.sin(player.yaw); dz = Math.cos(player.yaw); d = 1; }   // dead centre of the blast (a dragon landing on you): back the way you face
   knock.dx = dx / d; knock.dz = dz / d; knock.m = metres; knock.t = 0; knock.done = 0; knock.dur = 0.2 + 0.03 * metres;
 }
 function stepKnock(dt) {
@@ -1489,6 +1499,7 @@ function updateCombat(dt) {
   if (mech && mech.slippery) player.slipT = mt.carry; else if (player.slipT > 0) player.slipT -= dt;   // ice: the slide carries on for a moment after you leave it
   if (mech && mech.slow && mt) player.speedMul *= mt.slow;                      // wading through the Tavern's water
   if (BOSS_PUD.n) player.speedMul *= bossPuddleMul(player.x, player.z);                   // wading through the Innkeeper's ale
+  if (BOSS_FLAME.n && bossFlameAt(player.x, player.z)) flameBurn();                       // the Cinder Wyrm's flames: stand in them and you bleed
   if (BOSS_LANE.n && bossLaneAt(player.x, player.z)) player.slipT = Math.max(player.slipT, mt && mt.carry || 0.6);   // the Frost Giant's ice lane: slide like on the Chapel's ice
   player.slippery = player.slipT > 0; if (mt && mt.slip) player.slipRate = mt.slip;
   if (floor.prints) updatePrints(dt);
@@ -1818,7 +1829,7 @@ function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU mem
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
-  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear(); bossPuddlesClear();
+  arrows.forEach(dropArrowMesh); arrows.length = 0; bossTeleHide(); bossLanesClear(); bossPuddlesClear(); bossFlamesClear();
   floorCache[floorNum] = { floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnT };
   scene.remove(group);
 }
@@ -1857,7 +1868,7 @@ function startFloor(n) {
   if (floor.boss) flash(bossMsg());
   else flash(`${n === 1 ? '' : `Floor ${n}. `}Find the stairs.${locked ? ` Locked: ${locked}. Keys hide in chests.` : ''}`);
 }
-const bossMsg = () => stage === FINAL_STAGE ? 'The final chamber. Something huge waits in the middle. One healing potion hides along the walls.' : 'The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.';
+const bossMsg = () => stage === FINAL_STAGE ? 'The final chamber, open to the night sky. Something huge sleeps on the dais. One healing potion hides along the walls.' : 'The boss arena. Something huge sleeps in the middle. One healing potion hides along the walls.';
 function generateAndEnter(n, arrive) {
   clearBombs();
   gameRng = makeRng(((stageSeed ^ 0x6a09e667) >>> 0) + n * 69069);   // gameplay RNG for this floor (guard zones, procs, respawns)
@@ -1866,7 +1877,7 @@ function generateAndEnter(n, arrive) {
   floor = generateFloor(stageSeed, gn, { armory: !final && n === armoryFloor, boss: bossFloorAt(n), shop: !final && n === shopFloor, quest: final ? undefined : questPlan[n], themeName: theme.name, layoutStyle: theme.layout.style, depth: effFloor(0) });
   assignEnemyTypes(floor, stageSeed, gn, theme.name);       // natives, rat packs, wolves and their handlers (js/enemytypes.js)
   questSpawn(floor);                                        // then the floor's mini-boss, if any (js/quests.js), so the type pass never touches it
-  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? FINAL_BOSS : THEME_BOSS[theme.name]; if (b && tb) { b.dress = tb.dress; b.skin = tb.skin; b.final = final; b.bossId = final ? 'final' : theme.id; } }   // each theme's boss has its own look
+  if (floor.boss) { const b = floor.enemies.find(e => e.boss), tb = final ? null : THEME_BOSS[theme.name]; if (b) { if (tb) { b.dress = tb.dress; b.skin = tb.skin; } b.final = final; b.bossId = final ? 'final' : theme.id; } }   // each theme's boss has its own look (the final arena's is the dragon: js/bossmodels.js)
   floor.waterSlow = theme.mechanic.kind === 'puddle' ? theme.mechanic.TUNE.enemySlow : 0;   // the Tavern's flooded patches slow guards too (js/enemy.js goTo)
   floor.patches = new Map(floor.decor.filter(d => PATCH_KINDS.includes(d.kind)).map(d => [d.y * floor.w + d.x, d.kind]));   // the theme's floor gimmick, by tile
   WALL_H = floor.boss ? BOSS_WALL_H : 3.6;
@@ -2063,7 +2074,7 @@ function changeStage(s, dir) {
   const n = dir === 'up' ? MAX_FLOOR : 1, c = floorCache[n];
   if (c) { loadFloor(n, c); arriveBy(dir); floorBanner(n); }
   else { group = null; generateAndEnter(n, dir); }
-  flash(s === FINAL_STAGE ? 'The final stage. Whatever waits here has no name yet.' : dir === 'up' ? `You climb back up to stage ${s}: ${theme.name}, the safe room.` : `Stage ${s} of ${STAGES}: ${theme.name}. ${floor.boss ? '' : 'Find the stairs.'}`);
+  flash(s === FINAL_STAGE ? 'The final stage. Something ancient sleeps under the open sky.' : dir === 'up' ? `You climb back up to stage ${s}: ${theme.name}, the safe room.` : `Stage ${s} of ${STAGES}: ${theme.name}. ${floor.boss ? '' : 'Find the stairs.'}`);
   allyArrive();
   hunger.fight = 0;
   pruneThemeTextures();                                // free the textures of themes with no floor left
@@ -2081,7 +2092,7 @@ function startStage(s) {
 function finishRun() {
   state = 'won';
   document.exitPointerLock();
-  hud.overlayText.innerHTML = `<h1>Run complete</h1><p>The placeholder final boss is dead. You made it through all ${STAGES} stages. The real final fight is not designed yet.</p><p><button type="button" style="font:inherit;padding:6px 18px;cursor:pointer">Start a new run</button></p>`;
+  hud.overlayText.innerHTML = `<h1>Run complete</h1><p>The Cinder Wyrm is dead. You made it through all ${STAGES} stages and the final chamber.</p><p><button type="button" style="font:inherit;padding:6px 18px;cursor:pointer">Start a new run</button></p>`;
   hud.overlay.style.display = 'flex';
 }
 
@@ -2201,7 +2212,7 @@ function frame(now) {
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
-    updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt); bossPuddlesUpdate(dt);
+    updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt); bossPuddlesUpdate(dt); bossFlamesUpdate(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();

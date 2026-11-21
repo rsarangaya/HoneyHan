@@ -22,17 +22,21 @@
 //   charge ('charge' shape: it runs along the locked line at `speed` m/s up to `len` m, stops at you (hit: circle of `r`), or at a wall or prop: selfStun s of stagger, the only stun it can get), ticks/spin (a circle that hits `ticks` times
 //   over `spin` s after the strike: the Whirlwind), puddle {dur, r, slow} + splash (projectile: a bottle that lands within `splash` m of you still hurts and leaves a slowing puddle of radius r for dur s).
 //   blurb: one line for the glossary card (replaces the plate text).
+//   FLYING BOSS (the Cinder Wyrm): fly { radii (orbit radius candidates, the first one clear of walls and pillars wins), alt, bob, speed, cyc: [[air s, land s] per phase], early (share of maxHp lost in one landing that sends it up) },
+//   lowBands (bands while its head is down for a Bite: lowHead moves), moves flagged air:true are only picked in the air and the others only on the ground; 'land' and 'buffet' (chain: true) are started by the cycle.
+//   'dive' (it locks a line to you, then flies along it at speed, skimming low m over you: width/r/exit), 'sweep' (a cone that turns sweep degrees over spin s, a tick every tick s, leaving flame patches: flame {dur, r, n}),
+//   'land' (it glides down onto the spot it locked and the touchdown is a circle), after: 'fly' (the move ends with the take-off), muzzle/front (projectile: mouth height above alt, metres ahead), flight/spread (projectile: every shot
+//   lands flight s after it is fired, spread m apart, each with a ground ring of radius r; kind fire), phases[].gcdMul (more attacks).
 const BOSS_DEFS = {};
-const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon', 'blink', 'charge'];
+const BOSS_SHAPES = ['cone', 'circle', 'line', 'leap', 'projectile', 'summon', 'blink', 'charge', 'dive', 'sweep', 'land'];
 const BOSS_BASE_ID = 'cave';
 
 BOSS_DEFS.cave = {
   id: 'cave', name: 'Cave Warlord', theme: null, color: '#e0a070', model: null, scale: null, r: null, hpMul: 1, dmgMul: 1, speedMul: 1, resist: null, summonCap: 4, bands: null, meleeAlt: 2.5, phases: [],
   moves: [{ id: 'swing', name: 'Swing', shape: 'cone', wind: 0, dmg: 1, zone: 'rand', reach: 0, arc: 0, cd: 0, gcd: -1, rec: 0, minD: 0, maxD: 0, weight: 1, parry: true, ground: false }],
 };
-// The other themes and the final arena share the cave fight until their own defs replace these (BOSS2 to BOSS5); each keeps its own name and look.
+// Any theme without its own def shares the cave fight; each keeps its own name and look.
 if (typeof THEME_DEFS !== 'undefined') for (const t of THEME_DEFS) if (t.boss) BOSS_DEFS[t.id] = { ...BOSS_DEFS.cave, id: t.id, name: t.boss.name, theme: t.name };
-if (typeof FINAL_BOSS !== 'undefined') BOSS_DEFS.final = { ...BOSS_DEFS.cave, id: 'final', name: FINAL_BOSS.name, theme: null, tag: FINAL_BOSS.tag, color: '#c060ff' };
 
 // Damage multiplier on a hit to the boss: a Spore Burst leaves its cap deflated for a moment (body hits x expMul), a Shatter Nova opens the Frost Giant's core (any hit, expAll). Pure.
 function bossTakeMul(e, zone) { const bs = e.bs; return bs && bs.exp > 0 && (zone === 'body' || bs.expAll) ? bs.expMul : 1; }
@@ -153,7 +157,28 @@ BOSS_DEFS.warlord = {
     { id: 'whirl', name: 'Whirlwind', shape: 'circle', wind: 1.0, dmg: 0.5, zone: 'body', r: 3.4, ticks: 3, spin: 1.6, ground: true, knock: 3, maxD: 4, cd: 6, weight: 3, phase: [1, 99] },
   ],
 };
-// The Orchard, Cellar, Library, Chapel, Tavern, Market and Jungle fight their own bosses (bossId is the theme id).
+// ---- Cinder Wyrm (the Final Chamber): a dragon. It flies in circles (arrows, wands and spells hit it up there at full damage, melee cannot reach), strafes, sweeps fire and lobs fireballs, then lands for 12 s of
+// bites, claws, tail sweeps and breath. Hp = bossHp x hpMul x finalBossHp (3x the first boss). Cycle (air s / land s) by phase: 12/12, 10/12, 8/14; below a third it is enraged (x1.2 speed). ----
+BOSS_DEFS.dragon = {
+  id: 'dragon', name: 'Cinder Wyrm', theme: 'The Final Chamber', color: '#ff8a3a', model: 'dragon', scale: 1.7, r: 2.2, hpMul: 1, dmgMul: 1, speedMul: 1,
+  resist: { head: 0.75, body: 0.62, legs: 0.75 }, summonCap: 4, bands: [1.2, 2.6, 4.6], lowBands: [0.9, 1.6, 2.4], meleeAlt: 2.5,
+  fly: { radii: [16.75, 16.5, 17, 17.25, 20, 23, 14.5], alt: 6.4, bob: 0.6, speed: 9, cyc: [[12, 12], [10, 12], [8, 14]], early: 0.18 },
+  blurb: 'A huge dragon of charcoal and ember. It circles the chamber under the open sky, strafes you along a line of shadow, sweeps a stream of fire and lobs fireballs, then lands in a shockwave to bite, claw, lash its tail and breathe fire. Arrows and spells hit it in the air at full damage; melee reaches it on the ground or when it dives low. It takes off again if you hurt it badly while it is down. Below two thirds and a third of its health it fights harder.',
+  phases: [{ at: 0.66, dur: 1.4, gcdMul: 0.7 }, { at: 0.33, dur: 1.4, gcdMul: 0.7, enrage: 1.2 }],   // the air time shortens (10 s, 8 s) and the land time stretches (14 s); the last third is enraged
+  moves: [
+    { id: 'bite', name: 'Bite', shape: 'cone', wind: 0.8, dmg: 1.4, zone: 'head', reach: 4.5, arc: 40, lowHead: true, rec: 0.5, maxD: 5.2, cd: 1.5, weight: 3, parry: true },   // the head drops while it bites: that is the counter window
+    { id: 'claw', name: 'Claw Swipe', shape: 'cone', wind: 0.7, dmg: 1.0, zone: 'body', reach: 5, arc: 120, rec: 0.3, maxD: 5.7, weight: 3, parry: true },
+    { id: 'tail', name: 'Tail Sweep', shape: 'circle', wind: 1.0, dmg: 1.0, zone: 'legs', r: 6, ground: true, knock: 5, rec: 0.4, maxD: 6.4, cd: 5, weight: 2 },   // low guard (legs), a block still hurts
+    { id: 'breath', name: 'Close Breath', shape: 'cone', wind: 1.1, dmg: 1.1, zone: 'body', reach: 12, arc: 50, ground: true, knock: 3, status: 'bleed', statusDur: 3, rec: 0.6, minD: 4, maxD: 12.5, cd: 6, weight: 2 },   // go behind it
+    { id: 'buffet', name: 'Takeoff Buffet', shape: 'circle', wind: 0.9, dmg: 0.5, zone: 'body', r: 7, ground: true, knock: 3, after: 'fly', chain: true },
+    { id: 'strafe', name: 'Strafe Run', shape: 'dive', air: true, wind: 1.0, dmg: 1.3, zone: 'body', width: 3, r: 2.2, speed: 22, low: 1.6, exit: 12, ground: true, knock: 3, gcd: 1.3, rec: 0.5, minD: 9, maxD: 80, cd: 4, weight: 3 },   // a shadow strip for 1.0 s, then it dives along it: sidestep
+    { id: 'sweep', name: 'Fire Sweep', shape: 'sweep', air: true, wind: 1.2, dmg: 0.45, zone: 'body', reach: 24, arc: 40, sweep: 70, spin: 2.0, tick: 0.4, flame: { dur: 4, r: 1.8, n: 6 }, ground: true, gcd: 1.3, rec: 0.6, minD: 5, maxD: 30, cd: 6, weight: 2 },
+    { id: 'volley', name: 'Fireball Volley', shape: 'projectile', kind: 'fire', air: true, n: 3, spread: 5, flight: 1.1, r: 2.5, muzzle: 3.2, front: 2.6, wind: 0.8, dmg: 1.0, zone: 'body', lock: 'end', ground: true, knock: 2, status: 'bleed', statusDur: 3, gcd: 1.3, rec: 1.2, minD: 6, maxD: 60, cd: 5, weight: 3 },
+    { id: 'land', name: 'Landing', shape: 'land', air: true, at: 'target', wind: 1.5, dmg: 1.2, zone: 'body', r: 7, ground: true, knock: 5, rec: 0.6, chain: true },   // a shadow circle grows for 1.5 s, then the shockwave
+  ],
+};
+// The Orchard, Cellar, Library, Chapel, Tavern, Market and Jungle fight their own bosses (bossId is the theme id); the final arena fights the dragon (its bossId is 'final').
+BOSS_DEFS.final = BOSS_DEFS.dragon;
 BOSS_DEFS.orchard = BOSS_DEFS.scarecrow; BOSS_DEFS.cellar = BOSS_DEFS.mushroom; BOSS_DEFS.library = BOSS_DEFS.lich; BOSS_DEFS.chapel = BOSS_DEFS.giant;
 BOSS_DEFS.jungle = BOSS_DEFS.werewolf; BOSS_DEFS.tavern = BOSS_DEFS.innkeeper; BOSS_DEFS.market = BOSS_DEFS.warlord;
 for (const k in BOSS_DEFS) bossNormalize(BOSS_DEFS[k]);
@@ -171,6 +196,11 @@ function validateBossDef(def) {
     for (const nx of [].concat(mv.next || [])) if (!def.moves.some(m => m.id === nx)) err.push(mv.id + ': next ' + nx + ' does not exist');
     if (mv.phase && mv.phase[0] > mv.phase[1]) err.push(mv.id + ': phase range reversed');
   }
+  if (def.fly) {
+    if (!def.byId || !def.byId.land || !def.byId.buffet) err.push('a flying boss needs land and buffet moves');
+    if (!def.fly.cyc || def.fly.cyc.length !== (def.phases || []).length + 1) err.push('fly.cyc needs one [air, land] pair per phase');
+    if (!def.bands || !def.lowBands) err.push('a flying boss needs bands and lowBands');
+  }
   let prev = 1;
   for (const p of def.phases || []) { if (!(p.at > 0 && p.at < prev)) err.push('phases must have descending at in (0, 1): ' + p.at); prev = p.at; }
   return err;
@@ -182,7 +212,8 @@ const bossDefByTheme = themeName => { const t = typeof THEME_BY_NAME !== 'undefi
 // The per-boss state, built once (enemy.bs). cd: seconds left on each move's own cooldown; cand: scratch list for move selection.
 function bossState(def) {
   const cd = {}; for (const mv of def.moves) cd[mv.id] = 0;
-  return { st: 'idle', t: 0, mv: null, nx: null, combo: 0, phase: 0, spd: 1, windMul: 1, tx: 0, tz: 0, dx: 0, dz: -1, ox: 0, oz: 0, exp: 0, expMul: 1, expAll: false, cd, cand: new Array(def.moves.length).fill(0) };
+  return { st: 'idle', t: 0, mv: null, nx: null, combo: 0, phase: 0, spd: 1, windMul: 1, gcdMul: 1, tx: 0, tz: 0, dx: 0, dz: -1, ox: 0, oz: 0, exp: 0, expMul: 1, expAll: false, cd, cand: new Array(def.moves.length).fill(0),
+    air: false, cyc: 0, hp0: 0, hx: 0, hz: 0, R: def.fly ? def.fly.radii[0] : 0, cw: 1, fp: 0, a0: 0, dd: 0, dl: 0, hit: false, lowT: 0, y0: 0, sg: 1, tk: 0, run: 0 };   // air .. fp: a flying boss (cycle clock, home point, orbit radius and direction, flap clock); a0 .. hit: a dive or a landing; lowT: head down; y0, sg, tk: a sweep
 }
 
 // ---- hit tests (pure: plain objects with x, z, yaw, zone, reach, bs; no globals) ----
@@ -191,15 +222,15 @@ function moveHits(mv, boss, player) {
   const bs = boss.bs || BOSS_NO_BS, pr = player.radius || 0.35;
   const zone = mv.zone && mv.zone !== 'rand' ? mv.zone : boss.zone;
   switch (mv.shape) {
-    case 'cone': {
+    case 'cone': case 'sweep': {
       const dx = player.x - boss.x, dz = player.z - boss.z, d = Math.hypot(dx, dz);
       if (d > (mv.reach || boss.reach) + (mv.slack === undefined ? 0.5 : mv.slack)) return null;
       if (mv.arc > 0 && mv.arc < 360 && d > 0.5 && (dx * -Math.sin(boss.yaw) + dz * -Math.cos(boss.yaw)) / d < Math.cos(mv.arc * Math.PI / 360)) return null;
       return zone;
     }
     case 'charge': return Math.hypot(player.x - boss.x, player.z - boss.z) <= mv.r + pr ? zone : null;   // the shield and the body ploughing into you
-    case 'circle': case 'leap': {
-      const target = mv.shape === 'leap' || mv.at === 'target', cx = target ? bs.tx : boss.x, cz = target ? bs.tz : boss.z;
+    case 'circle': case 'leap': case 'land': {
+      const target = mv.shape === 'leap' || mv.shape === 'land' || mv.at === 'target', cx = target ? bs.tx : boss.x, cz = target ? bs.tz : boss.z;
       return Math.hypot(player.x - cx, player.z - cz) <= mv.r + pr ? zone : null;
     }
     case 'line': {
@@ -219,11 +250,16 @@ function moveHits(mv, boss, player) {
   }
 }
 const BOSS_NO_BS = { tx: 0, tz: 0, dx: 0, dz: -1 };
+// A dive (Strafe Run) from (ox, oz) along the unit line (dx, dz), the boss run m along it at height alt: hits when it passes over you (within mv.r along the line, inside the strip width) and is low enough. Pure.
+function diveHit(mv, ox, oz, dx, dz, run, alt, player) {
+  const rx = player.x - ox, rz = player.z - oz, along = rx * dx + rz * dz, across = Math.abs(rx * dz - rz * dx);
+  return alt <= (mv.hitAlt || 3.4) && Math.abs(run - along) <= (mv.r || 2.2) && across <= mv.width / 2 + (player.radius || 0.35) ? (mv.zone || 'body') : null;
+}
 
 // Hit zone for a non-biped boss: y is the world height of the swing or arrow (e.alt lifts the body), d the melee distance (omit for arrows).
 // Returns 'head' | 'body' | 'legs' or null. A swing cannot reach a body flying above def.meleeAlt.
 function bossZone(y, e, d) {
-  const B = e.def.bands, a = e.alt || 0;
+  const B = e.bs && e.bs.lowT > 0 && e.def.lowBands || e.def.bands, a = e.alt || 0;   // lowBands: the head is down for a Bite (a counter window)
   if (d !== undefined && a > (e.def.meleeAlt || 2.5)) return null;
   const h = y - a;
   if (h < 0 || h > B[2]) return null;
@@ -242,17 +278,81 @@ function bossBlinkSpot(e, player, dist) {
 }
 function bossLock(e, player) {
   const bs = e.bs, mv = bs.mv; if (mv.shape === 'blink') { bossBlinkSpot(e, player, mv.behind || 3); return; }
+  if (mv.shape === 'land') { bossLandSpot(e, player); return; }
   let dx = player.x - e.x, dz = player.z - e.z; const d = Math.hypot(dx, dz) || 1;
   dx /= d; dz /= d; bs.dx = dx; bs.dz = dz;
   const k = mv.shape === 'leap' && mv.maxD > 0 ? (d > mv.maxD ? mv.maxD : Math.max(0, d - (mv.stop || 0))) : d;   // a leap lands `stop` m short of you (so it never lands on top of you), or 10 m out at most
   bs.tx = e.x + dx * k; bs.tz = e.z + dz * k;
+  if (mv.shape === 'dive') bossDiveLine(e, d);
+}
+// ---- the flying boss (the Cinder Wyrm): x, z are logical as ever, e.alt is its height. It orbits its home point (the arena centre), dives, lands and takes off on a clock (bs.cyc). ----
+// Where it lands: on you if that spot is open for its body, else the nearest open spot toward home (the dais). Writes bs.tx / bs.tz and the glide origin.
+function bossLandSpot(e, player) {
+  const bs = e.bs; collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = e.r || r0;
+  let x = player.x, z = player.z;
+  for (let i = 0; i < 16 && Player.prototype.blocked.call(collider, e.floor, x, z); i++) { const dx = bs.hx - x, dz = bs.hz - z, d = Math.hypot(dx, dz) || 1; x += dx / d * 1.5; z += dz / d * 1.5; }
+  if (Player.prototype.blocked.call(collider, e.floor, x, z)) { x = bs.hx; z = bs.hz; }
+  collider.radius = r0; bs.tx = x; bs.tz = z; bs.ox = e.x; bs.oz = e.z; bs.a0 = e.alt;
+  bs.y0 = Math.hypot(x - e.x, z - e.z) > 1 ? Math.atan2(-(x - e.x), -(z - e.z)) : e.yaw;
+}
+// The line of a dive: d m to you plus mv.exit beyond, cut short where a wall or pillar would be in the way (bs.dl); bs.dd is where it skims lowest (over you).
+function bossDiveLine(e, d) {
+  const bs = e.bs, mv = bs.mv; collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = 2;
+  let L = d + (mv.exit || 12);
+  for (let s = 3; s < L; s += 2) if (Player.prototype.blocked.call(collider, e.floor, e.x + bs.dx * s, e.z + bs.dz * s)) { L = Math.max(4, s - 2); break; }
+  collider.radius = r0; bs.dl = L; bs.dd = Math.max(3, Math.min(d, L - 2)); bs.ox = e.x; bs.oz = e.z; bs.a0 = e.alt;
+}
+// The orbit radius for this flight: the first of def.fly.radii whose ring is clear of walls and pillars (else the one with the fewest blocked samples). Runs once per take-off.
+function bossOrbitR(e) {
+  const bs = e.bs, f = e.def.fly; collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = 2.4;
+  let best = f.radii[0], bn = 1e9;
+  for (let k = 0; k < f.radii.length && bn > 0; k++) {
+    const R = f.radii[k]; let n = 0;
+    for (let i = 0; i < 48; i++) { const a = i * Math.PI / 24; if (Player.prototype.blocked.call(collider, e.floor, bs.hx + Math.cos(a) * R, bs.hz + Math.sin(a) * R)) n++; }
+    if (n < bn) { bn = n; best = R; }
+  }
+  collider.radius = r0; return best;
+}
+const bossCyc = (e, air) => { const c = e.def.fly.cyc[Math.min(e.bs.phase, e.def.fly.cyc.length - 1)]; return air ? c[0] : c[1]; };   // seconds of this stance in the current phase
+// One frame of the orbit: ease the radius toward bs.R (5 m/s), go round at fly.speed, face the way it flies, and ease the height to fly.alt (bobbing).
+function bossOrbit(e, dt) {
+  const bs = e.bs, f = e.def.fly, sp = f.speed * bs.spd * e.st.moveMul(), ax = e.x - bs.hx, az = e.z - bs.hz, rad = Math.hypot(ax, az) || 1, ang = Math.atan2(az, ax);
+  const nr = rad + Math.max(-5 * dt, Math.min(5 * dt, bs.R - rad)), na = ang + bs.cw * sp * dt / Math.max(nr, 6);
+  e.yaw = turnToward(e.yaw, Math.atan2(bs.cw * Math.sin(na), -bs.cw * Math.cos(na)), 3 * dt);   // along the tangent
+  e.x = bs.hx + Math.cos(na) * nr; e.z = bs.hz + Math.sin(na) * nr; e.walkT += sp * dt;
+  e.alt += (f.alt + f.bob * Math.sin(bs.fp * 1.1) - e.alt) * (1 - Math.exp(-2.2 * dt));
+}
+// The glide of a landing: k 0..1 over the wind-up, from where it was (bs.ox, oz, a0) onto the locked spot, easing in and out.
+function bossGlide(e, k) { const bs = e.bs, s = k * k * (3 - 2 * k); e.x = bs.ox + (bs.tx - bs.ox) * s; e.z = bs.oz + (bs.tz - bs.oz) * s; e.alt = bs.a0 * (1 - s); }
+// The dive: along the locked line at mv.speed, height easing from where it was down to mv.low over you and back up to the orbit height. Returns the zone when it passes over you (once).
+function bossDive(e, dt, player) {
+  const bs = e.bs, mv = bs.mv, f = e.def.fly, sp = (mv.speed || 22) * bs.spd, lo = mv.low || 1.6;
+  bs.run = Math.min(bs.dl, bs.run + sp * dt);
+  const run = bs.run, D = bs.dd, L = bs.dl, u = run <= D ? run / D : (run - D) / Math.max(0.01, L - D), c = (1 - Math.cos(Math.PI * Math.min(1, u))) * 0.5;
+  e.x = bs.ox + bs.dx * run; e.z = bs.oz + bs.dz * run; e.alt = run <= D ? bs.a0 + (lo - bs.a0) * c : lo + (f.alt - lo) * c;
+  e.yaw = Math.atan2(-bs.dx, -bs.dz); e.walkT += sp * dt * 0.2;
+  let attack = null;
+  if (!bs.hit) { const z = diveHit(mv, bs.ox, bs.oz, bs.dx, bs.dz, run, e.alt, player); if (z) { bs.hit = true; attack = z; } }
+  if (run >= L) { bossTeleHide(); bossAfter(e, mv, player); }
+  return attack;
+}
+function bossTakeoff(e) { const bs = e.bs; bs.air = true; bs.cyc = bossCyc(e, true); bs.R = bossOrbitR(e); bs.cw = -bs.cw; e.atkCd = Math.max(e.atkCd, 1.2); }
+function bossLand(e) { const bs = e.bs; e.x = bs.tx; e.z = bs.tz; e.alt = 0; bs.air = false; bs.cyc = bossCyc(e, false); bs.hp0 = e.hp; e.pk = ''; e.rp = 0; e.stuckT = 0; }   // touchdown: the land stance starts, and the early take-off counts damage from here
+// The flying boss's chase step. Returns true when it handled the frame (orbiting, or starting the landing / the take-off), false to walk after you like the others.
+function bossFly(e, dt, player, dist) {
+  const bs = e.bs, f = e.def.fly;
+  if (!bs.air) { if (bs.cyc > 0) return false; bossStart(e, e.def.byId.buffet, player); return true; }
+  bossOrbit(e, dt);
+  if (bs.cyc <= 0) { bossStart(e, e.def.byId.land, player); return true; }
+  if (e.atkCd <= 0 && e.alt > f.alt - 1.2) { const mv = bossPick(e, dist); if (mv) bossStart(e, mv, player); }
+  return true;
 }
 function bossLive(e) { let live = 0; const all = Enemy.all; for (let i = 0; i < all.length; i++) if (all[i].minion === e && !all[i].dead) live++; return live; }
 function bossPick(e, dist) {
   const bs = e.bs, mvs = e.def.moves, cand = bs.cand; let n = 0, tot = 0;
   for (let i = 0; i < mvs.length; i++) {
     const mv = mvs[i];
-    if (mv.chain || bs.phase < mv.phase[0] || bs.phase > mv.phase[1] || bs.cd[mv.id] > 0) continue;
+    if (mv.chain || bs.phase < mv.phase[0] || bs.phase > mv.phase[1] || bs.cd[mv.id] > 0 || !!mv.air !== bs.air) continue;   // (air moves only in the air, the others only on the ground)
     if (dist < (mv.minD || 0) || dist >= (mv.maxD || mv.reach || e.reach)) continue;
     if (mv.shape === 'summon' && bossLive(e) >= (mv.cap || e.def.summonCap || 4)) continue;   // the cap is full: no howl
     cand[n++] = i; tot += mv.weight;
@@ -267,6 +367,7 @@ function bossStart(e, mv, player) {
   const bs = e.bs;
   bs.mv = e.mv = mv; bs.st = 'telegraph'; e.winding = true; e.windT = 0;
   e.zone = mv.zone === 'rand' ? pickZone(e.T.zones) : mv.zone; e.hitMul = mv.dmg;
+  if (mv.lowHead) bs.lowT = mv.wind * bs.windMul + STRIKE_T + (mv.lowT || 0.6);   // the head drops for the strike and just after it
   bossLock(e, player);
 }
 function bossAfter(e, mv, player) {
@@ -274,31 +375,45 @@ function bossAfter(e, mv, player) {
   if (mv.next) { if (typeof mv.next === 'string') nx = by[mv.next]; else for (let i = 0; i < mv.next.length && !nx; i++) { const c = by[mv.next[i]]; if (c && bs.phase >= c.phase[0] && bs.phase <= c.phase[1]) nx = c; } }
   if (nx && bs.phase >= nx.phase[0] && bs.phase <= nx.phase[1]) { bs.nx = nx; bs.st = 'chain'; bs.combo++; return; }   // started next frame, after this hit is resolved
   bs.combo = 0;
+  if (mv.after === 'fly') bossTakeoff(e);
   if (mv.expose) { bs.exp = mv.expose.t; bs.expMul = mv.expose.mul; bs.expAll = !!mv.expose.all; }
   if (mv.rec > 0) { bs.st = 'recover'; bs.t = mv.rec; } else bs.st = 'chase';
 }
 function bossPhase(e, i) {
   const bs = e.bs, p = e.def.phases[i - 1];
-  bs.phase = i; bs.spd = (p.speedMul || 1) * (p.enrage || 1); bs.windMul = p.windMul || 1;
+  bs.phase = i; bs.spd = (p.speedMul || 1) * (p.enrage || 1); bs.windMul = p.windMul || 1; bs.gcdMul = p.gcdMul || 1;
   bs.st = 'phase'; bs.t = p.dur === undefined ? 1.2 : p.dur; e.winding = false; e.atkCd = Math.max(e.atkCd, 0.5);
   if (p.add) for (let k = 0; k < p.add.length; k++) bossSummon(e, p.add[k], 1, e.def.summonCap || 4);
 }
 // A parry staggered it (enemy.js update sees stun > 0): drop the move, hide its telegraph, stand on the ground.
 function bossStagger(e) {
   const bs = e.bs; if (bs.st === 'stagger') return;
-  bs.st = 'stagger'; bs.combo = 0; bs.nx = null; bs.exp = 0; e.mv = null; e.alt = 0; bossTeleHide();
+  if (e.mv && e.mv.lowHead) bs.lowT = 1.0;                // a parried Bite leaves the head down for the stagger
+  bs.st = 'stagger'; bs.combo = 0; bs.nx = null; bs.exp = 0; e.mv = null; if (!bs.air) e.alt = 0; bossTeleHide();
 }
 function bossFire(e, mv, noise) {
-  const n = mv.n || 1, y = 1.35 * e.scaleK, bs = e.bs, gap = mv.gap || 0;
+  const n = mv.n || 1, bs = e.bs, gap = mv.gap || 0, y = mv.muzzle ? e.alt + mv.muzzle : 1.35 * e.scaleK;
+  if (mv.flight) {                                         // lobbed fire: every shot lands mv.flight s from now on its own spot (you, and mv.spread m either side), each with a ground ring from the telegraph pool
+    const mx = e.x - Math.sin(e.yaw) * (mv.front || 0), mz = e.z - Math.cos(e.yaw) * (mv.front || 0); collider.props = e.floor.solids;
+    for (let i = 0; i < n; i++) {
+      const o = (i - (n - 1) / 2) * (mv.spread || 0); let tx = bs.tx - bs.dz * o, tz = bs.tz + bs.dx * o;
+      if (o && Player.prototype.blocked.call(collider, e.floor, tx, tz)) { tx = bs.tx; tz = bs.tz; }   // not into a wall: then on you
+      if (noise.shoot({ from: e, kind: mv.kind, x: mx, y, z: mz, speed: 12, dmg: mv.dmg, mv, fan: 0, tx, tz, time: mv.flight, ring: i }) !== false) bossTeleShow(i, 'disc', tx, tz, 0, mv.r, mv.r);
+    }
+    if (BOSS_TELE_MAT) BOSS_TELE_MAT.opacity = 0.5;
+    return;
+  }
   for (let i = 0; i < n; i++) noise.shoot({ from: e, kind: mv.kind, x: e.x - bs.dx * gap * i, y, z: e.z - bs.dz * gap * i, speed: mv.speed || 12, dmg: mv.dmg, mv,   // gap: lined up one behind another
     fan: mv.ring ? (i / n * 360 + (mv.off || 0)) * Math.PI / 180 : n > 1 && mv.arc ? (i / (n - 1) - 0.5) * mv.arc * Math.PI / 180 : 0 });   // ring: spread round the whole circle
 }
 function bossStrike(e, mv, player, noise, los) {
   const bs = e.bs;
-  e.winding = false; e.atkCd = mv.gcd >= 0 ? mv.gcd : e.cooldown; bs.cd[mv.id] = mv.cd;
+  e.winding = false; e.atkCd = mv.gcd >= 0 ? mv.gcd * bs.gcdMul : e.cooldown; bs.cd[mv.id] = mv.cd;
   noise.emit(e.x, e.z, CLASH_R, e);                       // a fight is loud
-  if (mv.shape !== 'leap' && !mv.ticks) bossTeleHide();   // a leap keeps its landing mark until it lands, a whirlwind its circle until it stops
-  if (mv.shape === 'leap' || mv.shape === 'charge') { bs.st = 'special'; bs.t = 0; bs.run = 0; bs.ox = e.x; bs.oz = e.z; return null; }
+  if (mv.shape !== 'leap' && mv.shape !== 'dive' && mv.shape !== 'sweep' && !mv.ticks) bossTeleHide();   // a leap keeps its landing mark until it lands, a whirlwind its circle until it stops, a dive its strip and a sweep its fan
+  if (mv.shape === 'leap' || mv.shape === 'charge' || mv.shape === 'dive') { bs.st = 'special'; bs.t = 0; bs.run = 0; bs.ox = e.x; bs.oz = e.z; bs.hit = false; bs.a0 = e.alt; return null; }
+  if (mv.shape === 'sweep') { bs.st = 'sweep'; bs.t = 0; bs.tk = 1; bs.y0 = e.yaw; bs.sg = -bs.sg; bossSweepTick(e, mv, 0); return hasLOS(e.floor, e.x, e.z, player.x, player.z) ? moveHits(mv, e, player) : null; }   // the first tick lands with the strike, the beam turns the other way each time
+  if (mv.shape === 'land') bossLand(e);
   if (mv.ticks > 1) { bs.st = 'spin'; bs.t = 0; bs.tk = 1; return moveHits(mv, e, player); }   // the first tick lands with the strike, the rest while it spins
   let attack = null;
   if (mv.shape === 'blink') { e.x = bs.tx; e.z = bs.tz; e.yaw = Math.atan2(-(player.x - e.x), -(player.z - e.z)); }   // gone, and there behind you
@@ -331,8 +446,11 @@ function bossUpdate(e, dt, player, noise, dist, los) {
   e.atkCd -= dt;
   for (let i = 0; i < mvs.length; i++) { const id = mvs[i].id; if (cd[id] > 0) cd[id] -= dt; }
   if (bs.exp > 0) bs.exp -= dt;
-  if (e.mv && bs.st !== 'telegraph' && bs.st !== 'attack' && bs.st !== 'special' && bs.st !== 'spin') e.mv = null;   // a finished move stops being the boss's move (its hit was resolved last frame)
-  if (bs.st === 'idle' || bs.st === 'stagger') bs.st = 'chase';
+  if (bs.lowT > 0) bs.lowT -= dt;
+  if (e.mv && bs.st !== 'telegraph' && bs.st !== 'attack' && bs.st !== 'special' && bs.st !== 'spin' && bs.st !== 'sweep') e.mv = null;   // a finished move stops being the boss's move (its hit was resolved last frame)
+  if (bs.st === 'idle') { if (def.fly) { bs.hx = e.x; bs.hz = e.z; bs.hp0 = e.hp; bs.cyc = bossCyc(e, false); } bs.st = 'chase'; }   // a flying boss wakes on its landing pad: that is its home point
+  else if (bs.st === 'stagger') bs.st = 'chase';
+  if (def.fly) { bs.cyc -= dt; bs.fp += dt; if (!bs.air && bs.cyc > 0 && bs.hp0 - e.hp >= def.fly.early * e.maxHp) bs.cyc = 0; }   // the stance clock; badly hurt on the ground: up it goes
   if ((bs.st === 'chase' || bs.st === 'recover') && bs.phase < def.phases.length && e.hp <= def.phases[bs.phase].at * e.maxHp) bossPhase(e, bs.phase + 1);
   switch (bs.st) {
     case 'phase': case 'recover':
@@ -343,9 +461,10 @@ function bossUpdate(e, dt, player, noise, dist, los) {
     case 'telegraph': case 'attack': {
       const mv = bs.mv, w = e.windT_; e.windT += dt;
       if (e.windT < w) {
-        e.yaw = turnToward(e.yaw, Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts
+        e.yaw = turnToward(e.yaw, mv.shape === 'dive' ? Math.atan2(-bs.dx, -bs.dz) : mv.shape === 'land' ? bs.y0 : Math.atan2(-dx, -dz), 4 * dt);   // locked once the swing starts (a dive and a landing face their own line)
         if (mv.lock === 'end') bossLock(e, player);
       } else bs.st = 'attack';
+      if (mv.shape === 'land') bossGlide(e, Math.min(1, e.windT / w));
       if (mv.ground || mv.tele) bossTeleDraw(e, mv, Math.min(1, e.windT / w));
       if (e.windT >= w + STRIKE_T) attack = bossStrike(e, mv, player, noise, los);
       break;
@@ -359,9 +478,17 @@ function bossUpdate(e, dt, player, noise, dist, los) {
       }
       break;
     }
+    case 'sweep': {                                                     // the Fire Sweep: the beam turns mv.sweep degrees over mv.spin s, a tick every mv.tick s (the first came with the strike), flames where it falls
+      const mv = bs.mv, n = Math.round(mv.spin / mv.tick); bs.t += dt;
+      e.yaw = bs.y0 + bs.sg * mv.sweep * Math.PI / 180 * Math.min(1, bs.t / mv.spin); bossTeleDraw(e, mv, 1);
+      if (bs.tk < n && bs.t >= bs.tk * mv.tick) { bossSweepTick(e, mv, bs.tk); bs.tk++; e.hitMul = mv.dmg; if (hasLOS(e.floor, e.x, e.z, player.x, player.z)) attack = moveHits(mv, e, player); }
+      if (bs.t >= mv.spin) { bossSweepTick(e, mv, n); bossTeleHide(); bossAfter(e, mv, player); }
+      break;
+    }
     case 'special': {                                                   // a leap: slide from the take-off point to the locked landing point, arcing up, then the landing circle hits
       const mv = bs.mv, dur = mv.dur || 0.6;
       if (mv.shape === 'charge') { attack = bossCharge(e, dt, player); break; }
+      if (mv.shape === 'dive') { attack = bossDive(e, dt, player); break; }
       bs.t += dt;
       let k = Math.min(1, bs.t / dur);
       const nx = bs.ox + (bs.tx - bs.ox) * k, nz = bs.oz + (bs.tz - bs.oz) * k;
@@ -374,14 +501,20 @@ function bossUpdate(e, dt, player, noise, dist, los) {
       break;
     }
     default: {                                                          // chase, same movement as every alerted guard
+      if (def.fly && bossFly(e, dt, player, dist)) break;              // (a flying boss orbits while it is up, and starts its landing and take-off on the clock)
       if (dist > 1.0 || !e.seen) { if (e.goTo(e.last.x, e.last.z, e.chase, dt) < 0.8 && !e.seen) e.lostT += dt; }
       else e.yaw = turnToward(e.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
       if (!e.seen) e.lostT += dt * 0.5;
       if (los && e.atkCd <= 0) { const mv = bossPick(e, dist); if (mv) bossStart(e, mv, player); }
-      if (e.lostT > 3) { e.aware = 0.6; e.set('searching'); }
+      if (e.lostT > 3 && !def.fly) { e.aware = 0.6; e.set('searching'); }   // (the dragon never loses you: it keeps its cycle going and hunts from the air)
     }
   }
   return attack;
+}
+
+// Tick i of a Fire Sweep: a flame patch on the beam (8 m out, then 3 m farther each tick), mv.flame = { dur, r, n }.
+function bossSweepTick(e, mv, i) {
+  const d = 8 + 3 * i; bossFlameAdd(e.x - Math.sin(e.yaw) * d, e.z - Math.cos(e.yaw) * d, mv.flame.r, mv.flame.dur);
 }
 
 // Summon up to n of enemy type `type` round the boss, never more than cap alive from this boss. Returns how many appeared. Main.js builds them (Enemy.summon).
@@ -394,10 +527,10 @@ function bossSummon(e, type, n, cap) {
 
 // ---- pools (per floor group: group.userData.bossFx; the meshes are children of the group, so they are freed with it) ----
 const BOSS_TELE_N = 4, BOSS_POOL_N = 12;
-const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0, geo: 'page', both: true }, shard: { color: 0x9ad8ff, r: 0.14, g: 0, geo: 'shard' }, bottle: { color: 0x6aa04a, r: 0.14, g: 6, geo: 'bottle', spin: true }, axe: { color: 0xa0a0aa, r: 0.17, g: 4, geo: 'axe', spin: true }, fire: { color: 0xff7a20, r: 0.2, g: 5 } };
+const BOSS_SHOT = { crow: { color: 0x221a1a, r: 0.16, g: 0, bird: true }, page: { color: 0xe8e0c0, r: 0.15, g: 0, geo: 'page', both: true }, shard: { color: 0x9ad8ff, r: 0.14, g: 0, geo: 'shard' }, bottle: { color: 0x6aa04a, r: 0.14, g: 6, geo: 'bottle', spin: true }, axe: { color: 0xa0a0aa, r: 0.17, g: 4, geo: 'axe', spin: true }, fire: { color: 0xff7a20, r: 0.45, g: 5 } };
 const BOSS_SHOT_MATS = {};
 let BOSS_TELE_MAT = null;
-const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {}, lane: [], pud: [] });
+const bossFxFor = g => g.userData.bossFx || (g.userData.bossFx = { tele: [], shots: {}, lane: [], pud: [], flame: [] });
 
 function bossTeleGeo(kind, arc) {
   if (kind === 'disc') return cachedGeo('tdisc', () => { const g = new THREE.CircleGeometry(1, 32); g.rotateX(-Math.PI / 2); return g; });
@@ -409,7 +542,7 @@ function bossTeleSlot(i) {
   if (i >= BOSS_TELE_N) return null;
   const pool = bossFxFor(group).tele;
   if (!BOSS_TELE_MAT) { BOSS_TELE_MAT = new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }); BOSS_TELE_MAT.userData.shared = true; }
-  while (pool.length <= i) { const m = new THREE.Mesh(bossTeleGeo('disc'), BOSS_TELE_MAT); m.visible = false; m.renderOrder = 2; m.position.y = 0.03; m.frustumCulled = false; group.add(m); pool.push(m); }
+  while (pool.length <= i) { const m = new THREE.Mesh(bossTeleGeo('disc'), BOSS_TELE_MAT); m.visible = false; m.renderOrder = 2; m.position.y = group.userData.fxY || 0.03; m.frustumCulled = false; group.add(m); pool.push(m); }   // (fxY: the final arena's dais is 0.18 m high, the marks must sit above it)
   return pool[i];
 }
 // Show slot i: kind 'disc' | 'strip' | 'fan', at (x, z) facing yaw, scaled sx (radius or width) by sz (radius or length). Reuses the mesh, no allocation.
@@ -421,6 +554,9 @@ function bossTeleShow(i, kind, x, z, yaw, sx, sz, arc) {
 function bossTeleDraw(e, mv, k) {
   const bs = e.bs;
   if (mv.shape === 'blink') bossTeleShow(0, 'disc', bs.tx, bs.tz, 0, 1.1, 1.1);                  // the marker where it will appear
+  else if (mv.shape === 'dive') bossTeleShow(0, 'strip', bs.ox, bs.oz, Math.atan2(-bs.dx, -bs.dz), mv.width, bs.dl);              // the shadow it will dive along
+  else if (mv.shape === 'land') { const s = mv.r * (0.35 + 0.65 * k); bossTeleShow(0, 'disc', bs.tx, bs.tz, 0, s, s); }          // the landing shadow grows
+  else if (mv.shape === 'projectile') return;                                                                                       // fireballs: their rings come with the shots
   else if (mv.shape === 'charge') bossTeleShow(0, 'strip', e.x, e.z, Math.atan2(-bs.dx, -bs.dz), mv.width, mv.len);
   else if (mv.shape === 'circle' || mv.shape === 'leap') { const t = mv.shape === 'leap' || mv.at === 'target'; bossTeleShow(0, 'disc', t ? bs.tx : e.x, t ? bs.tz : e.z, 0, mv.r, mv.r); }
   else if (mv.shape === 'line') {
@@ -530,6 +666,35 @@ function bossPuddlesUpdate(dt) {
   }
 }
 function bossPuddlesClear() { const L = BOSS_PUD.items; for (let i = 0; i < BOSS_PUD_N; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_PUD.n = 0; }
+// ---- flame patches (Fire Sweep, fireball impacts): up to 6 pooled discs on the floor for dur s; standing in one makes you bleed (bossFlameAt, main.js applies it). Same cost model as the puddles. ----
+const BOSS_FLAME_N = 6, BOSS_FLAME = { n: 0, items: Array.from({ length: BOSS_FLAME_N }, () => ({ t: 0, dur: 1, x: 0, z: 0, r: 1, m: null })) };
+function bossFlameAdd(x, z, r, dur) {
+  const L = BOSS_FLAME.items; let it = null;
+  for (let i = 0; i < BOSS_FLAME_N && !it; i++) if (L[i].t <= 0) it = L[i];
+  if (!it) { it = L[0]; for (let i = 1; i < BOSS_FLAME_N; i++) if (L[i].t < it.t) it = L[i]; }       // all in use: replace the one about to burn out
+  if (it.t <= 0) BOSS_FLAME.n++;
+  it.t = it.dur = dur; it.x = x; it.z = z; it.r = r;
+  const pool = bossFxFor(group).flame, i = L.indexOf(it);
+  if (!pool[i]) { const m = new THREE.Mesh(bossTeleGeo('disc'), new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.7, depthWrite: false })); m.position.y = (group.userData.fxY || 0.025) + 0.003; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
+  const m = it.m = pool[i]; m.position.x = x; m.position.z = z; m.scale.set(r, 1, r); m.material.opacity = 0.7; m.visible = true;
+}
+function bossFlameAt(x, z) {
+  if (!BOSS_FLAME.n) return false;
+  const L = BOSS_FLAME.items;
+  for (let i = 0; i < BOSS_FLAME_N; i++) { const p = L[i]; if (p.t > 0 && (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) <= (p.r + 0.1) * (p.r + 0.1)) return true; }
+  return false;
+}
+function bossFlamesUpdate(dt) {
+  if (!BOSS_FLAME.n) return;
+  const L = BOSS_FLAME.items;
+  for (let i = 0; i < BOSS_FLAME_N; i++) {
+    const p = L[i]; if (p.t <= 0) continue;
+    if ((p.t -= dt) <= 0) { p.t = 0; BOSS_FLAME.n--; if (p.m) p.m.visible = false; } else if (p.m) p.m.material.opacity = (0.55 + 0.15 * Math.sin(p.t * 13 + i * 2)) * Math.min(1, p.t * 1.2);   // it flickers and dies down over the last second
+  }
+}
+function bossFlamesClear() { const L = BOSS_FLAME.items; for (let i = 0; i < BOSS_FLAME_N; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_FLAME.n = 0; }
+// One ring of the telegraph pool goes out (a fireball landed).
+function bossTeleOff(i) { if (typeof group === 'undefined' || !group || !group.userData.bossFx) return; const m = group.userData.bossFx.tele[i]; if (m) m.visible = false; }
 function bossFxRelease(m) { m.visible = false; m.userData.busy = false; }
 
 // ---- HUD and glossary text from the defs ----

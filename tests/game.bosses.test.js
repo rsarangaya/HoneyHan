@@ -1,5 +1,6 @@
 // Boss framework in the browser: the cave boss behaves exactly as before (golden numbers), the pooled ground telegraph and boss shots never grow,
-// and ground moves are blockable only for a share (blockTake) with an eased knockback that never passes a wall. Run on its own: node tests/game.bosses.test.js
+// and ground moves are blockable only for a share (blockTake) with an eased knockback that never passes a wall; then every boss in turn, the Cinder Wyrm last (the arena, the fly / land cycle, every move,
+// hits on a flying body, pools, cost, the end of the run). Run on its own: node tests/game.bosses.test.js
 const { run } = require('./lib');
 
 // Page-side helpers: put the player `d` metres south of the boss facing it, boss awake and alerted, no cooldown.
@@ -696,6 +697,291 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
     check(`${tag} nothing grows while it fights: same children, at most 4 telegraph meshes and 12 per shot kind`, o.pools.kids0 === o.pools.kids1 && o.pools.tele0 === o.pools.tele1 && o.pools.tele1 <= 4 && o.pools.shots0 === o.pools.shots1 && o.pools.maxShot <= 12, JSON.stringify(o.pools));
     check(`${tag} the boss bar has a 50% notch and the glossary card lists every move`, ui.notch.join() === '50%' && ui.name === 'Goblin Warlord' && ['War Cleave', 'Shield Charge', 'Cleaver Throw', 'Banner Rally', 'Whirlwind'].every(n => ui.card.includes(n)), `${ui.notch}`);
     check(`${tag} it dies and the safe room door opens`, o.fin.error === null && o.fin.dead && o.fin.open, JSON.stringify(o.fin));
+    await pg.close();
+  }
+
+  // 8. BOSS5: the Cinder Wyrm (stage 5, the Final Chamber, seed 3): the arena, the fly / land cycle, every move, hits on a flying body, pools, cost, the run's end.
+  const DR_HELPERS = () => {
+    window.DR = {
+      fresh() {   // a fresh final stage, the dragon asleep on its dais; BT.setup is patched once so a landed dragon never takes off on the clock while a landed move is being tested
+        game.startStage(5); const b = game.enemies.find(e => e.boss); DR.home = [b.x, b.z]; BR.home = DR.home;
+        for (const e of game.enemies) if (!e.boss) e.dead = true;
+        if (!DR.patched) { DR.patched = true; const s0 = BT.setup; BT.setup = (d, sw) => { const b = s0(d, sw); if (b.def.fly) { b.bs.cyc = 1e9; b.bs.hp0 = b.hp; b.bs.hx = DR.home[0]; b.bs.hz = DR.home[1]; b.bs.air = false; b.alt = 0; } return b; }; }
+        return b;
+      },
+      // The dragon up at its orbit height (or landed: o.land), awake, only move `id` ready; the player at home + (px, pz) looking at it.
+      up(id, o = {}) {
+        const b = game.enemies.find(e => e.boss), P = game.player, D = b.def, h = DR.home;
+        for (const a of game.arrows) a.life = 0; updateArrows(0.016); bossTeleHide(); bossFlamesClear(); knock.m = 0;
+        b.bs = bossState(D); b.bs.st = 'chase'; b.bs.hx = h[0]; b.bs.hz = h[1]; b.bs.air = !o.land; b.bs.R = 17; b.bs.cyc = o.cyc === undefined ? 1e9 : o.cyc; b.bs.phase = o.phase || 0;
+        const a = o.ang === undefined ? -0.6 : o.ang; b.x = h[0] + Math.cos(a) * 17; b.z = h[1] + Math.sin(a) * 17; b.alt = o.land ? 0 : 6.4; b.yaw = Math.atan2(Math.sin(a), -Math.cos(a));
+        b.dormant = false; b.stun = 0; b.winding = false; b.mv = null; b.set('alerted'); b.atkCd = 0; b.hp = b.maxHp; b.bs.hp0 = b.hp;
+        for (const m of D.moves) b.bs.cd[m.id] = m.id === id ? 0 : 1e9;
+        P.x = h[0] + (o.px === undefined ? -5 : o.px); P.z = h[1] + (o.pz === undefined ? 4 : o.pz); P.vx = P.vz = 0; P.keys = {}; P.pitch = 0; P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z));
+        b.last = { x: P.x, z: P.z }; game.inv.hp = game.inv.maxHp = 10000; game.cb.stamina = 100; game.cb.block = false; game.cb.blockT = 1; game.pst.clear();
+        return b;
+      },
+      // Step the dragon and the shots until until(b, t) says stop; every hit goes through resolveEnemyAttack. ev: { id, t (since the telegraph began), wind, zone, lost, knock, alt }.
+      go(b, until, o = {}) {
+        const P = game.player, dt = o.dt || 1 / 120, ev = []; let t = 0, t0 = null;
+        for (let i = 0; i < (o.max || 2400); i++) {
+          if (o.pre) o.pre(b, t);
+          const z = b.update(dt, P, BT.noise); if (b.winding && t0 === null) t0 = t; t += dt;
+          const h0 = game.inv.hp; updateArrows(dt); if (o.ks) stepKnock(dt);
+          if (h0 !== game.inv.hp) ev.push({ id: 'shot', t: t - (t0 || 0), lost: h0 - game.inv.hp, knock: knock.m });
+          if (z) { const mv = b.mv, hp0 = game.inv.hp, wind = b.windT_; resolveEnemyAttack(b, z); ev.push({ id: mv.id, t: t - (t0 || 0), wind, zone: z, lost: hp0 - game.inv.hp, knock: knock.m, alt: b.alt }); }
+          if (o.each) o.each(b, t, i);
+          if (until(b, t)) break;
+        }
+        return { ev, t, t0 };
+      },
+      sim(phase, secs, dt = 1 / 60) {   // the cycle on its own: the player far away, no move ever picked; the times of every stance change
+        const b = DR.fresh(), P = game.player, D = b.def, h = DR.home;
+        b.bs = bossState(D); b.bs.st = 'chase'; b.bs.hx = h[0]; b.bs.hz = h[1]; b.bs.phase = phase; b.hp = b.maxHp * (phase === 0 ? 1 : phase === 1 ? 0.5 : 0.2); b.bs.hp0 = b.hp; b.bs.cyc = bossCyc(b, false);
+        for (const m of D.moves) b.bs.cd[m.id] = 1e9;
+        b.dormant = false; b.set('alerted'); b.atkCd = 0; P.x = h[0] + 45; P.z = h[1] + 20; b.last = { x: P.x, z: P.z }; game.inv.hp = game.inv.maxHp = 1e6;
+        const log = []; let air = false, mv = null, t = 0, maxAlt = 0, minR = 1e9, maxR = 0;
+        for (let i = 0; i < secs / dt; i++) {
+          b.update(dt, P, BT.noise); t += dt; const id = b.mv ? b.mv.id : null;
+          if (id !== mv && (id === 'buffet' || id === 'land')) log.push([id, +t.toFixed(2)]); mv = id;
+          if (b.bs.air !== air) { air = b.bs.air; log.push([air ? 'air' : 'ground', +t.toFixed(2)]); }
+          if (b.bs.air && b.bs.st === 'chase' && b.alt > 5 && b.bs.cyc < 4 && b.bs.cyc > 0.5) { const r = Math.hypot(b.x - h[0], b.z - h[1]); minR = Math.min(minR, r); maxR = Math.max(maxR, r); maxAlt = Math.max(maxAlt, b.alt); }
+        }
+        return { log, maxAlt, minR, maxR, phase: b.bs.phase };
+      },
+    };
+  };
+
+  {
+    const pg = await open(3); await pg.evaluate(BOSS_HELPERS); await pg.evaluate(BR_HELPERS); await pg.evaluate(DR_HELPERS);
+    const tag = '[Cinder Wyrm]';
+    const o = await pg.evaluate(() => {
+      const out = {}; let b = DR.fresh(); const D = b.def, P = game.player;
+      out.def = { id: D.id, name: D.name, hud: document.querySelector('#boss div').textContent, scale: b.scaleK, hp: b.maxHp, dmg: b.dmgMul, final: b.final, sky: !!game.group.userData.sky, chand: game.floor.decor.filter(d => d.kind === 'chandelier').length, wall: WALL_H, final5: BOSS_DEFS.final === D, tag: b.tag && b.tag.parent === b.mesh, theme: game.floor.decor.some(d => d.kind === 'dais') && !!game.floor.runes };
+      out.meshes = 0; b.mesh.traverse(o => { if (o.isMesh) out.meshes++; }); out.baked = b.mats.length === 1; out.groups = b.bd.groups.length;
+      out.stun = b.addStatus('stun', 2); out.sleep = b.sleep(5);
+      { const w0 = weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })); b = BT.setup(1.6); const hp = b.maxHp; b.hp = b.maxHp = 50000; dealHit(b, 'body', w0.dmg, w0, 0); out.ttk = Math.ceil(hp / (50000 - b.hp)); b.hp = b.maxHp = hp; }
+      out.ttk1 = Math.ceil(220 / (() => { const w0 = weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), x = { hp: 50000, resist: { body: 0.62 } }; return w0.dmg * ZONE_MUL.body * 0.62; })());
+      // zones: melee (landed, diving low, too high) and arrows
+      b = DR.up('none', { land: true }); const mz = (alt, d, pitch, reach) => { b.alt = alt; P.x = b.x; P.z = b.z + d; P.yaw = 0; P.pitch = pitch; const t = findMeleeTarget(P, eyeY(), game.enemies, game.floor, reach || 3); return t && t.zone; };
+      out.melee = { landed: mz(0, 3, 0), low: mz(1.6, 3, 0), edge: mz(2.4, 3, Math.atan2(2.9 - eyeY(), 3)), high: mz(3, 3, Math.atan2(3.5 - eyeY(), 3)), up: mz(6.4, 3, 0.9), spear: mz(1.6, 6, 0, 6.9), swordFar: mz(1.6, 6, 0, 2.3) };
+      b.alt = 6.4; out.arrowZ = { body: zoneAtHeight(8, b), head: zoneAtHeight(6.4 + 3, b), under: zoneAtHeight(3, b), over: zoneAtHeight(6.4 + 5, b) };
+      b.alt = 0; out.landedZ = { legs: zoneAtHeight(0.5, b), body: zoneAtHeight(2, b), head: zoneAtHeight(3, b), over: zoneAtHeight(5, b) };
+      b.bs.lowT = 1; out.lowZ = { head: zoneAtHeight(2.0, b), over: zoneAtHeight(2.6, b) }; b.bs.lowT = 0;
+      // full damage in the air: the same arrow, the same hit, landed or at 6.4 m
+      const zs = []; const dh = window.dealHit; window.dealHit = (e, z, ...r) => { zs.push(z); return dh(e, z, ...r); };
+      const shoot = alt => { b = DR.up('none', { land: alt === 0 }); b.alt = alt; b.x = DR.home[0]; b.z = DR.home[1] - 14; P.x = b.x; P.z = b.z + 12; P.yaw = 0; P.pitch = 0; const w = weaponStats(makeItem({ type: 'weapon', base: 'bow', tier: 0 })); b.hp = b.maxHp = 5000; const a = { x: b.x, y: alt + 1.8, z: b.z + 6, vx: 0, vy: 0, vz: -30, gravity: 0, dmg: w.dmg, owner: 'player', stuck: false, w, mesh: makeArrowMesh() }; group.add(a.mesh); game.arrows.push(a);
+        for (let i = 0; i < 200 && b.hp === 5000; i++) { updateArrows(1 / 120); b.alt = alt; } return 5000 - b.hp; };
+      out.arrow = { landed: shoot(0), air: shoot(6.4), zones: zs.join() }; window.dealHit = dh; game.inv.equip.weapon = makeItem({ type: 'weapon', base: 'sword', tier: 0 });
+      { b = DR.fresh(); out.calls = BR.calls(b); b.bs.air = true; b.alt = 6.4; out.callsAir = BR.calls(b); }
+      return out;
+    });
+    check(`${tag} the final arena (seed 3) fights the dragon: def dragon (also BOSS_DEFS.final), named Cinder Wyrm (name tag and HUD), scale 1.7 from the def, hp = 220 x 1.0 x 3 = 660, damage x2.52, final flag`, o.def.id === 'dragon' && o.def.final5 && o.def.name === 'Cinder Wyrm' && o.def.hud === 'Cinder Wyrm' && o.def.tag && Math.abs(o.def.scale - 1.7) < 1e-9 && Math.abs(o.def.hp - 660) < 1e-6 && Math.abs(o.def.dmg - 2.52) < 1e-9 && o.def.final, JSON.stringify(o.def));
+    check(`${tag} the arena is under an open night sky (a sky dome, no chandeliers), walls stay 10 m, the dais and rune circle stay`, o.def.sky && o.def.chand === 0 && o.def.wall === 10 && o.def.theme, JSON.stringify([o.def.sky, o.def.chand, o.def.wall, o.def.theme]));
+    check(`${tag} mesh count <= 28 (baked groups, one flash material), draw calls in the worst of 8 views < 260, landed and flying`, o.meshes <= 28 && o.baked && o.groups === 11 && o.calls < 260 && o.callsAir < 260, `${o.meshes} meshes in ${o.groups} baked groups, ${o.calls} calls landed, ${o.callsAir} flying`);
+    check(`${tag} time to kill with a Common sword at stage 1: 42 to 66 body hits (3x a stage 1 boss's ${o.ttk1})`, o.ttk >= 42 && o.ttk <= 66, `${o.ttk} body hits`);
+    check(`${tag} it cannot be stunned or put to sleep`, o.stun === false && o.sleep === false);
+    check(`${tag} melee: reaches it landed (body) and diving low (legs, even at 2.4 m up), never when it is 3 m or more up; the Hog's 6.9 m spear reaches a low dive from 6 m, a sword does not`, o.melee.landed === 'body' && o.melee.low === 'legs' && o.melee.edge === 'legs' && o.melee.high === null && o.melee.up === null && o.melee.spear && o.melee.swordFar === null, JSON.stringify(o.melee));
+    check(`${tag} arrow zones follow its height: landed legs / body / head / nothing above, at 6.4 m up the same bands lifted (nothing under it or over its head)`, o.landedZ.legs === 'legs' && o.landedZ.body === 'body' && o.landedZ.head === 'head' && o.landedZ.over === null && o.arrowZ.body === 'body' && o.arrowZ.head === 'head' && o.arrowZ.under === null && o.arrowZ.over === null, JSON.stringify([o.landedZ, o.arrowZ]));
+    check(`${tag} an arrow hits it while it flies at FULL damage: the same hp lost as when it is landed (no x0.5)`, o.arrow.landed > 0 && Math.abs(o.arrow.landed - o.arrow.air) < 1e-9, JSON.stringify(o.arrow));
+    check(`${tag} its head drops while it bites (bands 1.6 to 2.4 m): a hit at 2.0 m is a head hit then, a body hit otherwise`, o.lowZ.head === 'head' && o.lowZ.over === null, JSON.stringify(o.lowZ));
+
+    // ---- the cycle ----
+    const cyc = await pg.evaluate(() => ({ p0: DR.sim(0, 62), p1: DR.sim(1, 52), p2: DR.sim(2, 58) }));
+    const at = (r, id, n = 0) => (r.log.filter(e => e[0] === id)[n] || [0, NaN])[1];
+    check(`${tag} cycle A (100 to 66%): lands for 12 s, then the Takeoff Buffet (0.9 s) and it is up; 12 s of flying, then the 1.5 s landing, 12 s on the ground, up again`,
+      Math.abs(at(cyc.p0, 'buffet') - 12) < 0.1 && Math.abs(at(cyc.p0, 'air') - 12.97) < 0.1 && Math.abs(at(cyc.p0, 'land') - at(cyc.p0, 'air') - 12) < 0.1 && Math.abs(at(cyc.p0, 'ground') - at(cyc.p0, 'land') - 1.57) < 0.1 && Math.abs(at(cyc.p0, 'buffet', 1) - at(cyc.p0, 'ground') - 12) < 0.1, JSON.stringify(cyc.p0.log));
+    check(`${tag} cycle B (66 to 33%): 10 s up, 12 s down; cycle C (below 33%): 8 s up, 14 s down`,
+      Math.abs(at(cyc.p1, 'land') - at(cyc.p1, 'air') - 10) < 0.1 && Math.abs(at(cyc.p1, 'buffet', 1) - at(cyc.p1, 'ground') - 12) < 0.1 && Math.abs(at(cyc.p2, 'land') - at(cyc.p2, 'air') - 8) < 0.1 && Math.abs(at(cyc.p2, 'buffet', 1) - at(cyc.p2, 'ground') - 14) < 0.1, JSON.stringify([cyc.p1.log, cyc.p2.log]));
+    check(`${tag} in the air it orbits the arena centre at one radius (about 16.5 to 17 m, clear of the pillars), 6 m up or higher, never touching the floor`, cyc.p0.maxAlt > 6 && cyc.p0.maxAlt < 7.2 && cyc.p0.maxR - cyc.p0.minR < 2.5 && cyc.p0.minR >= 14 && cyc.p0.maxR <= 24, `alt ${cyc.p0.maxAlt.toFixed(2)}, radius ${cyc.p0.minR.toFixed(1)} to ${cyc.p0.maxR.toFixed(1)}`);
+
+    const ph = await pg.evaluate(() => {
+      const b = DR.fresh(), P = game.player, D = b.def, h = DR.home, out = {};
+      b.bs = bossState(D); b.bs.st = 'chase'; b.bs.hx = h[0]; b.bs.hz = h[1]; b.bs.cyc = 1e9; for (const m of D.moves) b.bs.cd[m.id] = 1e9; b.dormant = false; b.set('alerted'); b.x = h[0]; b.z = h[1]; P.x = h[0] + 45; P.z = h[1] + 20; b.last = { x: P.x, z: P.z }; game.inv.hp = game.inv.maxHp = 1e6;
+      const step = n => { for (let i = 0; i < n; i++) b.update(1 / 60, P, BT.noise); };
+      b.bs.hp0 = b.hp = b.maxHp; step(120); out.a = b.bs.phase; out.spd0 = b.chase;
+      b.hp = b.maxHp * 0.67; b.bs.hp0 = b.hp; step(120); out.b = b.bs.phase;
+      b.hp = b.maxHp * 0.66; b.bs.hp0 = b.hp; step(10); out.c = b.bs.phase; out.stC = b.bs.st; step(600); out.d = b.bs.phase; out.gcd1 = b.bs.gcdMul; out.spd1 = b.chase;
+      b.hp = b.maxHp * 0.34; b.bs.hp0 = b.hp; step(120); out.e = b.bs.phase;
+      b.hp = b.maxHp * 0.33; b.bs.hp0 = b.hp; step(10); out.f = b.bs.phase; step(600); out.g = b.bs.phase; out.spd2 = b.chase; out.notch = null;
+      return out;
+    });
+    check(`${tag} phase 2 fires once at 66% (not at 67%), phase 3 once at 33% (not at 34%), each with a roar; enrage x1.2 speed only in the last third; more attacks from phase 2 (gap x0.7)`, ph.a === 0 && ph.b === 0 && ph.c === 1 && ph.stC === 'phase' && ph.d === 1 && ph.e === 1 && ph.f === 2 && ph.g === 2 && Math.abs(ph.spd1 / ph.spd0 - 1) < 1e-9 && Math.abs(ph.spd2 / ph.spd0 - 1.2) < 1e-9 && Math.abs(ph.gcd1 - 0.7) < 1e-9, JSON.stringify(ph));
+
+    const ea = await pg.evaluate(() => {
+      const b = DR.up('none', { land: true, cyc: 12 }), P = game.player, out = {}; b.bs.cd.buffet = 1e9;
+      const step = n => { for (let i = 0; i < n; i++) b.update(1 / 60, P, BT.noise); };
+      b.hp = b.maxHp * (1 - 0.17); step(30); out.at17 = { air: b.bs.air, cyc: +b.bs.cyc.toFixed(2), mv: b.mv && b.mv.id };
+      b.hp = b.maxHp * (1 - 0.19); let t = 0, air = null; for (let i = 0; i < 240 && air === null; i++) { b.update(1 / 60, P, BT.noise); t += 1 / 60; if (b.bs.air) air = t; }
+      out.at19 = { air: b.bs.air, t: air, cyc: +b.bs.cyc.toFixed(2) };
+      // the damage clock restarts at touchdown
+      b.bs.cyc = 0; b.bs.cd.land = 1e9; bossStart(b, b.def.byId.land, P); for (let i = 0; i < 400 && b.bs.air; i++) b.update(1 / 60, P, BT.noise); out.land = { air: b.bs.air, hp0: b.bs.hp0, hp: b.hp, cyc: b.bs.cyc };
+      return out;
+    });
+    check(`${tag} early take-off: 17% of its health lost in one landing changes nothing, 19% sends it up (Buffet, then air), and the new stance clock is 12 s; touchdown resets the damage count`, !ea.at17.air && ea.at17.cyc > 11 && ea.at17.mv === null && ea.at19.air && ea.at19.t > 0.9 && ea.at19.t < 1.1 && Math.abs(ea.at19.cyc - 12) < 1.1 && ea.land.air === false && ea.land.hp0 === ea.land.hp, JSON.stringify(ea));
+
+    // ---- landed moves ----
+    const ld = await pg.evaluate(() => {
+      const out = {}; DR.fresh();
+      out.bite = BR.cone('bite'); const b0 = BT.setup(2.2); bossStart(b0, b0.def.byId.bite, game.player); out.biteLow = b0.bs.lowT; for (let i = 0; i < 120; i++) b0.update(1 / 60, game.player, BT.noise);
+      out.claw = BR.cone('claw');
+      // Tail Sweep: ground circle r 6, legs; a high block does not cover legs (full damage), a low block takes half; knock 5 either way
+      const t0 = BR.run('tail', { dist: 4 }), t1 = BR.run('tail', { dist: 4, block: true, pitch: 0 }), t2 = BR.run('tail', { dist: 4, block: true, pitch: -0.6 }), t3 = BR.run('tail', { dist: 4, block: 'parry', pitch: -0.6 }), t4 = { ev: [] }; BT.setup(6.8); t0.b.bs.cd.tail = 0; t0.b.bs.phase = 0; t0.b.bs.air = false; const pk = bossPick(t0.b, 6.8), pk2 = bossPick(t0.b, 6.0);
+      out.tail = { ev: t0.ev, full: BR.full(t0.b, 'legs'), high: t1.ev, low: t2.ev, parry: t3.ev, far: pk === null || pk.id !== 'tail', near: !!pk2 && pk2.id === 'tail', vis: t0.vis };
+      const br = BR.run('breath', { dist: 6 }), bb = BR.run('breath', { dist: 6, block: true, pitch: 0 }); out.breath = { ev: br.ev, full: BR.full(br.b, 'body'), bleed: false, vis: br.vis, blk: bb.ev };
+      { const r = BR.run('breath', { dist: 6 }); out.breath.bleed = game.pst.has('bleed'); const r2 = BR.run('breath', { dist: 13.5, force: true }); out.breath.far = r2.ev.length; }
+      // Takeoff Buffet: a ground circle r 7, 0.5, then it is up
+      const bf = BR.run('buffet', { dist: 4, force: true }); out.buffet = { ev: bf.ev, full: BR.full(bf.b, 'body'), air: bf.b.bs.air, cyc: bf.b.bs.cyc, vis: bf.vis };
+      // the tail's knock at a wall: never through it
+      const b = BT.setup(3), P = game.player; let wx = b.x; while (!P.blocked(game.floor, wx + 0.1, b.z)) wx += 0.1; b.x = wx - 4; P.x = wx - 1.2; P.z = b.z; b.bs.phase = 0; for (const m of b.def.moves) b.bs.cd[m.id] = m.id === 'tail' ? 0 : 1e9; b.last = { x: P.x, z: P.z }; b.yaw = Math.PI / 2 * -1;
+      game.inv.hp = 1e5; const r = DR.go(b, () => false, { max: 360, ks: true }); out.wall = { hits: r.ev.length, free: !P.blocked(game.floor, P.x, P.z), x: P.x - wx };
+      return out;
+    });
+    const bi = ld.bite, cl = ld.claw, f1 = ld.tail.full;
+    check(`${tag} Bite: wind 0.8, 1.4 on the head, nothing before the wind-up, a parry staggers it (the counter window: its head stays down)`, bi.ev.length === 1 && Math.abs(bi.ev[0].wind - 0.8) < 1e-9 && bi.ev[0].zone === 'head' && Math.abs(bi.ev[0].lost - bi.full * 1.4) < 1e-6 && bi.ev[0].t >= 0.8 - 0.02 && bi.parry && bi.parry.lost === 0 && bi.parry.stun === 1 && ld.biteLow > 1, JSON.stringify([bi.ev[0], bi.parry, ld.biteLow]));
+    check(`${tag} Claw Swipe: wind 0.7, 1.0 on the body, a parry staggers it`, cl.ev.length === 1 && Math.abs(cl.ev[0].wind - 0.7) < 1e-9 && cl.ev[0].zone === 'body' && Math.abs(cl.ev[0].lost - cl.full) < 1e-6 && cl.parry && cl.parry.lost === 0 && cl.parry.stun === 1, JSON.stringify([cl.ev[0], cl.parry]));
+    check(`${tag} Tail Sweep: a red circle r 6 for 1.0 s, then 1.0 x 18.2 on the legs; a high guard does not cover legs (full damage), a low guard lets half through, a parry never staggers; knock 5 m; out of its 6 m it does not pick it`, ld.tail.ev.length === 1 && Math.abs(ld.tail.ev[0].wind - 1.0) < 1e-9 && ld.tail.ev[0].t >= 1.0 - 0.02 && ld.tail.ev[0].zone === 'legs' && Math.abs(ld.tail.ev[0].lost - f1) < 1e-6 && ld.tail.ev[0].knock === 5 && ld.tail.vis === 1
+      && Math.abs(ld.tail.high[0].lost - f1) < 1e-6 && Math.abs(ld.tail.low[0].lost - f1 * 0.5) < 1e-6 && ld.tail.low[0].knock === 5 && ld.tail.parry[0].stun === 0 && ld.tail.far && ld.tail.near, JSON.stringify(ld.tail));
+    check(`${tag} Close Breath: a red 12 m cone for 1.1 s, then 1.1 x 18.2 on the body and a bleed (3 s), knock 3 m; a block lets half through with no bleed; out of range it does nothing`, ld.breath.ev.length === 1 && Math.abs(ld.breath.ev[0].wind - 1.1) < 1e-9 && ld.breath.ev[0].t >= 1.1 - 0.02 && Math.abs(ld.breath.ev[0].lost - ld.breath.full * 1.1) < 1e-6 && ld.breath.ev[0].knock === 3 && ld.breath.vis === 1 && ld.breath.bleed
+      && Math.abs(ld.breath.blk[0].lost - ld.breath.full * 1.1 * 0.5) < 1e-6 && ld.breath.far === 0, JSON.stringify([ld.breath.ev, ld.breath.blk, ld.breath.bleed, ld.breath.far]));
+    check(`${tag} Takeoff Buffet: a red circle r 7 for 0.9 s, then 0.5 x 18.2 on the body and knock 3 m, and the dragon is up (stance clock 12 s)`, ld.buffet.ev.length === 1 && Math.abs(ld.buffet.ev[0].wind - 0.9) < 1e-9 && Math.abs(ld.buffet.ev[0].lost - ld.buffet.full * 0.5) < 1e-6 && ld.buffet.ev[0].knock === 3 && ld.buffet.air && Math.abs(ld.buffet.cyc - 12) < 0.2 && ld.buffet.vis === 1, JSON.stringify([ld.buffet.ev, ld.buffet.air, ld.buffet.cyc]));
+    check(`${tag} a 5 m tail knock beside a wall never carries you into it`, ld.wall.free && ld.wall.hits >= 1 && ld.wall.x <= 0.1, JSON.stringify(ld.wall));
+    await pg.close();
+  }
+  // the orbit ring it picks is clear of walls and pillars in every arena (five different seeds)
+  {
+    const rings = [];
+    for (const sd of [3, 7, 11, 21, 42]) {
+      const pg = await open(sd);
+      rings.push(await pg.evaluate(() => {
+        const b = DR_ORBIT(); return b;
+        function DR_ORBIT() {
+          game.startStage(5); const b = game.enemies.find(e => e.boss); b.bs.hx = b.x; b.bs.hz = b.z; b.bs.phase = 0;
+          const R = bossOrbitR(b), c = { radius: 2.4, props: game.floor.solids, mob: true }; let n = 0;
+          for (let i = 0; i < 48; i++) { const a = i * Math.PI / 24; if (Player.prototype.blocked.call(c, game.floor, b.bs.hx + Math.cos(a) * R, b.bs.hz + Math.sin(a) * R)) n++; }
+          return { R, n };
+        }
+      }));
+      await pg.close();
+    }
+    check(`[Cinder Wyrm] the orbit radius it picks (about 16.5 to 17 m, the gap between the pillar rings) has no wall or pillar on the ring, in five different arenas`, rings.every(r => r.n === 0), JSON.stringify(rings));
+  }
+
+  // ---- the air moves, flames, the landing, pools, the bar and the end of the run ----
+  {
+    const pg = await open(3); await pg.evaluate(BOSS_HELPERS); await pg.evaluate(BR_HELPERS); await pg.evaluate(DR_HELPERS);
+    const tag = '[Cinder Wyrm]';
+    await pg.evaluate(() => DR.fresh());
+    const A = await pg.evaluate(() => {
+      const out = {}, P = game.player, fxT = () => group.userData.bossFx && group.userData.bossFx.tele, full = b => TUNE.enemyDmg * b.dmgMul * ZONE_MUL.body * (1 - game.inv.armorRed('body'));
+      // ---- Strafe Run ----
+      let b = DR.up('strafe'), strip = null, run = [], hitAlt = null;
+      let r = DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.2, { max: 900, each: (b, t) => {
+        if (b.bs.st === 'telegraph' && b.windT > 0.5 && !strip) { const m = fxT().find(m => m.visible); strip = m && { geo: m.geometry.type, w: m.scale.x, len: m.scale.z, dl: b.bs.dl }; }
+        if (b.bs.st === 'special') run.push([t, b.bs.run, b.alt]);
+      } });
+      out.strafe = { ev: r.ev, strip, dd: b.bs.dd, dl: b.bs.dl, full: full(b), endAlt: b.alt, air: b.bs.air, vis: fxT().filter(m => m.visible).length, st: b.bs.st };
+      { const a = run[Math.floor(run.length * 0.2)], c = run[Math.floor(run.length * 0.6)]; out.strafe.speed = (c[1] - a[1]) / (c[0] - a[0]); out.strafe.minAlt = Math.min(...run.map(x => x[2])); out.strafe.hitAlt = r.ev[0] ? r.ev[0].alt : null; }
+      // a sidestep once the dive begins: no hit; a block (facing it) lets half through
+      b = DR.up('strafe'); let moved = false;
+      r = DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.2, { max: 900, pre: (b) => { if (b.bs.st === 'special' && !moved) { moved = true; P.x += -b.bs.dz * 5; P.z += b.bs.dx * 5; } } });
+      out.strafeSide = r.ev.length;
+      b = DR.up('strafe'); game.cb.block = true; game.cb.blockT = 1; const s0 = game.cb.stamina;
+      r = DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.2, { max: 900, pre: (b) => { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); } }); out.strafeBlock = { ev: r.ev, stam: s0 - game.cb.stamina, full: full(b) }; game.cb.block = false;
+      // the line is cut short at a wall and it never ends inside stonework
+      b = DR.up('strafe'); let wx = DR.home[0]; while (!P.blocked(game.floor, wx + 0.1, DR.home[1])) wx += 0.1;
+      b.x = wx - 30; b.z = DR.home[1]; P.x = wx - 4; P.z = DR.home[1]; b.yaw = -Math.PI / 2; b.last = { x: P.x, z: P.z };
+      r = DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.2, { max: 900 });
+      out.wall = { dl: b.bs.dl, dd: b.bs.dd, free: !Player.prototype.blocked.call({ radius: 2, props: game.floor.solids, mob: true }, game.floor, b.x, b.z), gap: wx - b.x };
+      // ---- Fire Sweep ----
+      b = DR.up('sweep', { px: -2, pz: 2 }); let fan = null, y0 = null, y1 = null, fl = [], ts = null, prevN = 0;
+      r = DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.5, { max: 1500, pre: (b) => { if (b.bs.st === 'sweep') { P.x = b.x - Math.sin(b.yaw) * 12; P.z = b.z - Math.cos(b.yaw) * 12; P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); } }, each: (b, t) => {
+        if (b.bs.st === 'telegraph' && b.windT > 0.5 && !fan) { const m = fxT().find(m => m.visible); fan = m && { geo: m.geometry.type, sx: m.scale.x, sz: m.scale.z }; }
+        if (b.bs.st === 'sweep' && ts === null) { ts = t; y0 = b.yaw; } if (b.bs.st === 'sweep') y1 = b.yaw;
+        if (BOSS_FLAME.n > prevN) fl.push(+(ts === null ? 0 : t - ts).toFixed(2)); prevN = BOSS_FLAME.n;
+      } });
+      out.sweep = { ev: r.ev, fan, turn: Math.abs(y1 - y0) * 180 / Math.PI, flames: BOSS_FLAME.n, fl, full: full(b), decals: group.userData.bossFx.flame.length, tele: fxT().filter(m => m.visible).length };
+      // flames: a patch hurts by bleeding, dies after its time, at most 6
+      { const it = BOSS_FLAME.items.find(i => i.t > 0); out.flame = { on: bossFlameAt(it.x, it.z), off: bossFlameAt(it.x + it.r + 3, it.z), r: it.r };
+        P.x = it.x; P.z = it.z; game.pst.clear(); updateCombat(0.016); out.flame.bleed = game.pst.has('bleed'); P.x = it.x + 30; game.pst.clear(); updateCombat(0.016); out.flame.clean = !game.pst.has('bleed');
+        bossFlamesClear(); bossFlameAdd(DR.home[0], DR.home[1], 1.8, 4); bossFlamesUpdate(3.9); out.flame.n39 = BOSS_FLAME.n; bossFlamesUpdate(0.2); out.flame.n41 = BOSS_FLAME.n; out.flame.hidden = group.userData.bossFx.flame.every(m => !m.visible);
+        for (let i = 0; i < 20; i++) bossFlameAdd(DR.home[0] + i, DR.home[1], 1, 4); out.flame.max = BOSS_FLAME.n; out.flame.decals = group.userData.bossFx.flame.length; bossFlamesClear(); out.flame.cleared = BOSS_FLAME.n === 0 && group.userData.bossFx.flame.every(m => !m.visible); }
+      b = DR.up('sweep', { px: -2, pz: 2 }); game.cb.block = true; game.cb.blockT = 1;
+      r = DR.go(b, (b, t) => b.bs.st === 'sweep' && t > 0, { max: 1500, pre: (b) => { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); } }); out.sweepBlock = { ev: r.ev, full: full(b) }; game.cb.block = false;
+      // ---- Fireball Volley ----
+      const vol = (o = {}) => {
+        b = DR.up('volley', { px: -2, pz: 2 }); const a0 = game.arrows.length; let fired = null, rings = null, last = {}, wasLive = false;
+        if (o.block) { game.cb.block = true; game.cb.blockT = 1; }
+        const q = DR.go(b, (b, t) => fired !== null && !game.arrows.some(a => a.ring >= 0), { max: 1500, pre: (b) => { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); if (o.dodge && fired !== null) { P.x = DR.home[0] + 30; P.z = DR.home[1] + 20; } }, each: (b, t) => {
+          if (fired === null && game.arrows.length > a0) { fired = t; rings = fxT().filter(m => m.visible).map(m => [m.position.x, m.position.z, m.scale.x, m.geometry.type]); }
+          for (const a of game.arrows) if (a.ring >= 0) last[a.ring] = [a.x, a.z, a.y, t];
+        } });
+        game.cb.block = false;
+        return { ev: q.ev, fired: fired - q.t0, rings, last, flames: BOSS_FLAME.n, visEnd: fxT().filter(m => m.visible).length, bleed: game.pst.has('bleed'), full: full(b), pool: group.userData.bossFx.shots.fire.length, free: group.userData.bossFx.shots.fire.every(m => !m.userData.busy), kinds: [...new Set(group.userData.bossFx.shots.fire.map(m => m.geometry.type))].join() };
+      };
+      out.volley = vol(); out.volleyBlock = vol({ block: true }); out.volleyDodge = vol({ dodge: true });
+      // ---- Landing ----
+      b = DR.up('none', { px: -3, pz: 2, cyc: 0 }); let alts = [], disc = [], prevAlt = 99, mono = true, tele0 = null;
+      const sh0 = b.shadow.material.opacity;
+      r = DR.go(b, (b, t) => !b.bs.air && b.bs.st !== 'telegraph' && t > 0.1, { max: 900, each: (b, t) => {
+        if (b.mv && b.mv.id === 'land') { if (b.alt > prevAlt + 1e-9) mono = false; prevAlt = b.alt; const m = fxT().find(m => m.visible); if (m) disc.push(m.scale.x); }
+        if (b.bs.st === 'telegraph' && b.mv && b.mv.id === 'land' && tele0 === null) tele0 = { tx: b.bs.tx - P.x, tz: b.bs.tz - P.z, y: b.mesh.position.y, op: b.shadow.material.opacity, sc: b.shadow.scale.x };
+      } });
+      b.update(0.016, P, BT.noise);
+      out.land = { ev: r.ev, full: full(b), air: b.bs.air, alt: b.alt, cyc: b.bs.cyc, hp0: b.bs.hp0 === b.hp, at: [b.x - b.bs.tx, b.z - b.bs.tz], mono, disc0: disc[0], disc1: disc[disc.length - 1], tele0, shadowOp0: sh0, shadowOpEnd: b.shadow.material.opacity, shadowSc: b.shadow.scale.x, shadowR: b.shadowR, y: b.mesh.position.y };
+      // a spot blocked by stonework: it lands on the nearest open one toward the dais
+      b = DR.up('none', { px: -3, pz: 2, cyc: 0 }); game.floor.solids.push({ x: P.x, z: P.z, r: 1.5 }); bossStart(b, b.def.byId.land, P); const blockedAt = Player.prototype.blocked.call({ radius: 2.2, props: game.floor.solids, mob: true }, game.floor, b.bs.tx, b.bs.tz); out.landSpot = { blocked: blockedAt, moved: Math.hypot(b.bs.tx - P.x, b.bs.tz - P.z) }; game.floor.solids.pop(); b.mv = null; b.winding = false; b.bs.st = 'chase';
+      return out;
+    });
+    const S = A.strafe, f = A.sweep, V = A.volley;
+    check(`${tag} Strafe Run: a 3 m shadow strip along the locked line (as long as the whole dive) for 1.0 s, nothing before it ends, then it dives at 22 m/s skimming 1.6 m up and hits for 1.3 x 18.2 on the body as it passes, knock 3 m`,
+      S.strip && S.strip.geo === 'PlaneGeometry' && S.strip.w === 3 && Math.abs(S.strip.len - S.dl) < 1e-6 && S.ev.length === 1 && S.ev[0].id === 'strafe' && Math.abs(S.ev[0].wind - 1.0) < 1e-9 && S.ev[0].t >= 1.0 + 0.07 + S.dd / 22 - 1.0 / 22 * 2.6 - 0.02 && S.ev[0].t <= 1.07 + S.dd / 22 + 0.1 && Math.abs(S.ev[0].lost - S.full * 1.3) < 1e-6 && S.ev[0].knock === 3 && S.ev[0].alt <= 2.6 && Math.abs(S.speed - 22) < 1.5 && Math.abs(S.minAlt - 1.6) < 0.15, JSON.stringify(S));
+    check(`${tag} Strafe Run: afterwards it climbs back to its orbit height, still flying, the strip gone; a sidestep once it dives avoids the hit; a block lets half through (and costs stamina)`, S.endAlt > 6.0 && S.air && S.vis === 0 && S.st === 'chase' && A.strafeSide === 0 && A.strafeBlock.ev.length === 1 && Math.abs(A.strafeBlock.ev[0].lost - A.strafeBlock.full * 1.3 * 0.5) < 1e-6 && A.strafeBlock.stam > 0, JSON.stringify([S.endAlt, S.air, S.vis, A.strafeSide, A.strafeBlock]));
+    check(`${tag} Strafe Run: the dive line stops short of a wall (never ends inside stonework)`, A.wall.free && A.wall.dl < A.wall.dd + 12 && A.wall.gap > 1, JSON.stringify(A.wall));
+    check(`${tag} Fire Sweep: a red 24 m cone (40 deg) for 1.2 s, then the beam turns 70 degrees over 2.0 s hitting every 0.4 s for 0.45 x 18.2 on the body (5 ticks), nothing before the wind-up`,
+      f.fan && f.fan.geo === 'CircleGeometry' && f.fan.sx === 24 && f.ev.length === 5 && Math.abs(f.ev[0].wind - 1.2) < 1e-9 && f.ev[0].t >= 1.2 - 0.02 && f.ev.every(e => Math.abs(e.lost - f.full * 0.45) < 1e-6 && e.zone === 'body') && f.ev.slice(1).every((e, i) => Math.abs(e.t - f.ev[i].t - 0.4) < 0.02) && Math.abs(f.turn - 70) < 2 && f.tele === 0, JSON.stringify({ fan: f.fan, turn: f.turn, ev: f.ev.map(e => [+e.t.toFixed(2), +e.lost.toFixed(1)]), tele: f.tele }));
+    check(`${tag} Fire Sweep: 6 pooled flame patches (one per tick and one at the end, 0.4 s apart), a block lets half of a tick through`, f.flames === 6 && f.decals <= 6 && f.fl.length === 6 && f.fl.slice(1).every((x, i) => Math.abs(x - f.fl[i] - 0.4) < 0.03) && A.sweepBlock.ev.length >= 1 && Math.abs(A.sweepBlock.ev[0].lost - A.sweepBlock.full * 0.45 * 0.5) < 1e-6, JSON.stringify([f.flames, f.decals, f.fl, A.sweepBlock.ev[0]]));
+    check(`${tag} flame patches: inside one you bleed, outside you do not, each lasts 4 s, at most 6 exist (reused), and a restart clears them`, A.flame.on && !A.flame.off && A.flame.bleed && A.flame.clean && A.flame.n39 === 1 && A.flame.n41 === 0 && A.flame.hidden && A.flame.max === 6 && A.flame.decals <= 6 && A.flame.cleared, JSON.stringify(A.flame));
+    check(`${tag} Fireball Volley: three fire shots from the pool after the 0.8 s wind-up, each landing exactly 1.1 s later on its own ring (r 2.5 on the floor from the moment it is fired), the middle one on you; lobbed (gravity)`,
+      V.ev.filter(e => e.id === 'shot').length === 1 && V.fired >= 0.8 - 0.02 && V.fired < 0.8 + 0.1 && V.rings.length === 3 && V.rings.every(r => r[2] === 2.5 && r[3] === 'CircleGeometry') && [0, 1, 2].every(i => V.last[i] && Math.abs(V.last[i][3] - V.last[0][3]) < 0.06 && Math.hypot(V.last[i][0] - V.rings[i][0], V.last[i][1] - V.rings[i][1]) < 0.9 && V.last[i][2] < 0.6) && V.kinds === 'SphereGeometry' && V.pool === 3, JSON.stringify({ fired: V.fired, rings: V.rings, last: V.last, ev: V.ev, pool: V.pool }));
+    check(`${tag} Fireball Volley: the shot that lands on you does 1.0 x 18.2 on the body, burns (bleed), knock 2 m; a block lets half through, no bleed; standing clear of every ring takes nothing; rings go out when the fire lands, the ground burns there a moment`,
+      Math.abs(V.ev.find(e => e.id === 'shot').lost - V.full) < 1e-6 && V.ev.find(e => e.id === 'shot').knock === 2 && V.bleed && Math.abs(A.volleyBlock.ev.find(e => e.id === 'shot').lost - A.volleyBlock.full * 0.5) < 1e-6 && !A.volleyBlock.bleed && A.volleyDodge.ev.length === 0 && V.visEnd === 0 && V.flames === 3 && V.free, JSON.stringify([V.ev, V.bleed, A.volleyBlock.ev, A.volleyBlock.bleed, A.volleyDodge.ev, V.visEnd, V.flames]));
+    const L = A.land;
+    check(`${tag} Landing: a shadow circle (r 7) grows for 1.5 s on your spot while it glides down (height never rises), then the shockwave: 1.2 x 18.2 on the body, knock 5 m; it is on the ground (stance clock 12 s, damage count reset) exactly on that spot`,
+      L.ev.length === 1 && L.ev[0].id === 'land' && Math.abs(L.ev[0].wind - 1.5) < 1e-9 && L.ev[0].t >= 1.5 - 0.02 && L.ev[0].t < 1.5 + 0.12 && Math.abs(L.ev[0].lost - L.full * 1.2) < 1e-6 && L.ev[0].knock === 5 && L.mono && L.disc1 > L.disc0 * 1.5 && Math.abs(L.disc1 - 7) < 0.3 && !L.air && L.alt === 0 && Math.abs(L.cyc - 12) < 0.1 && L.hp0 && Math.hypot(L.at[0], L.at[1]) < 0.01 && Math.abs(L.tele0.tx) < 0.01 && Math.abs(L.tele0.tz) < 0.01, JSON.stringify(L));
+    check(`${tag} the model rides its height (mesh y = alt) and the floor shadow spreads and fades with it: faint and wide up high, full and its own size on the ground`, L.tele0.y > 5 && L.tele0.op < L.shadowOpEnd * 0.8 && L.tele0.sc > L.shadowR * 1.3 && L.y === 0 && Math.abs(L.shadowSc - L.shadowR) < 1e-6, JSON.stringify([L.tele0, L.shadowOpEnd, L.shadowSc, L.shadowR, L.y]));
+    check(`${tag} a landing spot blocked by stonework moves to open ground toward the dais`, A.landSpot.blocked === false && A.landSpot.moved > 1, JSON.stringify(A.landSpot));
+
+    const Z = await pg.evaluate(() => {
+      const out = {}, P = game.player, fx = () => group.userData.bossFx;
+      // nothing grows: every move, twice over; the same children, at most 4 telegraph meshes, 6 flame decals, 12 shots per kind
+      let b = DR.up('none'); const kids = group.children.length; let tele = 0, flame = 0, fire = 0;
+      for (let k = 0; k < 2; k++) {
+        for (const id of ['strafe', 'sweep', 'volley']) { b = DR.up(id, { px: -2, pz: 2 }); DR.go(b, (b, t) => b.bs.st === 'chase' && t > 1.4 && !game.arrows.some(a => a.ring >= 0), { max: 1800, pre: () => { game.inv.hp = 1e5; } }); }
+        for (const id of ['bite', 'claw', 'tail', 'breath']) BR.run(id, { dist: id === 'breath' ? 6 : 3 });
+        b = DR.up('none', { cyc: 0 }); DR.go(b, (b, t) => !b.bs.air && t > 0.2, { max: 900 });
+        tele = Math.max(tele, fx().tele.length); flame = Math.max(flame, fx().flame.length); fire = Math.max(fire, fx().shots.fire.length);
+      }
+      out.kids0 = kids; out.kids1 = group.children.length; out.tele = tele; out.flame = flame; out.fire = fire;
+      // the boss bar: notches at 66% and 33%, the bar shows while it flies
+      return out;
+    });
+    check(`${tag} nothing grows while it fights: the same children after every move twice over, at most 4 telegraph meshes, 6 flame decals, 12 fire shots`, Z.kids0 === Z.kids1 && Z.tele <= 4 && Z.flame <= 6 && Z.fire <= 12, JSON.stringify(Z));
+
+    const ui = await pg.evaluate(async () => { const b = DR.up('none'); await T.sleep(400); const bar = { notch: [...document.querySelectorAll('#bossBar .bnotch')].map(n => n.style.left), show: document.getElementById('boss').style.display, name: document.querySelector('#boss div').textContent, fill: document.getElementById('bossFill').style.width };
+      discover('enemy:boss:Cinder Wyrm', 'Cinder Wyrm'); pauseMenu.open('glossary'); document.querySelector('#pauseMenu [data-g="enemies"]').click(); const gl = document.getElementById('pauseMenu').textContent; pauseMenu.close(); return { bar, gl, alt: b.alt }; });
+    check(`${tag} the boss bar shows while it flies (name, notches at 66% and 33%) and the glossary card lists its moves, the 660 HP and the take-off buffet`, ui.alt > 5 && ui.bar.show === 'block' && ui.bar.name === 'Cinder Wyrm' && ui.bar.notch.join() === '66%,33%' && ['Cinder Wyrm', 'Bite', 'Claw Swipe', 'Tail Sweep', 'Close Breath', 'Strafe Run', 'Fire Sweep', 'Fireball Volley', '660 HP', 'Final boss'].every(s => ui.gl.includes(s)) && !/placeholder/i.test(ui.gl), JSON.stringify([ui.bar, ui.gl.length]));
+
+    // ---- killing it ends the run ----
+    const K = await pg.evaluate(async () => {
+      state = 'play'; const b = DR.up('none'); const body = b.mesh, out = {}; b.hp = 1; let error = null;
+      try { dealHit(b, 'body', 99, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0); } catch (e) { error = e.message; }
+      out.error = error; out.dead = b.dead; out.alt = b.alt; out.corpse = propObjs.some(o => o.p.kind === 'corpse' && o.mesh === body); out.stillPlaying = game.state === 'play';
+      const iv = setInterval(() => { if (state !== 'won') state = 'play'; }, 50);   // (a late pointer-lock event from the glossary above must not pause the game before the 2.5 s timer)
+      out.won = await T.until(() => game.state === 'won', 6000); clearInterval(iv); out.overlay = document.getElementById('overlayText').textContent;
+      return out;
+    });
+    check(`${tag} killing it (even in the air) drops it to the floor, leaves its body with loot, flashes that it falls and, 2.5 s later, ends the run with "Run complete" naming the Cinder Wyrm`, K.error === null && K.dead && K.alt === 0 && K.corpse && K.stillPlaying && K.won && /Run complete/.test(K.overlay) && /Cinder Wyrm/.test(K.overlay) && !/placeholder/i.test(K.overlay), JSON.stringify(K));
     await pg.close();
   }
 });

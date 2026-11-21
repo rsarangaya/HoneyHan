@@ -1,4 +1,4 @@
-// Stages: four themed stages of five floors, the placeholder final boss, the way between stages (down by the safe room's
+// Stages: four themed stages of five floors, the final boss (the Cinder Wyrm), the way between stages (down by the safe room's
 // stairs; up only into cached floors, otherwise sealed), stage scaling and loot depth, the memory bound, HUD text, the stage
 // start message, glossary cards and the run's end and restart. Run on its own: node tests/game.stages.test.js
 const { run } = require('./lib');
@@ -61,8 +61,8 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
   const bossWant = [[220, 1.4], [330, 1.68], [440, 1.96], [550, 2.24]];
   check('stage bosses: HP 220 x the boss hpMul x (1 + 0.5 x (stage - 1)), damage x (1 + 0.2 x (stage - 1))',
     sc.boss.every(([hp, dm, fin, hm], i) => Math.abs(hp - bossWant[i][0] * hm) < 1e-6 && Math.abs(dm - bossWant[i][1]) < 1e-9 && !fin), JSON.stringify(sc.boss.map(b => b.slice(0, 2))));
-  check('the final boss: 660 HP (3x), damage 1.8x the stage 1 boss, drawn 1.25x bigger',
-    Math.abs(sc.final[0] - 660) < 1e-6 && Math.abs(sc.final[1] - 2.52) < 1e-9 && sc.final[2] && Math.abs(sc.final[3] - 1.25) < 1e-9, JSON.stringify(sc.final));
+  check('the final boss (the dragon): 660 HP (3x), damage 1.8x the stage 1 boss, drawn at its own scale 1.7 (the def\'s, no final multiplier)',
+    Math.abs(sc.final[0] - 660) < 1e-6 && Math.abs(sc.final[1] - 2.52) < 1e-9 && sc.final[2] && Math.abs(sc.final[3] * 1.6 - 1.7) < 1e-9, JSON.stringify(sc.final));
   check('loot depth follows the stage: effFloor = floor + 1.5 x (stage - 1)', Math.abs(sc.eff32 - 5) < 1e-9 && Math.abs(sc.eff44 - 8.5) < 1e-9, `stage 3 floor 2: ${sc.eff32}, stage 4 floor 4: ${sc.eff44}`);
 
   // 3. The run: 4 stages x 5 floors by the real stairs, the boss of each stage killed, then the final arena. Recorded as it goes.
@@ -119,7 +119,7 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
         ST.killBoss();
         out.won = await T.until(() => game.state === 'won', 6000);
         out.overlay = document.getElementById('overlayText').textContent.slice(0, 80);
-        out.discFinal = discovered.has('enemy:boss:' + FINAL_BOSS.name);
+        out.discFinal = discovered.has('enemy:boss:' + BOSS_DEFS.final.name);
       }
     }
     out.finalState = game.state; out.maxCached = Math.max(out.maxCached, ST.cached());
@@ -158,12 +158,12 @@ run('Four stages, the final boss, the way between stages, scaling, memory and HU
   check('going back down returns to the same stage 2 floor 1 (kept, not rebuilt)', c.back === true);
   check('from stage 5 (final) floor 1, going up enters stage 4\'s safe room; further up is sealed', c.final && c.final.stage === 4 && c.final.n === 5 && c.finalBack === true && c.finalSealed && c.finalSealed.same, JSON.stringify(c.final));
 
-  check('the final arena is a boss arena with the placeholder final boss, and the run ends in "Run complete"', A.finalBoss.final && A.finalBoss.maxHp === 660 && A.won && /Run complete/.test(A.overlay) && A.finalState === 'won', `${A.finalState}, ${A.overlay}`);
+  check('the final arena is a boss arena with the Cinder Wyrm, and killing it ends the run in "Run complete"', A.finalBoss.final && A.finalBoss.maxHp === 660 && A.won && /Run complete/.test(A.overlay) && /Cinder Wyrm/.test(A.overlay) && A.finalState === 'won', `${A.finalState}, ${A.overlay}`);
   check('the final stage has no shop or armory floor', A.first[5].shop === false && A.first[5].armory === false);
 
   // The glossary lists the stage bosses (their names show once discovered) and the final boss.
   const gl = await page.evaluate(() => { pauseMenu.open('glossary'); document.querySelector('#pauseMenu [data-g="enemies"]').click(); const txt = document.getElementById('pauseMenu').textContent; pauseMenu.close(); return txt; });
-  check('the glossary shows each stage boss card and the placeholder final boss card', th.bossNames.every(n => gl.includes(n)) && gl.includes('The Final Boss') && gl.includes('Placeholder final boss'), gl.length + ' chars');
+  check('the glossary shows each stage boss card and the final boss card (the Cinder Wyrm, no placeholder text)', th.bossNames.every(n => gl.includes(n)) && gl.includes('Cinder Wyrm') && gl.includes('Final boss of stage 5') && !/placeholder/i.test(gl), gl.length + ' chars');
 
   // Restart from the win screen: the overlay button starts a new run on a new seed.
   const url0 = page.url();

@@ -129,11 +129,11 @@ const THEME_DEFS = [
 const THEMES = THEME_DEFS;                                  // the stage theme pool (the Final Chamber is not in it)
 const THEME_BY_NAME = {}; for (const t of THEME_DEFS) THEME_BY_NAME[t.name] = t;
 
-// The placeholder final stage's look: a darker, colder chamber (not part of the theme pool; the run never picks it as a stage 1 to 4 theme).
-// Dark purple stone, a ceiling void, rune pillars ringing the arena, a dais under the boss and a glowing rune circle on the floor (layoutBoss builds them when it is told it is the final arena).
+// The final stage's look (the Cinder Wyrm's arena): a darker, colder chamber (not part of the theme pool; the run never picks it as a stage 1 to 4 theme).
+// Dark purple stone under an open night sky (no ceiling), rune pillars ringing the arena, a dais under the boss and a glowing rune circle on the floor (layoutBoss builds them when it is told it is the final arena).
 // Mechanic RUNES: the circle swells (a warning of flareWarn s) and flares for flareLen s every flareEvery s; while it flares, anyone standing within flareR m of its centre is seen flareSeen x as far.
 const FINAL_THEME = mkTheme('The Final Chamber', 'final', { wall: '#2e2440', floor: '#1c1626', ceil: '#08060e', fog: 0x040208, light: 0xb070ff }, {
-  fog: { density: 0.07 }, tex: { wall: 'voidstone', floor: 'obsidian', ceil: 'void' },
+  fog: { density: 0.07 }, tex: { wall: 'voidstone', floor: 'obsidian', ceil: 'void' }, sky: 'night',
   mechanic: { kind: 'runes', hint: 'The rune circle swells and flares now and then: stay out of it when it does, or everything sees you.',
     TUNE: { flareEvery: 9, flareLen: 1.6, flareWarn: 1.4, flareR: 21, flareSeen: 1.4 } } });   // flareEvery/flareLen/flareWarn: seconds per cycle, the flare, the build-up before it; flareR: metres from the circle's centre; flareSeen: guards see you x this inside it
 THEME_BY_NAME[FINAL_THEME.name] = FINAL_THEME;
@@ -312,6 +312,7 @@ function layoutBoss(seed, floorNum, final = false) {
       decor.push({ kind: 'rpillar', x, y, seed: 3, edge: false, yaw: 0 });
     }
     decor.push({ kind: 'dais', x: cx, y: cy, seed: 3, edge: false, yaw: 0 }, { kind: 'runes', x: cx, y: cy, seed: 3, edge: false, yaw: 0 });
+    for (let i = decor.length - 1; i >= 0; i--) if (decor[i].kind === 'chandelier') decor.splice(i, 1);   // open sky: nothing hangs from a ceiling (those rng draws already happened, so the rest of the arena is unchanged)
   }
 
   // wall torches around the rim and on the pillars (none on the hidden door)
