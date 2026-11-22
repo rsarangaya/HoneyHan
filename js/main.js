@@ -891,7 +891,8 @@ function updateTorches(now) {
     nearD[j] = d; nearT[j] = t;
   }
   for (let i = 0; i < 4; i++) {
-    const l = torchLights[i], t = i < cnt ? nearT[i] : null;
+    const l = torchLights[i], t = i < cnt ? nearT[i] : null, on = i < K;
+    if (l.visible !== on) l.visible = on;                // an unused light is switched off, not just dimmed to 0: every light in the scene costs every lit pixel (about 1/8 of the GPU time each), dimmed or not
     if (!t) { l.intensity = 0; continue; }
     l.position.set(t.lx, t.y, t.lz);
     l.color.setHex(t.color);
@@ -2012,12 +2013,30 @@ function generateAndEnter(n, arrive) {
   arrows.length = 0;                                  // the old floor's group (and its arrows) is gone
   cb.draw = null;
   if (arrive) arriveBy(arrive); else player.place(floor);
+  warmGpu();                                          // upload the whole floor now, under the loading hitch, not a chunk at a time as you walk into view
   updateCulling(player, cullChunks, propObjs, enemies);
   baseGuards = floor.enemies.length;
   respawnQ = [];                                      // replacements for killed guards (updateRespawn)
   floorBanner(n);
   qualitySettle();
   // no background pre-generation: the next floor is built only after you take the stairs (it caused hitches during play)
+}
+
+// Three.js uploads a mesh's buffers (and compiles its program) the first time it is drawn, and skips what is outside the view or hidden. Left alone, every new room
+// walked into cost a 7 to 20 ms frame, and the first sight of a boss or an effect pool more. So a new floor is drawn once with everything on and uncullable (the frame the stairs
+// already spend building), and renderer.compile covers the hidden pooled effects. updateCulling then puts the visibility back. Not done in ?norender=1 (no drawing at all).
+const warmList = [];
+function warmGpu() {
+  if (params.has('norender')) return;
+  warmList.length = 0;
+  group.traverse(o => { if (o.isMesh && o.frustumCulled) { o.frustumCulled = false; warmList.push(o); } });
+  for (const c of cullChunks) c.group.visible = true;
+  for (const o of propObjs) if (o.mesh && !o.gone) o.mesh.visible = true;
+  for (const e of enemies) e.mesh.visible = true;
+  camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0);
+  renderer.compile(scene, camera); renderer.render(scene, camera);
+  for (let i = 0; i < warmList.length; i++) warmList[i].frustumCulled = true;
+  warmList.length = 0;
 }
 
 // Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
