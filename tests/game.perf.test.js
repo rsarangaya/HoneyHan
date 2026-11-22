@@ -184,7 +184,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     game.setQualityMode('auto'); out.auto = snap();
     return out;
   });
-  check('steady 144, 60 and 30 Hz frame times never degrade quality (judged against the display rate)', qa.steady['144'] && qa.steady['60'] && qa.steady['30'], JSON.stringify(qa.steady));
+  check('steady 144 and 60 Hz frame times never degrade quality; a steady 30 Hz (33 ms) display counts as slow and does', qa.steady['144'] && qa.steady['60'] && !qa.steady['30'], JSON.stringify(qa.steady));
   check('a 2 s hitch (spike frames) is ignored', qa.hitch);
   check('sustained 40 ms frames lower quality one stage at a time (level 1, settling, level 2)', JSON.stringify(qa.log) === '[1,1,2]', JSON.stringify(qa.log));
   check('level 2: draw distance 24 m, 1 torch light, minimap every 6th frame, fog denser by the same ratio', qa.s2.cull === 24 && qa.s2.torches === 1 && qa.s2.mini === 6 && Math.abs(qa.s2.fog - qa.themeFog * 38 / 24) < 1e-6, JSON.stringify(qa.s2));

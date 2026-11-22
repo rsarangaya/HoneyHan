@@ -147,7 +147,7 @@ function adaptQuality(dt, apply) {
   quality.sinceUp++;
   if (quality.skip) { quality.skip = 0; return; }          // the window right after a change is still settling
   if (quality.hold > 0) quality.hold--;
-  if (avg > QSLOW && (avg > base * 1.6 || avg > QABS)) {
+  if (avg > QSLOW) {
     quality.fast = 0;
     if (quality.sinceUp < 6) quality.hold = 12;            // we stepped up and it was too much: stay down a while
     if (quality.level < 2) { setQualityLevel(quality.level + 1); apply(quality.cur); quality.skip = 1; }
