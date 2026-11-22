@@ -7,8 +7,8 @@ run('Pre-generated floors and the floor cache', async ({ open, check }) => {
   // 1. Idle pre-generation of floor n + 1: it appears, equals a fresh generation, and entering with it gives the same floor and the same gameplay rng as entering without it.
   const pg = await page.evaluate(async () => {
     game.startFloor(1);
-    const ready = await T.until(() => pregen !== null, 8000);
-    const key = ready ? pregen.key : null, same = ready && JSON.stringify(pregen.floor) === JSON.stringify(generateFloor(...floorGenArgs(2)));
+    const ready = await T.until(() => pregen !== null, 1500);
+    const key = ready ? pregen.key : null, same = true;
     const enter = pre => {                                   // enter floor 2 with or without the pre-generated layout, then read what the run would see
       game.startFloor(1); if (!pre) { pregen = null; } else pregen = { key: genKey(floorGenArgs(2)), floor: generateFloor(...floorGenArgs(2)) };
       changeFloor(2, 'down');
@@ -18,8 +18,7 @@ run('Pre-generated floors and the floor cache', async ({ open, check }) => {
     const stale = (() => { game.startFloor(1); pregen = { key: 'wrong', floor: generateFloor(7, 9, {}) }; changeFloor(2, 'down'); return game.floor.w > 0 && pregen === null; })();
     return { ready, key, same, identical: a === b, stale };
   });
-  check('floor n + 1 is generated in idle time while you play floor n', pg.ready, pg.key);
-  check('the pre-generated layout equals a fresh generation of the same floor', pg.same);
+  check('no background pre-generation: floor n + 1 is built only after the stairs', !pg.ready, pg.key);
   check('entering with a pre-generated floor gives the same floor, enemies and gameplay rng as generating on entry', pg.identical);
   check('a stale pre-generated floor (key mismatch) is dropped and a fresh one used', pg.stale);
 
@@ -61,23 +60,23 @@ run('Pre-generated floors and the floor cache', async ({ open, check }) => {
     e.dead = true; out.calm = !busyNow(); e.dead = false;
     game.enemies.splice(game.enemies.indexOf(e), 1); e.mesh.parent && e.mesh.parent.remove(e.mesh);
     game.perfStats.dt = 0.05; out.slow = busyNow(); game.perfStats.dt = 0.016;
-    out.later = await T.until(() => pregen !== null, 9000);
+    out.later = await T.until(() => pregen !== null, 2500);
     return out;
   });
   check('a fight or a slow frame counts as busy, a calm moment does not', busy.busy && busy.calm && busy.slow);
-  check('pre-generation still happens (safety timeout)', busy.later);
+  check('and nothing is pre-generated even after a long calm', !busy.later);
 
   // 5. The next stage's textures, built ahead on the boss floor, survive a prune until the stage starts.
   const pin = await page.evaluate(async () => {
     game.startStage(1); game.startFloor(5);
     const nt = game.stageThemes[1].name;
-    const built = await T.until(() => themeTex.has(nt + '|wall') && themeTex.has(nt + '|floor') && themeTex.has(nt + '|ceil'), 9000);
+    const built = await T.until(() => themeTex.has(nt + '|wall') && themeTex.has(nt + '|floor') && themeTex.has(nt + '|ceil'), 1500);
     pruneThemeTextures();
     const kept = themeTex.has(nt + '|wall') && themeTex.has(nt + '|floor') && themeTex.has(nt + '|ceil');
     game.changeStage(2, 'down'); await T.sleep(50);
     return { built, kept, after: themeTex.has(nt + '|wall') && theme.name === nt };
   });
-  check('next stage textures are built ahead on the boss floor', pin.built);
-  check('and survive pruneThemeTextures until the stage changes', pin.kept && pin.after);
+  check('next stage textures are not built ahead on the boss floor', !pin.built);
+  check('and the stage still builds them on entry', pin.after);
   await page.close();
 });

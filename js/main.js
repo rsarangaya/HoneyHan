@@ -2017,7 +2017,7 @@ function generateAndEnter(n, arrive) {
   respawnQ = [];                                      // replacements for killed guards (updateRespawn)
   floorBanner(n);
   qualitySettle();
-  prefetchNext(n);
+  // no background pre-generation: the next floor is built only after you take the stairs (it caused hitches during play)
 }
 
 // Take the stairs. The floor you leave is kept; the one you arrive on is restored if you have been there, else built.
