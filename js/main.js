@@ -10,6 +10,8 @@ let stage = 1, stageSeed = runSeed, theme = stageThemes[0];   // stageSeed is th
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(quality.cur);   // 1.5 at most; js/perf.js lowers it if the frame rate drops
+// An integrated Intel GPU (the browser often picks it on dual-GPU laptops whatever powerPreference says) starts one stage down at pixel ratio 1; Auto still steps up if frames allow.
+try { const gl = renderer.getContext(), x = gl.getExtension("WEBGL_debug_renderer_info"), n = x ? String(gl.getParameter(x.UNMASKED_RENDERER_WEBGL)) : ""; quality.gpu = n; if (/Intel/i.test(n) && quality.mode === "auto" && quality.level === 0) { setQualityLevel(1); quality.cur = Math.min(quality.max, 1); renderer.setPixelRatio(quality.cur); } } catch (e) { }
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;   // a filmic curve instead of hard clipping
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 80);
