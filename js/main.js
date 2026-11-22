@@ -583,9 +583,7 @@ function buildFloor() {
   endWall.position.set(sx, -STAIR_DEPTH / 2 - 0.2, stairBox.z1 + 0.05);
   group.add(endWall);
   stairRoots.push(asRoot(stairFrom, sx, sz));
-  stairsLight = new THREE.PointLight(0xffe0a0, 0.35, 12);
-  stairsLight.position.set(sx, 0.6, sz);
-  group.add(stairsLight);
+  stairsLight = { x: sx, y: 0.6, z: sz, color: 0xffe0a0, i: 0.35, d: 12, swing: 0.08 };   // the glow at the way down: lit by the one shared stair lamp (stairLamp) while you are near it
 
   // the stairs back up (floors 2 and deeper): a flight of steps on the start tile, rising from the open side
   upBox = null; upLight = null; floor.up = null;
@@ -608,8 +606,8 @@ function buildFloor() {
     }
     const top = new THREE.Mesh(new THREE.BoxGeometry(uw + 0.3, 0.3, 0.3), sharedLam(0x15120e)); top.position.set(ux, UP_RISE + 0.6, base - dir * ulen); group.add(top);   // a dark opening at the top
     stairRoots.push(asRoot(upFrom, ux, uz));
-    upLight = new THREE.PointLight(0xa8c8ff, 0.3, 9); upLight.position.set(ux, 1.8, uz); group.add(upLight);                // a cool light from above
-  } else group.add(new THREE.PointLight(0xa8c8ff, 0, 9));  // an unlit stand-in: the lit materials' shader depends on the light count, so every floor keeps the same count (no recompile hitch on the first floor with stairs up)
+    upLight = { x: ux, y: 1.8, z: uz, color: 0xa8c8ff, i: 0.3, d: 9, swing: 0 };                                          // a cool light from above
+  }
 
   propObjs = floor.props.map(p => { const o = makeProp(p, !!p.mimic); if (p.mimic) { o.mats.forEach(m => m.dispose()); o.mats = []; o.mesh = new THREE.Group(); } return o; });   // a mimic's chest is drawn by its enemy (below), so its prop is only the thing you search
   propObjs.forEach(o => { group.add(o.mesh); if (o.p.opened && !o.p.mimic) markOpened(o); });   // (a searched-out prop looks searched out when its floor is built again)
@@ -825,6 +823,17 @@ const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6).translate(0, 
 const TORCH_PLATE = new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8).rotateX(Math.PI / 2), TORCH_ARM = new THREE.CylinderGeometry(0.025, 0.025, 0.22, 5).rotateX(Math.PI / 2);   // wall bracket: a plate on the surface and an arm out to the torch
 const TORCH_POST = new THREE.CylinderGeometry(0.04, 0.06, 1.5, 6).translate(0, 0.75, 0), TORCH_FOOT = new THREE.CylinderGeometry(0.2, 0.22, 0.08, 8).translate(0, 0.04, 0), TORCH_BOWL = new THREE.CylinderGeometry(0.1, 0.06, 0.12, 6).translate(0, 1.56, 0);
 const TORCH = { lean: 0.5, embed: 0.05, heights: [0, -0.4, -0.8, -1.2], minSurf: 0.2, postOut: 1.1, tall: new Set(['banner', 'hearth', 'statue', 'rpillar', 'awning', 'counter', 'crowd']) };   // lean: rad the flame tilts out from the wall; heights: tried below the usual mount height when nothing is there
+// One point light serves both stairwells (it was one light per stairwell, plus an unlit stand-in on floors without stairs up): every lit pixel pays for every light in the scene,
+// and you are near only one stairwell at a time. It always exists, so the shader never changes. Each frame it sits at whichever of the floor's two stair glows is nearer.
+const stairLamp = new THREE.PointLight(0xffe0a0, 0, 12); scene.add(stairLamp);
+function updateStairLamp(now) {
+  const a = stairsLight, b = upLight;
+  let s = a;
+  if (b && (b.x - player.x) ** 2 + (b.z - player.z) ** 2 < (a.x - player.x) ** 2 + (a.z - player.z) ** 2) s = b;
+  stairLamp.position.set(s.x, s.y, s.z); stairLamp.distance = s.d;
+  if (stairLamp.color.getHex() !== s.color) stairLamp.color.setHex(s.color);
+  stairLamp.intensity = s.i + (s.swing ? Math.sin(now / 300) * s.swing : 0);
+}
 const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.pal.light, 0, 14, 1.5); scene.add(l); return l; });
 // A torch spot is dropped when tall decor stands at its wall or a door is beside it.
 function torchBlocked(t) {
@@ -1613,12 +1622,17 @@ function updateCombat(dt) {
 }
 
 // Free distance in front of the camera before a wall or solid prop, checked left, centre and right of the blade (max 2 m).
+const FA_OFF = [-0.4, 0, 0.45], faNear = [];   // the three probe lines, and the solids within reach of the probes (reused: no per-frame arrays or closures)
 function freeAhead() {
-  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw), sol = floor.solids;
+  let n = 0;                                                       // only the props that can be within 2.5 m of the player matter: the probes then test a handful, not every solid on the floor
+  for (let i = 0; i < sol.length; i++) { const s = sol[i]; if (s.r > 0.3) { const dx = s.x - player.x, dz = s.z - player.z, m = 2.5 + s.r; if (dx * dx + dz * dz < m * m) faNear[n++] = s; } }
   let free = 2;
-  for (const off of [-0.4, 0, 0.45]) for (let d = 0.1; d < free; d += 0.1) {
-    const px = player.x + fx * d + rx * off, pz = player.z + fz * d + rz * off;
-    if (wallAt(floor, Math.floor(px / TILE), Math.floor(pz / TILE)) || floor.solids.some(s => s.r > 0.3 && (px - s.x) ** 2 + (pz - s.z) ** 2 < s.r * s.r)) { free = d; break; }
+  for (let k = 0; k < 3; k++) for (let d = 0.1; d < free; d += 0.1) {
+    const off = FA_OFF[k], px = player.x + fx * d + rx * off, pz = player.z + fz * d + rz * off;
+    let hit = wallAt(floor, Math.floor(px / TILE), Math.floor(pz / TILE));
+    for (let i = 0; !hit && i < n; i++) { const s = faNear[i]; hit = (px - s.x) ** 2 + (pz - s.z) ** 2 < s.r * s.r; }
+    if (hit) { free = d; break; }
   }
   return free;
 }
@@ -1712,8 +1726,10 @@ function lookTarget() {
   let best = null, bestD = 1e9;
   for (const o of propObjs) {
     if (o.p.opened) continue;
-    const vx = o.x - player.x, vz = o.z - player.z, d = Math.hypot(vx, vz);
-    if (d > 2.4 || (vx * dx + vz * dz) / d < 0.8) continue;
+    const vx = o.x - player.x, vz = o.z - player.z, d2 = vx * vx + vz * vz;
+    if (d2 > 5.76) continue;                                  // (2.4 m, squared: most props are far, so no square root for them)
+    const d = Math.sqrt(d2);
+    if ((vx * dx + vz * dz) / d < 0.8) continue;
     if (d < bestD) { best = o; bestD = d; }
   }
   return best;
@@ -1732,6 +1748,8 @@ function targetInfo(o) {
   return player.crouching && (o.p.kind === 'barrel' || o.p.kind === 'rubble') ? { label: 'Search carefully', time: pi.time * TRAP.disarmMul } : pi;
 }
 
+let promptFor = null, promptLocked = false, promptTxt = '';
+const promptNode = document.getElementById('promptText'), barNode = document.getElementById('barFill');
 function updateSearch(dt) {
   const target = lookTarget();
   const info = target && targetInfo(target);
@@ -1741,12 +1759,12 @@ function updateSearch(dt) {
     if (search.t >= info.time) { finishSearch(target); search = null; }
   } else search = null;
 
-  const prompt = el('prompt');
+  const prompt = el('prompt');                                  // (other code shows this prompt too, eating and drawing the bow, so it is not cached)
   if (target) {
-    prompt.style.display = 'block';
-    el('promptText').textContent = info.locked ? info.label : `Hold E: ${info.label}`;
-    el('barFill').style.width = (search && info.time ? Math.min(1, search.t / info.time) * 100 : 0) + '%';
-  } else prompt.style.display = 'none';
+    if (prompt.style.display !== 'block') prompt.style.display = 'block';
+    if (promptFor !== info.label || promptLocked !== !!info.locked || promptNode.textContent !== promptTxt) { promptFor = info.label; promptLocked = !!info.locked; promptTxt = promptLocked ? promptFor : `Hold E: ${promptFor}`; promptNode.textContent = promptTxt; }   // (the text is rebuilt only when the label changes)
+    const w = (search && info.time ? Math.min(1, search.t / info.time) * 100 : 0) + '%'; if (barNode.style.width !== w) barNode.style.width = w;
+  } else if (prompt.style.display !== 'none') prompt.style.display = 'none';
 }
 
 // The Final Chamber's rune circle (floor.runes = its centre): it swells for flareWarn s, then flares for flareLen s, once every flareEvery s (a phase of gameT). Pulses the shared rune and mist materials.
@@ -1850,8 +1868,9 @@ function updateDoors(dt) {
 
 let hudKey = '';
 const HUNGER_COLOR = { fed: '#d9a441', hungry: '#e08a2a', weak: '#d4562a', starving: '#b01e1e' };
-const styleSeen = new Map();   // 'id.prop' -> the last value written, so an unchanged value costs no DOM write
-function setStyle(id, prop, v) { const k = id + '.' + prop; if (styleSeen.get(k) === v) return; styleSeen.set(k, v); el(id).style[prop] = v; }
+const styleSeen = {};   // id -> { prop: last value written }, so an unchanged value costs no DOM write (and no key string is built)
+function setStyle(id, prop, v) { const m = styleSeen[id] || (styleSeen[id] = {}); if (m[prop] === v) return; m[prop] = v; el(id).style[prop] = v; }
+function setPct(id, pct) { const q = Math.round(pct * 10) / 10, m = styleSeen[id] || (styleSeen[id] = {}); if (m.w === q) return; m.w = q; el(id).style.width = q + '%'; }   // a bar's width: the string is built only when the value (to 0.1%) changed
 let hudBossDef = null;
 function bossHud(def) {                                 // the boss bar's name and one notch per phase (rebuilt only when the boss's def changes)
   hudBossDef = def; const bar = el('bossBar');
@@ -1864,13 +1883,13 @@ function updateHud() {
   if (boss && boss.def && boss.def !== hudBossDef) bossHud(boss.def);
   if (boss && boss.justWoke) { boss.justWoke = false; flash('The boss wakes!'); }
   setStyle('boss', 'display', boss && !boss.dormant && !boss.dead ? 'block' : 'none');
-  if (boss) setStyle('bossFill', 'width', Math.max(0, boss.hp / boss.maxHp * 100) + '%');
-  setStyle('hpFill', 'width', (inv.hp / inv.maxHp * 100) + '%');
-  setStyle('stamFill', 'width', (cb.stamina / STAMINA_MAX * 100) + '%');
+  if (boss) setPct('bossFill', Math.max(0, boss.hp / boss.maxHp * 100));
+  setPct('hpFill', inv.hp / inv.maxHp * 100);
+  setPct('stamFill', cb.stamina / STAMINA_MAX * 100);
   setStyle('stamFill', 'background', cb.exhT > 0 && ((cb.exhT * 8) | 0) % 2 === 0 ? '#e0453a' : cb.stamina < 25 && !dev.on ? '#d7822a' : cb.canSprint ? '#4cc36a' : '#c9a23a');   // flashes red when you try something tired; orange while exhausted (an action there is slow)
-  setStyle('dashFill', 'width', (cb.dashCd > 0 ? (1 - cb.dashCd / TUNE.dashCd) * 100 : 100) + '%');   // the dash cooldown under the stamina bar
+  setPct('dashFill', cb.dashCd > 0 ? (1 - cb.dashCd / TUNE.dashCd) * 100 : 100);   // the dash cooldown under the stamina bar
   setStyle('dashFill', 'background', cb.dashCd > 0 ? '#6a7a8a' : cb.stamina >= TUNE.dashStam || dev.on ? '#7fd8ff' : '#8a5a4a');
-  setStyle('hungerFill', 'width', hunger.v + '%');
+  setPct('hungerFill', hunger.v);
   setStyle('hungerFill', 'background', HUNGER_COLOR[hunger.stage]);
   if (frameCount % 3 !== 0) return;                    // the text part builds strings: 20 times a second is plenty
   const slots = inv.quick.map((_, i) => {
@@ -2104,15 +2123,35 @@ function reveal() {
   }
 }
 
+// The map's tiles (explored ones only) are drawn into a layer of their own, and only when a tile's colour code changed (a reveal, a door, a sliding shelf, a new floor): a pass over the
+// tiles to compare codes costs microseconds, thousands of fillRects every few frames did not. The frame then copies the layer and draws the moving things on top.
+const miniLayer = document.createElement('canvas'), lctx = miniLayer.getContext('2d');
+miniLayer.width = hud.mini.width; miniLayer.height = hud.mini.height;
+const MINI_COL = ['#000', '#2a2a33', '#ffd24a', '#5aa0ff', '#c0702a', '#6a6a78'];   // by code: unexplored, wall (or a safe-room door), the way down (gold), the way back up (blue), door, floor
+let miniSig = new Uint8Array(0), miniFloor = null;
+function miniLayerUpdate() {
+  const n = floor.w * floor.h, tiles = floor.tiles, safe = floor.safe, up = floor.up;
+  let diff = miniFloor !== floor || miniSig.length !== n;
+  if (miniSig.length !== n) miniSig = new Uint8Array(n);
+  miniFloor = floor;
+  for (let i = 0; i < n; i++) {
+    let c = 0;
+    if (explored[i]) { const t = tiles[i]; c = t === T_WALL || (t === T_DOOR && safe) ? 1 : t === T_STAIRS ? 2 : t === T_START && up ? 3 : t === T_DOOR ? 4 : 5; }
+    if (miniSig[i] !== c) { miniSig[i] = c; diff = true; }
+  }
+  if (!diff) return;
+  const S = miniLayer.width / floor.w;
+  lctx.fillStyle = '#000'; lctx.fillRect(0, 0, miniLayer.width, miniLayer.height);
+  let cur = 0;
+  for (let y = 0, i = 0; y < floor.h; y++) for (let x = 0; x < floor.w; x++, i++) {
+    const c = miniSig[i]; if (!c) continue;
+    if (c !== cur) { lctx.fillStyle = MINI_COL[cur = c]; }
+    lctx.fillRect(x * S, y * S, S + 0.5, S + 0.5);
+  }
+}
 function drawMinimap(step = 1) {
   const S = hud.mini.width / floor.w;
-  mctx.fillStyle = '#000'; mctx.fillRect(0, 0, hud.mini.width, hud.mini.height);
-  for (let y = 0; y < floor.h; y++) for (let x = 0; x < floor.w; x++) {
-    if (!explored[y * floor.w + x]) continue;
-    const t = floor.tiles[y * floor.w + x];
-    mctx.fillStyle = t === T_WALL || (t === T_DOOR && floor.safe) ? '#2a2a33' : t === T_STAIRS ? '#ffd24a' : t === T_START && floor.up ? '#5aa0ff' : t === T_DOOR ? '#c0702a' : '#6a6a78';   // gold: the way down, blue: the way back up
-    mctx.fillRect(x * S, y * S, S + 0.5, S + 0.5);
-  }
+  miniLayerUpdate(); mctx.drawImage(miniLayer, 0, 0);
   if (dev.on) for (const e of enemies) {
     if (e.dead || e.inBrush) continue;                        // (an enemy in Jungle brush is hidden on the minimap)
     mctx.fillStyle = e.state === 'alerted' ? '#ff3a3a' : e.state === 'unaware' ? '#e07a3a' : '#ffc23a';
@@ -2307,6 +2346,7 @@ function updateAssist(under, mt) {
 function qualityApply(r) { applyFog(); if (renderer.getPixelRatio() !== r) { renderer.setPixelRatio(r); resize(); } }
 let last = performance.now(), frameNo = 0, dazeOn = false, frameCount = 0;
 const BASE_FOV = 75; let fovNow = BASE_FOV;
+const noiseCtx = { events: [], emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold, prints: null, pt: null, t: 0 };   // what every creature's update gets: built once, its fields set each frame
 const perfStats = { logic: 0, dt: 0 };   // average milliseconds of game logic per frame (everything but drawing), for the tests
 function frame(now) {
   const dt = (now - last) / 1000; last = now; perfStats.dt = dt; const tl0 = performance.now();
@@ -2320,7 +2360,7 @@ function frame(now) {
     updateArrows(dt);
     updateDoors(dt); updateMovers(dt);
     if (prisonerWalk) prisonerStep(Math.min(dt, 0.05));                                // a freed prisoner on its way to the stairs (js/quests.js): only while one is walking
-    const events = pending.splice(0);              // noises guards made last frame
+    const events = noiseCtx.events; events.length = 0; for (let i = 0; i < pending.length; i++) events.push(pending[i]); pending.length = 0;   // noises guards made last frame (the same two arrays every frame)
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
     const under = floor.patches.get(player.tileY * floor.w + player.tileX), mt = theme.mechanic.TUNE;
     const hush = HUSH * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
@@ -2339,7 +2379,7 @@ function frame(now) {
     }
     updateNoiseHud(Math.max(player.noiseRadius, pulse) * hush, dt); updateAssist(under, mt);
     pulse = 0;
-    const noise = { events, emit: (x, z, r, src) => pending.push({ x, z, r, src }), shoot: spawnEnemyShot, steal: stealGold, prints: floor.prints, pt: mt, t: gameT };
+    const noise = noiseCtx; noise.prints = floor.prints; noise.pt = mt; noise.t = gameT;
     for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
@@ -2365,7 +2405,7 @@ function frame(now) {
   const dazed = pst.has('daze');
   if (dazed !== dazeOn) { dazeOn = dazed; canvas.style.filter = dazed ? 'blur(2.5px)' : ''; }
   if (dazed) camera.rotation.z += Math.sin(now / 180) * 0.035;
-  stairsLight.intensity = 0.35 + Math.sin(now / 300) * 0.08;
+  updateStairLamp(now);
   updateViewmodel(dt);
   frameCount++;
   if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);

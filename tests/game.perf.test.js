@@ -43,7 +43,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   // 2. Furniture is merged: far fewer meshes than decor pieces, and the merged geometry is not lost.
   const merged = await page.evaluate(async () => {
     game.startFloor(2); await T.sleep(120);
-    let meshes = 0, tris = 0; for (const c of cullChunks) c.group.traverse(o => { if (o.isMesh) { meshes++; tris += o.geometry.attributes.position.count / 3; } });
+    let meshes = 0, tris = 0; for (const c of cullChunks) c.group.traverse(o => { if (o.isMesh) { meshes++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
     return { decor: game.floor.decor.length, chunks: cullChunks.length, meshes, tris };
   });
   check('a floor\'s furniture and torches are merged into about 4 meshes per chunk (it was over a thousand meshes)', merged.meshes <= merged.chunks * 6 && merged.meshes < 220 && merged.chunks >= 3, JSON.stringify(merged));

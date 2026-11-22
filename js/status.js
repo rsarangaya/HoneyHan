@@ -31,12 +31,12 @@ class Statuses {
     let dmg = 0;
     if (this.has('bleed')) dmg += STATUS.bleed.dps * dt;
     if (this.has('cripple')) dmg += STATUS.cripple.bleed * dt;
-    for (const k of Object.keys(this.t)) {
+    for (const k in this.t) {                                  // (for-in: no key array per call; deleting the current key while looping is safe)
       if ((this.t[k] -= dt) > 0) continue;
       delete this.t[k]; delete this.max[k];
       if (STATUS[k].immune) this.cool[k] = STATUS[k].immune;
     }
-    for (const k of Object.keys(this.cool)) if ((this.cool[k] -= dt) <= 0) delete this.cool[k];
+    for (const k in this.cool) if ((this.cool[k] -= dt) <= 0) delete this.cool[k];
     return dmg;
   }
   // Movement multiplier: the strongest effect wins, they never multiply. Cripple recovers gradually over its last half.

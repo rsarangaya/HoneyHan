@@ -7,36 +7,40 @@
 const PERF = { chunk: 24, cull: 38, arena: 60, floorBoss: false };
 
 
-// Merge items [{ g, cnt, mat4, color }] (cnt = vertices after un-indexing) into one geometry with position, normal and vertex colour,
-// transformed by each item's matrix. Reads the source geometries directly: no per-part clones (this runs for every prop and
-// creature of a floor, so it is most of the floor-build time).
+// Merge items [{ g, cnt, icnt, mat4, color }] (cnt = vertices, icnt = indices, or vertices when the source is not indexed) into one INDEXED geometry with position, normal and vertex
+// colour, transformed by each item's matrix. Sources keep their shared vertices (a sphere or cylinder has a third of the vertices it would have un-indexed), so a floor
+// merges, uploads and lights (per-vertex, with every light in the scene) in about half the work. Reads the source geometries directly: no per-part clones (this runs
+// for every prop and creature of a floor, so it is most of the floor-build time). n = total vertices.
 const _bm = new THREE.Matrix4(), _bn = new THREE.Matrix3(), _bi = new THREE.Matrix4();
 function mergeItems(items, n) {
-  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
-  let o = 0;
+  let ni = 0; for (let i = 0; i < items.length; i++) ni += items[i].icnt;
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), idx = n > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let o = 0, oi = 0;
   for (const it of items) {
     _bm.copy(it.mat4); _bn.getNormalMatrix(_bm);
-    const g = it.g, ix = g.index ? g.index.array : null, pa = g.attributes.position.array, na = g.attributes.normal.array, c = it.color;
+    const g = it.g, ix = g.index ? g.index.array : null, pa = g.attributes.position.array, na = g.attributes.normal.array, c = it.color, base = o;
     const m = _bm.elements, q = _bn.elements, cr = c.r, cg = c.g, cb = c.b;
     for (let k = 0; k < it.cnt; k++, o++) {
-      const vi = (ix ? ix[k] : k) * 3, x = pa[vi], y = pa[vi + 1], z = pa[vi + 2], o3 = o * 3;
+      const vi = k * 3, x = pa[vi], y = pa[vi + 1], z = pa[vi + 2], o3 = o * 3;
       pos[o3] = m[0] * x + m[4] * y + m[8] * z + m[12]; pos[o3 + 1] = m[1] * x + m[5] * y + m[9] * z + m[13]; pos[o3 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
       const nx = na[vi], ny = na[vi + 1], nz = na[vi + 2];
       const tx = q[0] * nx + q[3] * ny + q[6] * nz, ty = q[1] * nx + q[4] * ny + q[7] * nz, tz = q[2] * nx + q[5] * ny + q[8] * nz, il = 1 / (Math.sqrt(tx * tx + ty * ty + tz * tz) || 1);
       nor[o3] = tx * il; nor[o3 + 1] = ty * il; nor[o3 + 2] = tz * il;
       col[o3] = cr; col[o3 + 1] = cg; col[o3 + 2] = cb;
     }
+    if (ix) for (let k = 0; k < it.icnt; k++) idx[oi++] = base + ix[k]; else for (let k = 0; k < it.icnt; k++) idx[oi++] = base + k;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   return geo;
 }
-// Add mesh o (placed by matrix `mat`) to a bucket { items, n }.
+// Add mesh o (placed by matrix `mat`) to a bucket { items, n } (n counts vertices).
 function addItem(b, o, mat) {
   const g = o.geometry; if (!g.attributes.normal) g.computeVertexNormals();
-  const cnt = g.index ? g.index.count : g.attributes.position.count;
-  b.items.push({ g, cnt, mat4: new THREE.Matrix4().copy(mat), color: o.material.color }); b.n += cnt;
+  const cnt = g.attributes.position.count;
+  b.items.push({ g, cnt, icnt: g.index ? g.index.count : cnt, mat4: new THREE.Matrix4().copy(mat), color: o.material.color }); b.n += cnt;
 }
 
 // One shared material per kind of surface (lit, glowing, emissive trim, see-through): the colour moves into the vertices,
@@ -125,6 +129,7 @@ const QKEY = 'honeyhan-quality', QRING = new Float64Array(10);
 const quality = { max: Math.min(window.devicePixelRatio || 1, 1.5), cur: Math.min(window.devicePixelRatio || 1, 1.5), acc: 0, n: 0, t: 0, fast: 0, skip: 0, level: 0, mode: 'auto', cull: 38, torches: 4, mini: 3, fogK: 1, bn: 0, bi: 0, hold: 0, sinceUp: 99, base: 16.7 };
 function setQualityLevel(l) {
   const q = QLEVELS[quality.level = l];
+  if (quality.mode === 'auto') try { localStorage.setItem(QKEY + '-level', l); } catch (e) { }
   PERF.cull = quality.cull = q.cull; quality.torches = q.torches; quality.mini = q.mini; quality.fogK = QLEVELS[0].cull / q.cull;
 }
 function qualitySettle() { quality.acc = quality.n = quality.t = quality.fast = 0; quality.skip = 1; }   // a floor change: the next window is not a measurement
@@ -136,6 +141,7 @@ function setQualityMode(m, apply) {
 }
 try { const m = localStorage.getItem(QKEY); if (m === 'low' || m === 'high') quality.mode = m; } catch (e) { }
 if (quality.mode !== 'auto') setQualityMode(quality.mode, null);
+else try { const l = +localStorage.getItem(QKEY + '-level'); if (l === 1 || l === 2) setQualityLevel(l); } catch (e) { }   // Auto starts where the last session settled (a slow machine does not re-learn it every run; it steps back up when frames allow)
 function adaptQuality(dt, apply) {
   if (dt > QSPIKE || quality.mode !== 'auto') return;      // a hiccup is not the frame rate
   quality.acc += dt; quality.n++; quality.t += dt;

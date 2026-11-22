@@ -107,7 +107,7 @@ run('Weapon models, floppy spear, chest lids, potion shelf', async ({ open, chec
   // ---- potion shelf: one merged mesh of real bottles ----
   const p = await page.evaluate(() => {
     const o = makeProp({ kind: 'potions', seed: 5, x: 1, y: 1, yaw: 0 }), meshes = []; o.mesh.traverse(m => m.isMesh && meshes.push(m));
-    const g = meshes[0].geometry, tris = g.attributes.position.count / 3, before = o.mats[0].color.getHex();
+    const g = meshes[0].geometry, tris = (g.index ? g.index.count : g.attributes.position.count) / 3, before = o.mats[0].color.getHex();
     markOpened(o);
     return { meshes: meshes.length, tris, color: !!g.attributes.color, darker: o.mats[0].color.getHex() < before, vc: o.mats[0].vertexColors, r: o.r, time: PROP_INFO.potions.time };
   });
