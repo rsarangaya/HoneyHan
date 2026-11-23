@@ -37,6 +37,11 @@
   #stamFill { height: 100%; background: #4cc36a; }
   #dash { width: 200px; height: 3px; margin: -4px auto 6px; background: #0008; border: 1px solid #fff4; }
   #dashFill { height: 100%; width: 100%; background: #7fd8ff; }
+  #xp { width: 200px; height: 3px; margin: -3px auto 2px; background: #0008; border: 1px solid #fff4; }
+  #xpFill { height: 100%; width: 0; background: #9ad4ff; }
+  #lvhint { font-size: 10px; opacity: .75; min-height: 12px; margin-bottom: 4px; }
+  #dpips { font-size: 8px; line-height: 8px; letter-spacing: 3px; margin: -4px auto 4px; color: #7fd8ff; height: 8px; }
+  #xpgain { top: 56%; left: 0; right: 0; text-align: center; font-size: 15px; font-weight: 700; display: none; text-shadow: 0 0 4px #000; }
   #hunger { width: 200px; height: 4px; margin: -3px auto 6px; background: #0008; border: 1px solid #fff5; }
   #hungerFill { height: 100%; width: 100%; background: #d9a441; }
   #noise { display: block; width: 24px; height: 16px; margin: -2px auto 4px; color: #888; }
@@ -78,12 +83,16 @@
 <div id="flash"></div>
 <div class="hud" id="log"></div>
 <div class="hud" id="hitmark"></div>
+<div class="hud" id="xpgain"></div>
 <div class="hud" id="prompt"><span id="promptText"></span><span id="bar"><span id="barFill" style="display:block"></span></span></div>
 <div class="hud" id="stats">
   <div id="hp"><div id="hpFill"></div></div>
   <div id="stam"><div id="stamFill"></div></div>
   <div id="dash" title="Dash"><div id="dashFill"></div></div>
+  <div id="dpips" title="Dash charges"></div>
   <div id="hunger" title="Hunger"><div id="hungerFill"></div></div>
+  <div id="xp" title="Experience"><div id="xpFill"></div></div>
+  <div id="lvhint"></div>
   <svg id="noise" data-l="0" viewBox="0 0 24 16" title="Noise: enemies can hear you"><title>Noise: enemies can hear you</title><circle class="d" cx="5" cy="8" r="2.2"/><path class="a a1" d="M9 5.5Q11 8 9 10.5"/><path class="a a2" d="M13 3.5Q16.5 8 13 12.5"/><path class="a a3" d="M17 1.5Q22 8 17 14.5"/></svg>
   <div id="slots"></div>
   <div id="line"></div>
@@ -109,6 +118,7 @@
 <script src="js/perf.js"></script>
 <script src="js/status.js"></script>
 <script src="js/hunger.js"></script>
+<script src="js/progress.js"></script>
 <script src="js/gen.js"></script>
 <script src="js/player.js"></script>
 <script src="js/loot.js"></script>
