@@ -479,7 +479,7 @@ function buildFloor() {
   knock.m = 0; player.dashS.on = false; bossLanesClear(); bossPuddlesClear(); bossFlamesClear();   // no knockback, ice lane, ale puddle or flame patch carries over a floor change or restart
   if (group) {   // free the old floor's GPU memory: geometry, materials and their textures
     scene.remove(group);
-    group.traverse(freeObject);
+    group.traverse(freeObject); bakeFree(group.userData.bake);
   }
   group = new THREE.Group();
   const { w, h, tiles } = floor;
@@ -585,7 +585,7 @@ function buildFloor() {
   endWall.position.set(sx, -STAIR_DEPTH / 2 - 0.2, stairBox.z1 + 0.05);
   group.add(endWall);
   stairRoots.push(asRoot(stairFrom, sx, sz));
-  stairsLight = { x: sx, y: 0.6, z: sz, color: 0xffe0a0, i: 0.35, d: 12, swing: 0.08 };   // the glow at the way down: lit by the one shared stair lamp (stairLamp) while you are near it
+  stairsLight = { x: sx, y: 0.6, z: sz, color: 0xffe0a0, i: 0.35, d: 12, swing: 0.08 };   // the glow at the way down (baked into the floor's light grid)
 
   // the stairs back up (floors 2 and deeper): a flight of steps on the start tile, rising from the open side
   upBox = null; upLight = null; floor.up = null;
@@ -629,6 +629,7 @@ function buildFloor() {
   const rune = decorObjs.find(o => o.kind === 'runes'); floor.runes = rune ? { x: rune.x, z: rune.z } : null; group.userData.fxY = rune ? 0.2 : 0;   // the Final Chamber's rune circle (centre in metres)
   buildTorches();
   cullChunks.push(...mergeStatic(torchGroups, group));
+  group.userData.bake = bakeFloorLights(); bakeUse(group.userData.bake);   // the light grid every lit material reads
   enemies = floor.enemies.map(s => new Enemy(s, floor));
   for (const o of propObjs) if (o.p.mimic) {                                           // each flagged chest is really a dormant mimic, standing exactly where the chest would
     const p = o.p, e = new Enemy({ x: p.x, y: p.y, route: [{ x: p.x, y: p.y }, { x: p.x, y: p.y }], seed: p.seed, type: 'mimic', tier: p.tier }, floor);
@@ -798,7 +799,7 @@ function openSafeDoor() {
 }
 
 // ---- light sources: wall torches plus glowing furniture (hearths, cauldrons, candles, altars).
-// Emissive meshes everywhere, real light only on the 4 nearest to the player. ----
+// Emissive meshes everywhere; their light is baked per floor (bakeFloorLights), the lantern is the only real light. ----
 // The merchant: a goblin in an apron behind his counter (not an enemy, never moves), a solid circle so you cannot walk
 // through him, and an invisible trading spot at the counter. The stock is seeded per floor.
 function buildShop() {
@@ -825,18 +826,6 @@ const TORCH_STICK = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6).translate(0, 
 const TORCH_PLATE = new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8).rotateX(Math.PI / 2), TORCH_ARM = new THREE.CylinderGeometry(0.025, 0.025, 0.22, 5).rotateX(Math.PI / 2);   // wall bracket: a plate on the surface and an arm out to the torch
 const TORCH_POST = new THREE.CylinderGeometry(0.04, 0.06, 1.5, 6).translate(0, 0.75, 0), TORCH_FOOT = new THREE.CylinderGeometry(0.2, 0.22, 0.08, 8).translate(0, 0.04, 0), TORCH_BOWL = new THREE.CylinderGeometry(0.1, 0.06, 0.12, 6).translate(0, 1.56, 0);
 const TORCH = { lean: 0.5, embed: 0.05, heights: [0, -0.4, -0.8, -1.2], minSurf: 0.2, postOut: 1.1, tall: new Set(['banner', 'hearth', 'statue', 'rpillar', 'awning', 'counter', 'crowd']) };   // lean: rad the flame tilts out from the wall; heights: tried below the usual mount height when nothing is there
-// One point light serves both stairwells (it was one light per stairwell, plus an unlit stand-in on floors without stairs up): every lit pixel pays for every light in the scene,
-// and you are near only one stairwell at a time. It always exists, so the shader never changes. Each frame it sits at whichever of the floor's two stair glows is nearer.
-const stairLamp = new THREE.PointLight(0xffe0a0, 0, 12); scene.add(stairLamp);
-function updateStairLamp(now) {
-  const a = stairsLight, b = upLight;
-  let s = a;
-  if (b && (b.x - player.x) ** 2 + (b.z - player.z) ** 2 < (a.x - player.x) ** 2 + (a.z - player.z) ** 2) s = b;
-  stairLamp.position.set(s.x, s.y, s.z); stairLamp.distance = s.d;
-  if (stairLamp.color.getHex() !== s.color) stairLamp.color.setHex(s.color);
-  stairLamp.intensity = s.i + (s.swing ? Math.sin(now / 300) * s.swing : 0);
-}
-const torchLights = Array.from({ length: 4 }, () => { const l = new THREE.PointLight(theme.pal.light, 0, 14, 1.5); scene.add(l); return l; });
 // A torch spot is dropped when tall decor stands at its wall or a door is beside it.
 function torchBlocked(t) {
   const x = (t.x + 0.5) * TILE + t.dx * 1.0, z = (t.y + 0.5) * TILE + t.dy * 1.0;
@@ -882,26 +871,12 @@ function buildTorches() {
     if (l) torchPts.push({ lx: o.x + Math.sin(o.yaw) * 0.6, lz: o.z + Math.cos(o.yaw) * 0.6, y: o.ly ?? l.y, color: l.color, str: l.str * (o.ls || 1) });
   }
 }
-const nearT = new Array(4).fill(null), nearD = new Float64Array(4);   // the nearest lights, nearest first (reused: no per-call arrays or sort)
-function updateTorches(now) {
-  let cnt = 0; const K = quality.torches;               // 4 lights, fewer at the lower quality levels (the spare lights stay in the scene at intensity 0: the shader never changes)
-  for (let i = 0; i < torchPts.length; i++) {
-    const t = torchPts[i], d = (t.lx - player.x) ** 2 + (t.lz - player.z) ** 2;
-    if (cnt === K && d >= nearD[K - 1]) continue;
-    let j = cnt < K ? cnt++ : K - 1;                   // insertion into the sorted top K
-    while (j > 0 && nearD[j - 1] > d) { nearD[j] = nearD[j - 1]; nearT[j] = nearT[j - 1]; j--; }
-    nearD[j] = d; nearT[j] = t;
-  }
-  for (let i = 0; i < 4; i++) {
-    const l = torchLights[i], t = i < cnt ? nearT[i] : null, on = i < K;
-    if (l.visible !== on) l.visible = on;                // an unused light is switched off, not just dimmed to 0: every light in the scene costs every lit pixel (about 1/8 of the GPU time each), dimmed or not
-    if (!t) { l.intensity = 0; continue; }
-    l.position.set(t.lx, t.y, t.lz);
-    l.color.setHex(t.color);
-    l.intensity = t.str * (0.95 + Math.sin(now / 110 + i * 2 + t.lx) * 0.12 + Math.sin(now / 37 + t.lz) * 0.06);
-  }
+// The floor's static light (torches, hearths, candles, the stair glows) is baked into one light grid when the floor is built (js/light.js): no real light for any of it, nothing pops.
+function bakeFloorLights() {
+  const L = torchPts.slice();                                            // (copy: the cached list stays as built)
+  for (const s of [stairsLight, upLight]) if (s) L.push({ lx: s.x, lz: s.z, y: s.y, color: s.color, str: s.i, R: s.d, decay: 1 });
+  return bakeLights(floor, L);
 }
-
 const dropTell = o => { if (o.tell && o.tell.parent) o.tell.parent.remove(o.tell); };   // a padlock or tripwire goes when its job is done (they are not part of any merged chunk)
 function markOpened(o) {
   o.p.opened = true; dropTell(o);
@@ -1957,7 +1932,7 @@ camera.add(torch);
 // The armory (a locked room) is on one floor of each stage, picked from the seed (planStage).
 let respawnQ = [], baseGuards = 0;   // respawnQ: seconds left on each pending replacement (one per kill), per floor
 
-function disposeGroup(g) { g.traverse(freeObject); }   // free a floor's GPU memory: geometry, materials and their textures
+function disposeGroup(g) { g.traverse(freeObject); bakeFree(g.userData.bake); }   // free a floor's GPU memory: geometry, materials and their textures
 // Keep the floor you are on so you can come back to it exactly as you left it.
 function saveFloor() {
   clearBombs();
@@ -1968,7 +1943,7 @@ function saveFloor() {
 function loadFloor(n, c) {
   floorNum = n; delete floorCache[n];
   ({ floor, group, stairBox, upBox, stairsLight, upLight, propObjs, decorObjs, enemies, torchPts, cullChunks, explored, WALL_H, baseGuards, respawnQ } = c);
-  scene.add(group);
+  scene.add(group); bakeUse(group.userData.bake);
   enemies.forEach(e => { e.cone.visible = dev.on; });
   Enemy.all = enemies; player.props = propObjs; player.mobs = enemies;
   PERF.floorBoss = !!floor.boss; applyFog(); qualitySettle();
@@ -2274,7 +2249,6 @@ function useStage(s) {
   HUSH = theme.mechanic.hush || 1;
   if (s < FINAL_STAGE) planStage(s); else { stageSeed = stageSeedOf(s); questPlan = {}; }
   prisonerRun = prisonerRuns[s] || null;
-  for (const l of torchLights) l.color.setHex(theme.pal.light);
   torch.color.setHex(theme.pal.light);
   scene.background = new THREE.Color(theme.pal.fog); scene.fog = new THREE.FogExp2(theme.pal.fog, theme.fog.density); applyFog();
   hud.theme.textContent = theme.name;
@@ -2463,11 +2437,10 @@ function frame(now) {
   const dazed = pst.has('daze');
   if (dazed !== dazeOn) { dazeOn = dazed; canvas.style.filter = dazed ? 'blur(2.5px)' : ''; }
   if (dazed) camera.rotation.z += Math.sin(now / 180) * 0.035;
-  updateStairLamp(now);
+  bakeFlicker(now); if (torch.visible !== (quality.lamp > 0)) torch.visible = quality.lamp > 0;   // (level 2 drops the lantern: the one change of light count, and the one shader recompile)
   updateViewmodel(dt);
   frameCount++;
   if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);
-  if (frameCount % 2 === 0) updateTorches(now);                  // the lights drift slowly: every other frame is plenty
   if (frameCount % quality.mini === 0) { if (state === 'play' && theme.mechanic.kind === 'brush') updateBrush(); drawMinimap(quality.mini); }                      // and the minimap three times a second per 9 frames, not every frame
   updateHud();
   perfStats.logic = perfStats.logic * 0.95 + (performance.now() - tl0) * 0.05;
@@ -2483,6 +2456,6 @@ window.game = {
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
-    updateViewmodel(1); updateCulling(player, cullChunks, propObjs, enemies); updateTorches(performance.now()); drawMinimap(); renderer.render(scene, camera);
+    updateViewmodel(1); updateCulling(player, cullChunks, propObjs, enemies); bakeFlicker(performance.now()); drawMinimap(); renderer.render(scene, camera);
   },
 };

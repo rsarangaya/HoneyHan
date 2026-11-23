@@ -165,7 +165,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   const qa = await page.evaluate(async () => {
     game.startFloor(2); await T.sleep(80);
     const Q = game.quality, out = {}, feed = (dt, sec) => { const n = Math.round(sec / dt); for (let i = 0; i < n; i++) game.adaptQuality(dt, game.qualityApply); };
-    const snap = () => ({ level: Q.level, cull: PERF.cull, torches: Q.torches, mini: Q.mini, ratio: renderer.getPixelRatio(), fog: scene.fog.density });
+    const snap = () => ({ level: Q.level, cull: PERF.cull, lamp: Q.lamp, mini: Q.mini, ratio: renderer.getPixelRatio(), fog: scene.fog.density });
     const same = (a, b) => a.level === b.level && a.ratio === b.ratio;
     game.setQualityMode('auto'); const base = snap(); out.base = base; out.themeFog = theme.fog.density;
     out.steady = {};
@@ -176,7 +176,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     feed(0.04, 1.05); out.log.push(Q.level); feed(0.04, 1.05); out.log.push(Q.level); feed(0.04, 1.05); out.log.push(Q.level);   // level 1, settling, level 2
     const s2 = snap(); out.s2 = s2;
     feed(0.04, 3.2); out.px = snap().ratio;
-    game.draw(); let lit = 0; for (const l of torchLights) if (l.intensity > 0) lit++; out.lit = lit;
+    game.draw(); let lit = 0; scene.traverse(o => { if (o.isPointLight && o.visible) lit++; }); out.lit = lit;   // real point lights drawn (the lantern only: the torches are baked)
     feed(1 / 60, 1.05); out.noFlap = snap().level === s2.level && snap().ratio === out.px;                     // one window back at the baseline: nothing steps up yet
     feed(1 / 60, 30); out.end = snap(); out.max = Q.max;
     game.setQualityMode('low'); out.low = snap(); out.saved = localStorage.getItem('honeyhan-quality');
@@ -187,10 +187,10 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
   check('steady 144 and 60 Hz frame times never degrade quality; a steady 30 Hz (33 ms) display counts as slow and does', qa.steady['144'] && qa.steady['60'] && !qa.steady['30'], JSON.stringify(qa.steady));
   check('a 2 s hitch (spike frames) is ignored', qa.hitch);
   check('sustained 40 ms frames lower quality one stage at a time (level 1, settling, level 2)', JSON.stringify(qa.log) === '[1,1,2]', JSON.stringify(qa.log));
-  check('level 2: draw distance 24 m, 1 torch light, minimap every 6th frame, fog denser by the same ratio', qa.s2.cull === 24 && qa.s2.torches === 1 && qa.s2.mini === 6 && Math.abs(qa.s2.fog - qa.themeFog * 38 / 24) < 1e-6, JSON.stringify(qa.s2));
-  check('still slow at level 2: the pixel ratio drops too, and only one torch light is lit', qa.px < qa.base.ratio && qa.lit <= 1, 'ratio ' + qa.base.ratio + ' -> ' + qa.px + ', lit ' + qa.lit);
+  check('level 2: draw distance 24 m, lantern off, minimap every 6th frame, fog denser by the same ratio', qa.s2.cull === 24 && qa.s2.lamp === 0 && qa.s2.mini === 6 && Math.abs(qa.s2.fog - qa.themeFog * 38 / 24) < 1e-6, JSON.stringify(qa.s2));
+  check('still slow at level 2: the pixel ratio drops too, and no real light is left (the torches are baked, level 2 drops the lantern)', qa.px < qa.base.ratio && qa.lit === 0, 'ratio ' + qa.base.ratio + ' -> ' + qa.px + ', lit ' + qa.lit);
   check('one window back at the baseline does not step back up (no flapping)', qa.noFlap);
-  check('frames back at the baseline restore everything (pixel ratio, level 0, 38 m, 4 torches, original fog)', qa.end.level === 0 && qa.end.cull === 38 && qa.end.torches === 4 && qa.end.mini === 3 && Math.abs(qa.end.ratio - qa.max) < 1e-9 && Math.abs(qa.end.fog - qa.themeFog) < 1e-9, JSON.stringify(qa.end));
+  check('frames back at the baseline restore everything (pixel ratio, level 0, 38 m, lantern, original fog)', qa.end.level === 0 && qa.end.cull === 38 && qa.end.lamp === 1 && qa.end.mini === 3 && Math.abs(qa.end.ratio - qa.max) < 1e-9 && Math.abs(qa.end.fog - qa.themeFog) < 1e-9, JSON.stringify(qa.end));
   check('Low pins level 2 and is saved; High pins level 0; Auto starts at level 0', qa.low.level === 2 && qa.saved === 'low' && qa.high.level === 0 && qa.high.ratio === qa.max && qa.auto.level === 0);
 
   // 8. Bosses and their arena are never culled, even at the lowest quality level.

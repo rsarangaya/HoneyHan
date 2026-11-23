@@ -120,17 +120,17 @@ function updateCulling(player, chunks, props, enemies) {
 // Adaptive quality: watch the frame time over about a second and trade detail for frame rate, in stages. Judged against the display's own rate: the baseline
 // is the best window average of the last 10 s (clamped 4 to 34 ms), so a 144, 60 or 30 Hz display at its natural rate never degrades. Slow (over 21 ms and over
 // 1.6x the baseline, or over 38 ms whatever the baseline) steps down one stage per window: level 1, level 2 (shorter draw distance with denser fog so the cut is not seen,
-// fewer torch lights, far creatures not animated, a slower minimap), then the pixel ratio. Back within 1.15x of the baseline for two windows steps back up
+// no lantern, far creatures not animated, a slower minimap), then the pixel ratio. Back within 1.15x of the baseline for two windows steps back up
 // (pixel ratio first); a step up that fails within 6 windows blocks stepping up again for 12. Spikes (a frame over 0.1 s: pause, tab away, floor build) are left out.
 // mode: 'auto', 'low' (level 2 always) or 'high' (never reduced); saved in localStorage (try/catch). No allocations: the table and the ring are built once.
-const QLEVELS = [{ cull: 38, torches: 4, mini: 3 }, { cull: 30, torches: 2, mini: 6 }, { cull: 24, torches: 1, mini: 6 }];
+const QLEVELS = [{ cull: 38, lamp: 1, mini: 3 }, { cull: 30, lamp: 1, mini: 6 }, { cull: 24, lamp: 0, mini: 6 }];   // lamp: the player's lantern, the one real light (js/light.js bakes the torches); level 2 switches it off (the shaders then have no light loop at all; one recompile at the change)
 const QSLOW = 21, QABS = 38, QWIN = 1, QSPIKE = 0.1;
 const QKEY = 'honeyhan-quality', QRING = new Float64Array(10);
-const quality = { max: Math.min(window.devicePixelRatio || 1, 1.5), cur: Math.min(window.devicePixelRatio || 1, 1.5), acc: 0, n: 0, t: 0, fast: 0, skip: 0, level: 0, mode: 'auto', cull: 38, torches: 4, mini: 3, fogK: 1, bn: 0, bi: 0, hold: 0, sinceUp: 99, base: 16.7 };
+const quality = { max: Math.min(window.devicePixelRatio || 1, 1.5), cur: Math.min(window.devicePixelRatio || 1, 1.5), acc: 0, n: 0, t: 0, fast: 0, skip: 0, level: 0, mode: 'auto', cull: 38, lamp: 1, mini: 3, fogK: 1, bn: 0, bi: 0, hold: 0, sinceUp: 99, base: 16.7 };
 function setQualityLevel(l) {
   const q = QLEVELS[quality.level = l];
   if (quality.mode === 'auto') try { localStorage.setItem(QKEY + '-level', l); } catch (e) { }
-  PERF.cull = quality.cull = q.cull; quality.torches = q.torches; quality.mini = q.mini; quality.fogK = QLEVELS[0].cull / q.cull;
+  PERF.cull = quality.cull = q.cull; quality.lamp = q.lamp; quality.mini = q.mini; quality.fogK = QLEVELS[0].cull / q.cull;
 }
 function qualitySettle() { quality.acc = quality.n = quality.t = quality.fast = 0; quality.skip = 1; }   // a floor change: the next window is not a measurement
 function setQualityMode(m, apply) {
