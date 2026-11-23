@@ -241,7 +241,7 @@ Prototype target: stages 1 to 9, which is five floors ending at the first boss.
 - Scope. Wands, stuns, many weapons and many enemies come last.
 
 ## 12. Items, gear, rooms and spawns (built 2026-11-02, numbers untested)
-- **Inventory:** backpack of 16 stacks (potions stack, gold and arrows are counters). Tab or I opens it and pauses. Equipped slots: weapon, helmet, chest, boots. Quickslots 1 to 4 hold weapons or potions that the player assigns by hand. A weapon quickslot swaps with the equipped weapon and the old weapon takes the slot.
+- **Inventory:** backpack of 20 stacks (potions stack, gold and arrows are counters). Tab or I opens it and pauses. Equipped slots: weapon, helmet, chest, boots. Quickslots 1 to 4 hold weapons or potions that the player assigns by hand. A weapon quickslot swaps with the equipped weapon and the old weapon takes the slot.
 - **Tiers:** Common, Uncommon, Rare, Epic, Legendary, with damage or protection multipliers of x1, 1.15, 1.3, 1.5, 1.75. Deeper floors shift drop odds upward. Vault chests and armory racks add a tier and never drop below Uncommon.
 - **Armor:** helmet (head), chest (body), boots (legs), each in three weight classes (light, medium, heavy: 10, 20, 30 percent cut at Common). Heavier armor adds movement noise (0, 1, 2 m per piece). Visible enemy armor works the same way (a helmet cuts head damage).
 - **Potions:** Healing, Vigor (refill stamina, faster regen), Swiftness, Might, Stoneskin, Shadow (guards see half as far and notice slower). Timed buffs show on the HUD. Not yet: potions that harm, unknown or unidentified potions.
@@ -420,5 +420,12 @@ Still open:
 
 ## Exhaustion and the dash (2026-11-21)
 - Below an action's stamina cost you can still attack, draw a bow, bash or zap, at 40% speed (TUNE.exhaustedAtkMul, so x2.5 time). Stamina never goes below 0; the regen delay still applies. The stamina bar flashes red and EXHAUSTED shows.
-- Dash (default key Q, rebindable): 6 m in 0.18 s along the movement keys (forward when standing), 25 stamina, 1.2 s cooldown (thin bar under the stamina bar), loud (10 m), small FOV kick, no i-frames. It slides through the normal collision, so it stops at walls, doors, props and guards. Refused while stunned, dazed, crippled to a crawl, eating, drawing a bow, knocked back or on cooldown.
+- Dash (default key Q, rebindable): 6 m in 0.18 s along the movement keys (forward when standing), 25 stamina, now gated by charges (see Levels below; 0.8 s between two dashes), loud (10 m), small FOV kick, no i-frames unless the Long dash skill. It slides through the normal collision, so it stops at walls, doors, props and guards. Refused while stunned, dazed, crippled to a crawl, eating, drawing a bow, knocked back or on cooldown.
 - Guards glide round round props instead of stopping, skip path nodes lying under a prop or NPC, and when stuck hop to the nearest free spot instead of the tile centre.
+
+## Levels, stats and skills (2026-11-23, js/progress.js)
+- XP from kills: goblin guard 10 x (1 + 0.1 x floor) x (1 + 0.35 x (stage - 1)) x a type weight (sqrt of its hp x damage multipliers, min 0.3: rats about 3, brutes about 24). Clean sneak kill +25%, a guard that respawned pays 25%, boss summons 0. Stage bosses 100 x stage factor, the Cinder Wyrm 500, a finished quest 50 (exempt from the floor cap).
+- Per-floor XP budget (stage + floor): 105 x (1 + 0.1 x floor) x (1 + 0.5 x (stage - 1)) x (1 + 0.45 x (floor - 1)); a full clear of a floor pays 63 to 85% of it (measured over 20 floors, seed 3). Once earned, kills pay 10% and the popup says "no more XP here". Kept for the whole run (floorXp in js/progress.js), so leaving and coming back does not refill it.
+- Level curve need(l) = round(60 x 1.35^(l-1)), cap 20; +3 stat points a level and a skill point on every 3rd level. Progress resets with a new run.
+- Stats (+1 per point, spent instantly, no refunds): Vigor +8 max HP, Strength +4% damage (melee, bow, wands), Endurance +6 max stamina and +4% regen, Agility +3% attack speed and -4% dash recharge, Stealth -4% noise and -3% guard sight and awareness (never below 60%). Numbers in TUNE (lv*); tune panel sections "Levels and stats" and "XP".
+- Dash charges: start with 2, each comes back in 6 s one at a time (the stamina cost still applies). Skills (1 point a rank): Dash charges (+1, max 3), Quick recharge (-15%, 3), Long dash (+1 m and 0.12 s invulnerable, 2), Silent step (-25% crouch-walk noise, 2), Second wind (stamina regen delay -0.2 s, 2). The Tab screen shows the Stats and Skills panels.

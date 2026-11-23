@@ -38,14 +38,14 @@ run('Exhausted attacks and the dash', async ({ open, check }) => {
       if ([0, 1, 2, 3, 4, 5, 6].every(op)) spot = { x, y };
     }
     out.spot = !!spot; if (!spot) return out;
-    const place = () => { P.x = (spot.x + 0.5) * TILE; P.z = (spot.y + 0.5) * TILE; P.yaw = -Math.PI / 2; P.pitch = 0; P.vx = P.vz = 0; P.keys = {}; game.cb.dashCd = 0; game.cb.stamina = 100; game.cb.delay = 0; game.pst.clear(); game.cb.eat = null; game.cb.draw = null; };
+    const place = () => { P.x = (spot.x + 0.5) * TILE; P.z = (spot.y + 0.5) * TILE; P.yaw = -Math.PI / 2; P.pitch = 0; P.vx = P.vz = 0; P.keys = {}; game.cb.dashCd = 0; game.cb.dash.n = game.PD.dashMax; game.cb.dash.t = 0; game.cb.stamina = 100; game.cb.delay = 0; game.pst.clear(); game.cb.eat = null; game.cb.draw = null; };
     const go = async () => { game.cb.dashReq = true; await T.until(() => P.dashS.on, 2000); await T.until(() => !P.dashS.on, 3000); await T.sleep(100); };
     // distance, stamina, noise, cooldown
     place(); const x0 = P.x, z0 = P.z;
     const ear = T.guard(-12, 'away', false); let heard = 0;   // an unaware guard far behind: record the loudest noise event it is offered
     ear.update = function (dt, pl, noise) { for (const n of noise.events) heard = Math.max(heard, n.r); this.sync(0); return null; };
     game.cb.dashReq = true; await T.until(() => P.dashS.on, 2000);
-    out.cost = 100 - game.cb.stamina; out.cdSet = game.cb.dashCd > 0.5; 
+    out.cost = 100 - game.cb.stamina; out.cdSet = game.cb.dashCd > 0.3; 
     await T.until(() => !P.dashS.on, 3000); await T.sleep(150); out.loud = heard >= TUNE.dashNoise - 0.01; game.enemies.splice(game.enemies.indexOf(ear), 1);
     out.dist = Math.hypot(P.x - x0, P.z - z0); out.straight = Math.abs(P.z - z0) < 0.3;
     // a second press during the cooldown does nothing

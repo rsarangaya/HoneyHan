@@ -32,6 +32,97 @@ function C(parent, rt, rb, h, mat, x, y, z, seg = 10) {
 // share one set of vertices, and the whole floor's furniture is merged into a few meshes afterwards (js/perf.js). ----
 const GEO = {};
 const cached = (key, make) => GEO[key] || (GEO[key] = make());
+// ---- organic flat decals (water, ale, ice): a few shared, hand-grown outlines instead of discs. Built once (7 blobs, 5 ice shards, 1 lane, 3 ripple arcs), then picked per prop by its seed and
+// given a random turn and a non-uniform scale. Vertex colour = a grey multiplier (used by the boss decals, which are not merged; the merge in perf.js reads only position and normal). ----
+function decalGeo(build) {
+  const P = [], C = [], I = [];
+  const v = (x, z, c) => { P.push(x, 0, z); C.push(c, c, c); return P.length / 3 - 1; };
+  const t = (a, b, c) => { const x0 = P[a * 3], z0 = P[a * 3 + 2], up = (P[b * 3] - x0) * (P[c * 3 + 2] - z0) - (P[b * 3 + 2] - z0) * (P[c * 3] - x0) < 0; I.push(a, up ? b : c, up ? c : b); };   // always faces up
+  build(v, t);
+  const g = new THREE.BufferGeometry(), n = P.length / 3, nor = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) nor[i * 3 + 1] = 1;
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setIndex(I);
+  g.computeBoundingSphere(); g.userData.shared = true; return g;
+}
+// A wobbly outline of n points: a few sine lobes plus noise, stretched by el along x, scaled so the furthest point is 1.
+function blobPts(rg, n, el, amp) {
+  const p0 = rg() * 6.28, p1 = rg() * 6.28, p2 = rg() * 6.28, out = []; let mx = 0.001;
+  for (let i = 0; i < n; i++) {
+    const a = i / n * 6.2832, r = Math.max(0.45, 1 + amp * 0.8 * Math.sin(2 * a + p0) + amp * 0.7 * Math.sin(3 * a + p1) + amp * 0.45 * Math.sin(5 * a + p2) + (rg() - 0.5) * amp * 0.5);
+    const x = Math.cos(a) * r * el, z = Math.sin(a) * r; out.push(x, z); mx = Math.max(mx, Math.hypot(x, z));
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= mx;
+  return out;
+}
+const BLOB_EL = [1, 1.3, 1.7, 1.05, 1.45, 1.9, 1.2];
+// part 0: the whole blob (dark rim band, light core, satellite droplets) for the boss decals; 1: rim band and droplets only; 2: core only (the props layer these three-in-one as separate materials).
+function blobGeo(i, part) {
+  return cached('blob' + i + '.' + part, () => decalGeo((v, t) => {
+    const rg = makeRng(7000 + i * 97), pts = blobPts(rg, 24, BLOB_EL[i], 0.26), n = 24, K = 0.74;
+    if (part !== 1) { const c = v(0, 0, 1); const ring = []; for (let k = 0; k < n; k++) ring.push(v(pts[k * 2] * K, pts[k * 2 + 1] * K, part ? 0.9 : 0.85)); for (let k = 0; k < n; k++) t(c, ring[k], ring[(k + 1) % n]); }
+    if (part !== 2) {
+      const o = [], q = []; for (let k = 0; k < n; k++) { o.push(v(pts[k * 2], pts[k * 2 + 1], 0.5)); q.push(v(pts[k * 2] * K, pts[k * 2 + 1] * K, 0.7)); }
+      for (let k = 0; k < n; k++) { const k1 = (k + 1) % n; t(o[k], o[k1], q[k]); t(o[k1], q[k1], q[k]); }
+      for (let d = 0; d < 3; d++) {       // satellite droplets just outside the outline
+        const a = rg() * 6.28, dist = 1.12 + rg() * 0.3, r = 0.06 + rg() * 0.08, cx = Math.cos(a) * dist * BLOB_EL[i] * 0.8, cz = Math.sin(a) * dist, dp = blobPts(rg, 7, 1 + rg() * 0.5, 0.3), c0 = v(cx, cz, 0.8), ids = [];
+        for (let k = 0; k < 7; k++) ids.push(v(cx + dp[k * 2] * r, cz + dp[k * 2 + 1] * r, 0.55));
+        for (let k = 0; k < 7; k++) t(c0, ids[k], ids[(k + 1) % 7]);
+      }
+    }
+  }));
+}
+// A curved ripple arc (tapering to a point at both ends): radius ~0.5, a unit disc's worth of curve.
+function rippleGeo(i) {
+  return cached('ripple' + i, () => decalGeo((v, t) => {
+    const n = 10, a0 = i * 2.1, span = 1.1 + i * 0.35, o = [], q = [];
+    for (let k = 0; k <= n; k++) { const a = a0 + span * k / n, w = 0.05 * Math.sin(Math.PI * k / n) + 0.004; o.push(v(Math.cos(a) * (0.5 + w), Math.sin(a) * (0.5 + w), 1)); q.push(v(Math.cos(a) * (0.5 - w), Math.sin(a) * (0.5 - w), 1)); }
+    for (let k = 0; k < n; k++) { t(o[k], o[k + 1], q[k]); t(o[k + 1], q[k + 1], q[k]); }
+  }));
+}
+// A thin line a -> b, w wide (perpendicular).
+function decalLine(v, t, x0, z0, x1, z1, w, c) {
+  const l = Math.hypot(x1 - x0, z1 - z0) || 1, nx = -(z1 - z0) / l * w, nz = (x1 - x0) / l * w;
+  const a = v(x0 - nx, z0 - nz, c), b = v(x0 + nx, z0 + nz, c), d = v(x1 - nx, z1 - nz, c), e = v(x1 + nx, z1 + nz, c); t(a, b, d); t(b, e, d);
+}
+// part 0: a jagged crystalline shard (fill); 1: its bright edge band and faint inner cracks.
+function iceGeo(i, part) {
+  return cached('ice' + i + '.' + part, () => decalGeo((v, t) => {
+    const rg = makeRng(9100 + i * 131), n = 9 + (i % 3) * 2, el = [1, 1.5, 1.25, 1.8, 1.1][i], pts = [];
+    let mx = 0.001, a = rg() * 6.28; const ang = [];
+    for (let k = 0; k < n; k++) { ang.push(a); a += (6.2832 / n) * (0.6 + rg() * 0.8); }
+    const tot = a - ang[0]; for (let k = 0; k < n; k++) ang[k] = ang[0] + (ang[k] - ang[0]) * 6.2832 / tot;
+    for (let k = 0; k < n; k++) { const r = k % 2 ? 0.42 + rg() * 0.25 : 0.82 + rg() * 0.3, x = Math.cos(ang[k]) * r * el, z = Math.sin(ang[k]) * r; pts.push(x, z); mx = Math.max(mx, Math.hypot(x, z)); }
+    for (let k = 0; k < pts.length; k++) pts[k] /= mx;
+    if (part === 0) { const c = v(0, 0, 1), ids = []; for (let k = 0; k < n; k++) ids.push(v(pts[k * 2], pts[k * 2 + 1], 1)); for (let k = 0; k < n; k++) t(c, ids[k], ids[(k + 1) % n]); return; }
+    const o = [], q = []; for (let k = 0; k < n; k++) { o.push(v(pts[k * 2], pts[k * 2 + 1], 1)); q.push(v(pts[k * 2] * 0.86, pts[k * 2 + 1] * 0.86, 1)); }
+    for (let k = 0; k < n; k++) { const k1 = (k + 1) % n; t(o[k], o[k1], q[k]); t(o[k1], q[k1], q[k]); }
+    for (let c = 0; c < 4; c++) {         // cracks: zig-zag lines from near the middle out to a spike of the outline
+      const k = (c * 2 + (i % 2)) % n, tx = pts[k * 2] * 0.78, tz = pts[k * 2 + 1] * 0.78, sx = (rg() - 0.5) * 0.15, sz = (rg() - 0.5) * 0.15; let px = sx, pz = sz;
+      for (let s = 1; s <= 3; s++) { const f = s / 3, nx = sx + (tx - sx) * f + (s < 3 ? (rg() - 0.5) * 0.12 : 0), nz = sz + (tz - sz) * f + (s < 3 ? (rg() - 0.5) * 0.12 : 0); decalLine(v, t, px, pz, nx, nz, 0.012, 1); px = nx; pz = nz; }
+    }
+  }));
+}
+// The Frost Giant's ice lane: unit width (x -0.5..0.5) and length (z 0 to -1, like the boss strip), ragged on both edges, with long cracks. Always inside the rectangle, so the hit shape is unchanged.
+function laneGeo() {
+  return cached('lane', () => decalGeo((v, t) => {
+    const rg = makeRng(4242), K = 18, L = [], C = [], R = [];
+    for (let k = 0; k <= K; k++) { const z = -k / K, e = k === 0 || k === K ? 0.04 : 0, j = () => (rg() < 0.3 ? 0.09 : 0.02) * rg() + e; L.push(v(-0.5 + j(), z, 0.9)); C.push(v((rg() - 0.5) * 0.08, z, 0.55)); R.push(v(0.5 - j(), z, 0.9)); }
+    for (let k = 0; k < K; k++) { t(L[k], C[k], L[k + 1]); t(C[k], C[k + 1], L[k + 1]); t(C[k], R[k], C[k + 1]); t(R[k], R[k + 1], C[k + 1]); }
+    for (let c = 0; c < 5; c++) {         // cracks run mostly along the lane (the line is thickened in x only: the strip is scaled very unevenly)
+      let x = (rg() - 0.5) * 0.7, z = -rg() * 0.3; const end = z - 0.35 - rg() * 0.5;
+      while (z > end && z > -1) { const nz = Math.max(-1, z - 0.06 - rg() * 0.08), nx = Math.max(-0.42, Math.min(0.42, x + (rg() - 0.5) * 0.14)), a = v(x - 0.006, z, 1), b = v(x + 0.006, z, 1), d = v(nx - 0.006, nz, 1), e = v(nx + 0.006, nz, 1); t(a, b, d); t(b, e, d); x = nx; z = nz; }
+    }
+  }));
+}
+// Shared see-through materials of the water and ice decals (one set for every prop; the merge folds them by opacity and colour).
+const DECAL = {};
+function decalMat(key, color, opacity) {
+  return DECAL[key] || (DECAL[key] = Object.assign(new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }), { userData: { shared: true } }));
+}
+// One flat decal mesh: geometry g, material m, at (x, y, z), turned yaw, stretched sx by sz.
+function decalAdd(parent, g, m, x, y, z, yaw, sx, sz) {
+  const d = new THREE.Mesh(g, m); d.position.set(x, y, z); d.rotation.y = yaw; d.scale.set(sx, 1, sz); parent.add(d); return d;
+}
 // A box with softly rounded edges (a bevelled extrusion).
 function RB(parent, w, h, d, mat, x, y, z, ry = 0, rz = 0) {
   const b = Math.min(0.04, w / 5, h / 5, d / 5);
@@ -572,10 +663,14 @@ function makeDecor(d) {
       if (rg() < 0.5) SP(inner, 0.4, 0.15, 0.5, leatherMat(), 1.35, 0.08, 0.3);                       // boots left by the bed
       break;
     }
-    case 'puddle': {                                               // flooded floor (the Tavern): dark water filling most of the tile, with pale ripple rings
-      const pm = new THREE.MeshBasicMaterial({ color: 0x24465e, transparent: true, opacity: 0.62, depthWrite: false }), rm = new THREE.MeshBasicMaterial({ color: 0x8ac0e0, transparent: true, opacity: 0.3, depthWrite: false });
-      for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(cached('disc1', () => new THREE.CircleGeometry(1, 16)), pm), r = 0.9 + rg() * 0.5; d.rotation.x = -Math.PI / 2; d.scale.set(r, r, 1); d.position.set((rg() - 0.5) * 0.9, 0.012 + i * 0.001, (rg() - 0.5) * 0.9); inner.add(d); }
-      for (let i = 0; i < 2; i++) { const d = new THREE.Mesh(cached('ripple', () => new THREE.RingGeometry(0.55, 0.62, 20)), rm), r = 0.8 + i * 0.5; d.rotation.x = -Math.PI / 2; d.scale.set(r, r, 1); d.position.set((rg() - 0.5) * 0.6, 0.02, (rg() - 0.5) * 0.6); inner.add(d); }
+    case 'puddle': {                                               // flooded floor (the Tavern): irregular pools of dark water with a wet rim, a pale middle, curved ripples and a few droplets
+      const rimM = decalMat('prim', 0x10263a, 0.55), bodyM = decalMat('pbody', 0x2c566f, 0.6), hiM = decalMat('phi', 0x9ccfea, 0.2), rpM = decalMat('prip', 0xb8e0f4, 0.35);
+      for (let b = 0, nb = rg() < 0.55 ? 2 : 1; b < nb; b++) {
+        const bi = Math.floor(rg() * 7), yaw = rg() * 6.28, sx = b ? 0.5 + rg() * 0.35 : 0.95 + rg() * 0.45, sz = sx * (0.6 + rg() * 0.4), x = b ? (rg() - 0.5) * 1.8 : (rg() - 0.5) * 0.5, z = b ? (rg() - 0.5) * 1.8 : (rg() - 0.5) * 0.5, y = 0.012 + b * 0.002;
+        decalAdd(inner, blobGeo(bi, 1), rimM, x, y, z, yaw, sx, sz); decalAdd(inner, blobGeo(bi, 2), bodyM, x, y + 0.0005, z, yaw, sx, sz);
+        decalAdd(inner, blobGeo(bi, 2), hiM, x + (rg() - 0.5) * 0.2 * sx, y + 0.001, z, yaw, sx * 0.45, sz * 0.4);
+        if (!b) for (let r = 0; r < 2; r++) { const k = 0.5 + rg() * 0.25; decalAdd(inner, rippleGeo(Math.floor(rg() * 3)), rpM, x, 0.016, z, yaw + rg() * 6.28, sx * k, sz * k); }
+      }
       break;
     }
     case 'keg': {                                                  // an ale keg standing and another on its side, with a tap
@@ -650,9 +745,12 @@ function makeDecor(d) {
       C(inner, 0.02, 0.09, 0.14, lam(0xd8a030), 0, 0.07, 0, 10);
       break;
     }
-    case 'ice': {                                                  // a slick of ice
-      const im = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.6 });
-      for (let i = 0; i < 3; i++) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.6 + rg() * 0.6, 10), im); d.rotation.x = -Math.PI / 2; d.position.set((rg() - 0.5) * 1.2, 0.014 + i * 0.001, (rg() - 0.5) * 1.2); inner.add(d); }
+    case 'ice': {                                                  // a slick of ice: a few jagged, translucent shards with bright edges and hairline cracks
+      const fm = decalMat('icef', 0xa0d4f2, 0.58), em = decalMat('icee', 0xeaf8ff, 0.8);
+      for (let i = 0, n = 3 + (rg() < 0.4 ? 1 : 0); i < n; i++) {
+        const k = Math.floor(rg() * 5), yaw = rg() * 6.28, sx = i < 3 ? 0.55 + rg() * 0.5 : 0.16 + rg() * 0.1, sz = sx * (0.55 + rg() * 0.5), x = (rg() - 0.5) * (i < 3 ? 1.3 : 2.2), z = (rg() - 0.5) * (i < 3 ? 1.3 : 2.2);
+        decalAdd(inner, iceGeo(k, 0), fm, x, 0.014 + i * 0.001, z, yaw, sx, sz); decalAdd(inner, iceGeo(k, 1), em, x, 0.0145 + i * 0.001, z, yaw, sx, sz);
+      }
       break;
     }
     case 'counter': {

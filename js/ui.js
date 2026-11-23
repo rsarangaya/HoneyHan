@@ -24,6 +24,10 @@ const invUI = (() => {
     #invScreen .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
     #invScreen .sum { margin-top: 10px; opacity: .8; font-size: 12px; }
     #invScreen .dim { opacity: .5; }
+    #invScreen .char { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; border-top: 1px solid #fff3; padding-top: 8px; }
+    #invScreen .char .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 12px; }
+    #invScreen .char .row span { flex: 1; } #invScreen .char .row small { opacity: .6; display: block; font-size: 10px; }
+    #invScreen .char button { padding: 1px 8px; margin: 0; }
     #invScreen .icon { float: right; margin: 0 0 4px 8px; }
     @media (max-width: 880px) { #invScreen .cols { grid-template-columns: 150px minmax(0, 1fr); gap: 10px; } #invScreen .cols > :nth-child(3) { grid-column: 1 / -1; } #invScreen .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } #invScreen .detail { min-height: 0; } }   /* a small window: the details panel drops below instead of running off the right edge */
   `;
@@ -70,6 +74,15 @@ const invUI = (() => {
       return `vs equipped: ${d >= 0 ? '+' : ''}${Math.round(d * 100)}% ${ARMOR_ZONE[it.slot]} protection`;
     }
     return '';
+  }
+
+  // The Stats and Skills panel: spend points instantly (no refunds). Derived values come from PD (js/progress.js).
+  function charPanel() {
+    const P = prog, d = PD, r1 = v => Math.round(v * 10) / 10, pc = v => Math.round(v * 100) + '%';
+    const val = { vig: `max HP ${inv.maxHp}`, str: `damage ${pc(d.dmgMul)}`, end: `stamina ${Math.round(d.stamMax)}, regen ${pc(d.regenMul)}`, agi: `attack speed ${pc(d.atkSpd)}, dash recharge ${r1(d.dashRecharge)} s`, ste: `noise ${pc(d.noiseMul)}, sight ${pc(d.senseMul)}` };
+    const stats = STATS.map(s => `<div class="row"><span>${s.name} ${P.stat[s.id]}<small>${s.desc}. Now: ${val[s.id]}</small></span><button data-act="st:${s.id}"${P.pts < 1 ? ' disabled' : ''}>+</button></div>`).join('');
+    const sk = SKILLS.map(k => `<div class="row"><span>${k.name} ${P.skill[k.id]}/${k.max}<small>${k.desc}</small></span><button data-act="sk:${k.id}"${P.skp < 1 || P.skill[k.id] >= k.max ? ' disabled' : ''}>+</button></div>`).join('');
+    return `<div class="char"><div><h3>Stats: level ${P.level}${P.need ? ` (${P.xp}/${P.need} XP)` : ' (max)'} · ${P.pts} point${P.pts === 1 ? '' : 's'} to spend</h3>${stats}</div><div><h3>Skills · ${P.skp} point${P.skp === 1 ? '' : 's'} to spend</h3>${sk}<div class="sum dim">Dash: ${cb.dash.n}/${d.dashMax} charges, one back every ${r1(d.dashRecharge)} s.</div></div></div>`;
   }
 
   function render() {
@@ -120,6 +133,7 @@ const invUI = (() => {
         <div><h3>Details</h3><div class="detail">${detail}</div></div>
       </div>
       <div class="quick">${slots}</div>
+      ${charPanel()}
       <div class="sum">Armor cuts damage: ${arm}. Armor noise +${inv.armorNoise()} m.${buffs ? ' Active: ' + buffs + '.' : ''}${note ? '<br><b>' + note + '</b>' : ''}</div>
       ${questLine(floor) ? `<div class="sum">Optional: ${questLine(floor)}</div>` : ''}
       <div class="sum dim">Pickups go to the backpack only. Assign weapons and potions to a quickslot with the → buttons, then press ${[1, 2, 3, 4].map(n => keyName(KEYS['slot' + n])).join(', ')} in the game.</div>
@@ -130,6 +144,7 @@ const invUI = (() => {
     const it = selected();
     note = '';
     if (a === 'close') return close();
+    if (a.startsWith('st:') || a.startsWith('sk:')) { spendPoint(a[1] === 't' ? 'stat' : 'skill', a.slice(3)); return; }
     if (!it) return;
     if (a === 'equip') { inv.equipItem(it); sel = { src: 'equip', slot: it.type === 'weapon' ? 'weapon' : it.slot }; }
     else if (a === 'unequip') { if (inv.unequip(sel.slot)) sel = null; else note = 'Pack is full.'; }

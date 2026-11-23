@@ -617,7 +617,7 @@ function bossLaneAdd(e, mv) {
   if (it.t <= 0) BOSS_LANE.n++;
   it.t = it.dur = mv.lane.dur; it.x = e.x; it.z = e.z; it.dx = -Math.sin(e.yaw); it.dz = -Math.cos(e.yaw); it.len = mv.len; it.w = mv.width;
   const pool = bossFxFor(group).lane, i = L.indexOf(it);
-  if (!pool[i]) { const m = new THREE.Mesh(bossTeleGeo('strip'), new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.5, depthWrite: false })); m.position.y = 0.025; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
+  if (!pool[i]) { const m = new THREE.Mesh(laneGeo(), new THREE.MeshBasicMaterial({ color: 0xe4f6ff, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false })); m.position.y = 0.025; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
   const m = it.m = pool[i]; m.position.x = it.x; m.position.z = it.z; m.rotation.y = e.yaw; m.scale.set(it.w, 1, it.len); m.material.opacity = 0.5; m.visible = true;
 }
 function bossLaneAt(x, z) {
@@ -640,7 +640,7 @@ function bossLanesUpdate(dt) {
 }
 function bossLanesClear() { const L = BOSS_LANE.items; for (let i = 0; i < 4; i++) { L[i].t = 0; if (L[i].m) { L[i].m.visible = false; L[i].m = null; } } BOSS_LANE.n = 0; }
 // ---- ale puddles (Bottle Toss): up to 6 pooled discs on the floor for mv.puddle.dur s; bossPuddleMul(x, z) is the speed multiplier you wade at (1 = dry). The same cost model as the ice lanes: preallocated records, one decal each. ----
-const BOSS_PUD_N = 6, BOSS_PUD = { n: 0, items: Array.from({ length: BOSS_PUD_N }, () => ({ t: 0, dur: 1, x: 0, z: 0, r: 1, slow: 1, m: null })) };
+const BOSS_PUD_N = 6, BOSS_PUD = { n: 0, k: 0, items: Array.from({ length: BOSS_PUD_N }, () => ({ t: 0, dur: 1, x: 0, z: 0, r: 1, slow: 1, m: null })) };
 function bossPuddleAdd(x, z, mv) {
   const L = BOSS_PUD.items; let it = null;
   for (let i = 0; i < BOSS_PUD_N && !it; i++) if (L[i].t <= 0) it = L[i];
@@ -648,8 +648,8 @@ function bossPuddleAdd(x, z, mv) {
   if (it.t <= 0) BOSS_PUD.n++;
   const P = mv.puddle; it.t = it.dur = P.dur; it.x = x; it.z = z; it.r = P.r; it.slow = P.slow;
   const pool = bossFxFor(group).pud, i = L.indexOf(it);
-  if (!pool[i]) { const m = new THREE.Mesh(bossTeleGeo('disc'), new THREE.MeshBasicMaterial({ color: 0xc8902a, transparent: true, opacity: 0.55, depthWrite: false })); m.position.y = 0.022; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
-  const m = it.m = pool[i]; m.position.x = x; m.position.z = z; m.scale.set(it.r, 1, it.r); m.material.opacity = 0.55; m.visible = true;
+  if (!pool[i]) { const m = new THREE.Mesh(blobGeo(0, 0), new THREE.MeshBasicMaterial({ color: 0xe0a238, vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false })); m.position.y = 0.022; m.renderOrder = 1; m.frustumCulled = false; m.visible = false; group.add(m); pool[i] = m; }
+  const m = it.m = pool[i], k = BOSS_PUD.k++; m.geometry = blobGeo(k % 7, 0); m.position.x = x; m.position.z = z; m.rotation.y = k * 2.4; m.scale.set(it.r, 1, it.r * (0.75 + (k % 3) * 0.12)); m.material.opacity = 0.55; m.visible = true;   // a different splash outline each time (a counter, not the RNG)
 }
 function bossPuddleMul(x, z) {
   if (!BOSS_PUD.n) return 1;

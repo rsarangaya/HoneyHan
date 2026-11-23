@@ -20,6 +20,7 @@ class Player {
     this.canSprint = true;   // false when out of stamina
     this.noiseBonus = 0;     // extra noise metres from armor
     this.stealthMul = 1;     // 0.5 with a shadow potion: guards see half as far
+    this.senseMul = 1;       // Stealth stat: guards see and notice x this (set each frame by main.js)
     this.acc = 0;
     this.dashS = { on: false, t: 0, dur: 0.18, dist: 6, dx: 0, dz: 1 };   // the dash in progress (one shared object, no allocation): see startDash
     this.slippery = false;   // on ice (set each frame by main.js)

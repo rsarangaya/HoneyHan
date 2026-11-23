@@ -397,7 +397,7 @@ for (let s = 1; s <= N; s++) {
   // ---- the wanted reward (QUEST_TYPES.wanted.talk) with stub inventory and messages ----
   const stub = { got: [], msgs: [], full: false };
   ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; } };
-  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {};
+  ctx.flash = m => stub.msgs.push(m); ctx.questXp = () => { stub.xp = (stub.xp || 0) + 1; }; ctx.discover = () => {};
   const W = QT.wanted, WS = QX.QUESTS.wanted, dead = { dead: true };
   const talk = (quest, fl) => { ctx.floorNum = fl; stub.got = []; W.talk({ quest }); return stub.got; };
   const tierMean = {};
@@ -595,7 +595,7 @@ for (let s = 1; s <= N; s++) {
   // gold 60 to 120 plus 20 a floor; potion kinds and count; paid once; a full pack keeps the reward for the next talk.
   const stub = { got: [], msgs: [], full: false };
   ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; }, has: () => false };
-  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {}; ctx.addLog = () => {};
+  ctx.flash = m => stub.msgs.push(m); ctx.questXp = () => { stub.xp = (stub.xp || 0) + 1; }; ctx.discover = () => {}; ctx.addLog = () => {};
   const P = vm.runInContext('QUESTS', ctx).prisoner, rbad = [];
   const tierSum = { 2: 0, 3: 0 }, tierN = { 2: 0, 3: 0 }, kinds = { gear: 0, potion: 0, gold: 0 }, NR = 3000;
   for (const fl of [2, 3]) for (let i = 0; i < NR; i++) {
@@ -703,7 +703,7 @@ for (let s = 1; s <= N; s++) {
   // reward for the next talk; paid once (the ally is gone after).
   const stub = { got: [], msgs: [], full: false, gold: 0 };
   ctx.inv = { add: d => { if (stub.full) return null; stub.got.push(d); return 'an item'; }, has: () => false, pack: [], gold: 0 };
-  ctx.flash = m => stub.msgs.push(m); ctx.discover = () => {}; ctx.addLog = () => {};
+  ctx.flash = m => stub.msgs.push(m); ctx.questXp = () => { stub.xp = (stub.xp || 0) + 1; }; ctx.discover = () => {}; ctx.addLog = () => {};
   const mk = (fl, mode = 'safe') => ({ n: fl, f: null, reward: null, o: { p: {} }, e: { mesh: { parent: null }, dead: false }, mode, name: 'wounded adventurer', recruited: true, ask: 'gold', price: 70 });
   const rbad = [], R = { gear: 0, gold: 0 }, tierSum = { 2: 0, 5: 0 }, tierN = { 2: 0, 5: 0 }, NR = 2000;
   for (const fl of [2, 5]) for (let i = 0; i < NR; i++) {

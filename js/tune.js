@@ -1,7 +1,7 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-35';   // bumped so old saved values don't override the new defaults (last: the exhausted-attack and dash numbers)
+  const KEY = 'prototype-test-tune-36';  // bumped so old saved values don't override the new defaults (last: levels, stats, dash charges and the XP cap)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
     ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
@@ -9,6 +9,8 @@ const tunePanel = (() => {
     ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossWindMul', 0.05], ['bossReachMul', 0.05], ['bossAtkSpd', 0.05], ['bossWeaponTier', 1], ['bossLegendary', 0.01]]],
     ['Respawn', TUNE, [['respawnMin', 5], ['respawnSpan', 5], ['respawnMinDist', 1], ['roomCapTiles', 1]]],
     ['Player', TUNE, [['playerAtkSpd', 0.1], ['exhaustedAtkMul', 0.05], ['dashStam', 1], ['dashDist', 0.5], ['dashTime', 0.02], ['dashCd', 0.1], ['dashNoise', 1], ['dashFov', 1], ['walkSpeed', 0.2], ['sprintSpeed', 0.2], ['crouchSpeed', 0.2]]],
+    ['Levels and stats (apply on the next point spent)', TUNE, [['lvVigorHp', 1], ['lvStrDmg', 0.01], ['lvEndStam', 1], ['lvEndRegen', 0.01], ['lvAgiAtk', 0.01], ['lvAgiDash', 0.01], ['lvStealthNoise', 0.01], ['lvStealthSense', 0.01], ['lvStealthMin', 0.05], ['dashCharges', 1], ['dashRecharge', 0.5]]],
+    ['XP', TUNE, [['xpKill', 1], ['xpFloor', 0.01], ['xpStage', 0.05], ['xpSneak', 0.05], ['xpRespawn', 0.05], ['xpBudget', 5], ['xpBudFloor', 0.05], ['xpBudStage', 0.05], ['xpOverCap', 0.01]]],
     ['Zones', ZONE_MUL, [['head', 0.05], ['body', 0.05], ['legs', 0.05]]],
     ['Global', TUNE, [['damageCap', 0.1], ['staminaRegen', 1], ['staminaDelay', 0.1], ['sprintDrain', 1], ['parryRestore', 1], ['blockRefund', 0.05]]],
     ...['cook', 'bandit', 'rat', 'wolf', 'bouncer', 'archer', 'shaman', 'brute', 'scarecrow', 'warden', 'book', 'scholar', 'golem', 'librarian', 'skeleton', 'puffer', 'fungbrute', 'mguard', 'boar', 'thief', 'captain', 'cultist', 'wisp', 'iceknight', 'jaguar', 'dartgoblin', 'strangler', 'tribal', 'mimic', 'bomber', 'miniboss', 'wanted', 'sackthief'].map(k => [k, ENEMY_TYPES[k], [['hpMul', 0.05], ['dmgMul', 0.05], ['speed', 0.05], ['reach', 0.05], ['windMul', 0.05], ['cdMul', 0.05], ['vis', 0.05], ['hear', 0.05], ['smell', 0.5]]]),

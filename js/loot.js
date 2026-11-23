@@ -161,8 +161,8 @@ const tierName = it => it.tier === undefined ? '' : TIERS[it.tier].name;
 // Weapon stats with the tier multiplier applied to damage.
 function weaponStats(it) {
   const b = WSTATS[it.base];
-  if (it.base === 'spear') return { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd), limp: it.charges <= 0 };
-  return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd) };   // dur is the real swing time
+  if (it.base === 'spear') return { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd * PD.atkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd * PD.atkSpd), limp: it.charges <= 0 };
+  return b.ranged ? { ...b, dmg: b.dmg * TIERS[it.tier].mul } : { ...b, dmg: b.dmg * TIERS[it.tier].mul, atkSpd: b.spd * TUNE.playerAtkSpd * PD.atkSpd, dur: b.dur / (b.spd * TUNE.playerAtkSpd * PD.atkSpd) };   // dur is the real swing time
 }
 const armorStats = it => ({ red: Math.min(0.6, ARMOR_RED[it.cls] * TIERS[it.tier].mul), noise: ARMOR_NOISE[it.cls] });
 

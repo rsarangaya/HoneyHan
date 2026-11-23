@@ -966,14 +966,14 @@ class Enemy {
       this.dormant = false; this.justWoke = true; this.last = { x: player.x, z: player.z }; this.set('alerted');
     }
     const los = hasLOS(f, this.x, this.z, player.x, player.z);
-    let range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1);   // a dazed guard (spore clouds, gas) sees half as far
+    let range = (player.crouching ? VIS_RANGE * 0.55 : player.sprinting ? VIS_RANGE * 1.25 : VIS_RANGE) * player.stealthMul * player.senseMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1);   // a dazed guard (spore clouds, gas) sees half as far
     const cosA = (dx * -Math.sin(this.yaw) + dz * -Math.cos(this.yaw)) / dist;
     this.seen = los && dist < range && cosA > COS_HALF_FOV;
     // Smell (wolves): a moving player is noticed through walls and while crouching, but not a still one.
     if (!this.seen && this.T.smell && dist < this.T.smell && Math.hypot(player.vx, player.vz) > 0.4) { this.seen = true; range = this.T.smell; }
 
     if (this.seen) {
-      this.aware = Math.min(1, this.aware + (0.6 + 1.6 * (1 - dist / range)) * (player.stealthMul < 1 ? 0.6 : 1) * dt);
+      this.aware = Math.min(1, this.aware + (0.6 + 1.6 * (1 - dist / range)) * (player.stealthMul < 1 ? 0.6 : 1) * player.senseMul * dt);
       this.last = { x: player.x, z: player.z }; this.lostT = 0;
     } else if (this.state === 'unaware') this.aware = Math.max(0, this.aware - 0.25 * dt);
     else if (this.state === 'suspicious') this.aware = Math.max(0, this.aware - 0.08 * dt);
@@ -1190,7 +1190,7 @@ class Enemy {
     if (want) {
       const col = this.state === 'alerted' ? 0xff4030 : this.state === 'unaware' ? 0xffd23a : 0xff9a30;
       if (col !== this.coneCol) { this.coneCol = col; cone.material.color.setHex(col); }
-      const k = pl ? (pl.crouching ? 0.55 : pl.sprinting ? 1.25 : 1) * pl.stealthMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1) / this.scaleK : 1;   // the same range update() sees you at (the mesh is scaled, the fan is its child)
+      const k = pl ? (pl.crouching ? 0.55 : pl.sprinting ? 1.25 : 1) * pl.stealthMul * pl.senseMul * this.T.vis * (this.st.t.daze > 0 ? 0.5 : 1) / this.scaleK : 1;   // the same range update() sees you at (the mesh is scaled, the fan is its child)
       if (k !== this.coneK) { this.coneK = k; cone.scale.set(k, 1, k); }
     }
   }

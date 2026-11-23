@@ -54,6 +54,6 @@ check('CT5: chances are tunable data, 40% burn / 25% freeze, lightning has no ch
 check('CT5: wand descriptions quote the chances (and follow tuning)', /40%/.test(WANDS.fire.desc) && /25%/.test(WANDS.frost.desc) && (WAND.burnChance = 0.5, /50%/.test(WANDS.fire.desc)));
 const mainSrc = src('js/main.js');
 check('CT5: main applies them with the seeded gameRng', /gameRng\(\) < WAND\.burnChance/.test(mainSrc) && /gameRng\(\) < WAND\.freezeChance/.test(mainSrc));
-check('CT5: tune panel has the chance rows, key bumped', /burnChance/.test(src('js/tune.js')) && /freezeChance/.test(src('js/tune.js')) && /tune-35/.test(src('js/tune.js')));
+check('CT5: tune panel has the chance rows, key bumped', /burnChance/.test(src('js/tune.js')) && /freezeChance/.test(src('js/tune.js')) && /tune-36/.test(src('js/tune.js')));
 if (fails) { console.log(`\n${fails} FAILED`); process.exit(1); }
 console.log('\nall changes checks passed');

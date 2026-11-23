@@ -97,7 +97,7 @@ const QUEST_TYPES = {
         const d = q.reward || (q.reward = rng() < W.potionShare ? { type: 'potion', kind: rng.pick(W.potionKinds), n: W.potionN } : rollEquipment(effFloor(), rng, { minTier: W.gearMinTier, boost: floorNum >= 3 ? 1 : 0 }));
         const got = inv.add(d);
         if (!got) { flash('"Make room in your pack first."'); return; }
-        q.done = true; flash(`"${q.name} is dead? Take this." You receive: ${got}.`); return;
+        q.done = true; flash(`"${q.name} is dead? Take this." You receive: ${got}.`); questXp(); return;
       }
       q.talked = true; discover('quest:wanted', 'Wanted guard');
       flash(`"Kill ${q.name}. He patrols the ${room}. Come back to me after."`);
@@ -210,7 +210,7 @@ function allyReward(A) {
   }
   const got = inv.add(A.reward);
   if (!got) { flash('"Make room in your pack first."'); return; }
-  flash(`"We made it. Take this, and farewell." You receive: ${got}.`);
+  flash(`"We made it. Take this, and farewell." You receive: ${got}.`); questXp();
   A.mode = 'gone'; A.o.p.opened = true; Enemy.ally = null;
   const j = propObjs.indexOf(A.o); if (j >= 0) propObjs.splice(j, 1);
   if (A.e.mesh.parent) A.e.mesh.parent.remove(A.e.mesh);
@@ -400,7 +400,7 @@ function prisonerTalk(o) {
   const got = inv.add(R.reward);
   if (!got) { flash('"Make room in your pack first."'); return; }
   R.paid = true; o.p.opened = true;                                                          // done: no more prompt
-  flash(`"You saved me. Take this." You receive: ${got}.`);
+  flash(`"You saved me. Take this." You receive: ${got}.`); questXp();
 }
 // The Hold E label and the talk action of a quest NPC (main.js: targetInfo, finishSearch): the wanted guard's quest-giver, or the freed prisoner in the safe room.
 const questPrompt = (f, o) => o && o.p.who === 'ally' ? allyPrompt(o.p.ally || allyRun) : o && o.p.who === 'prisoner' ? 'Take the prisoner\'s reward' : f.quest && f.quest.type === 'wanted' ? QUEST_TYPES.wanted.prompt(f.quest) : 'Talk';

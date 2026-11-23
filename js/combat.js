@@ -23,7 +23,13 @@ const TUNE = {
   damageCap: 2,                       // zone multiplier cap, as in Test1
   staminaRegen: 28, staminaDelay: 0.8, sprintDrain: 14,
   exhaustedAtkMul: 0.4,               // below a weapon's stamina cost you can still attack, but the swing, draw, bash recovery and zap recovery run at this speed (x2.5 time); stamina never goes below 0
-  dashStam: 25, dashDist: 6, dashTime: 0.18, dashCd: 1.2, dashNoise: 10, dashFov: 9,   // the dash (js/main.js tryDash): stamina, metres, seconds, cooldown, noise metres, and the FOV kick in degrees
+  dashStam: 25, dashDist: 6, dashTime: 0.18, dashCd: 0.8, dashNoise: 10, dashFov: 9,   // the dash (js/main.js tryDash): stamina, metres, seconds, gap between two dashes, noise metres, and the FOV kick in degrees
+  dashCharges: 2, dashRecharge: 6,    // dash charges you start with, and seconds to get one back (one at a time); skills and Agility add charges / shorten it (js/progress.js)
+  // Levels (js/progress.js): per-point numbers of the five stats. Vigor: max HP. Strength: damage x. Endurance: max stamina and regen. Agility: attack speed x and dash recharge. Stealth: noise x and sight/awareness x, never below lvStealthMin.
+  lvVigorHp: 8, lvStrDmg: 0.04, lvEndStam: 6, lvEndRegen: 0.04, lvAgiAtk: 0.03, lvAgiDash: 0.04, lvStealthNoise: 0.04, lvStealthSense: 0.03, lvStealthMin: 0.6,
+  // XP: xpKill = a goblin guard on floor 0 of stage 1 (x (1 + xpFloor x floor) x (1 + xpStage x (stage - 1)) x the type's weight). xpSneak: clean sneak kill bonus. xpRespawn: a guard that respawned pays this share.
+  // xpBudget: the ordinary XP a floor pays = xpBudget x (1 + xpFloor x floor) x (1 + xpBudStage x (stage - 1)) x (1 + xpBudFloor x (floor - 1)), measured at 63 to 85% of a full clear (see STATUS.md); after it each kill pays only xpOverCap of its XP (bosses and quests are exempt).
+  xpKill: 10, xpFloor: 0.1, xpStage: 0.35, xpSneak: 0.25, xpRespawn: 0.25, xpBudget: 105, xpBudFloor: 0.45, xpBudStage: 0.5, xpOverCap: 0.1,
   respawnMin: 60, respawnSpan: 60,    // a killed guard is replaced after respawnMin + rnd * respawnSpan seconds (js/main.js updateRespawn)
   respawnMinDist: 24,                 // metres: a replacement appears at least this far from you (and out of sight)
   roomCapTiles: 15,                   // a room holds max(2, floor(area in tiles / this)) enemies at spawn (js/enemytypes.js spreadEnemies)
@@ -45,7 +51,7 @@ const WSTATS = {
   bow:    { ranged: true, proc: { zone: 'legs', status: 'slow', chance: 1 }, dmg: 13, draw: 0.8, stam: 10, noise: 4, sneak: 2.5, parryWin: 0, blockCost: 0 },
 };
 
-const STAMINA_MAX = 100;
+let STAMINA_MAX = 100;   // 100 + Endurance x TUNE.lvEndStam: main.js sets it when a point is spent (never per frame)
 
 // Which part of an enemy the crosshair ray crosses at this distance. null = over or under it.
 function aimZone(eyeY, pitch, dist, scale = 1) {

@@ -8,7 +8,7 @@ const stageThemes = (() => { const t0 = makeRng(runSeed).pick(THEMES); return [t
 let stage = 1, stageSeed = runSeed, theme = stageThemes[0];   // stageSeed is the run seed for stage 1 (so stage 1 generates exactly as before) and a seeded mix of it for the others
 
 const canvas = document.getElementById('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(quality.cur);   // 1.5 at most; js/perf.js lowers it if the frame rate drops
 // An integrated Intel GPU (the browser often picks it on dual-GPU laptops whatever powerPreference says) starts one stage down at pixel ratio 1; Auto still steps up if frames allow.
 try { const gl = renderer.getContext(), x = gl.getExtension("WEBGL_debug_renderer_info"), n = x ? String(gl.getParameter(x.UNMASKED_RENDERER_WEBGL)) : ""; quality.gpu = n; if (/Intel/i.test(n) && quality.mode === "auto" && quality.level === 0) { setQualityLevel(1); quality.cur = Math.min(quality.max, 1); renderer.setPixelRatio(quality.cur); } } catch (e) { }
@@ -911,6 +911,7 @@ function markOpened(o) {
 
 // ---- searching: hold E on the prop you are looking at ----
 const inv = new Inventory();
+const prog = new Progress(), PD = derive(prog, TUNE, {});   // XP, levels, stats and skills (js/progress.js); PD = what they add up to, recomputed only when a point is spent
 let propObjs = [], decorObjs = [], enemies = [], search = null;
 
 // ---- dev mode: 5x speed, god mode, vision cones, enemy dots, N skips a floor, M reveals the map ----
@@ -924,11 +925,11 @@ function setDev(on) {
 }
 
 // ---- combat: stamina, melee attacks, block and parry (numbers live in combat.js) ----
-const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, bashSlow: false, rageCd: 0, zap: null, dashCd: 0, dashReq: false, exhT: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
+const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, bashSlow: false, rageCd: 0, zap: null, dashCd: 0, dashReq: false, dash: { n: PD.dashMax, t: 0 }, iframe: 0, exhT: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
-const spend = n => { cb.stamina = Math.max(0, cb.stamina - n); cb.delay = TUNE.staminaDelay; };
+const spend = n => { cb.stamina = Math.max(0, cb.stamina - n); cb.delay = PD.stamDelay; };
 const wstats = () => weaponStats(inv.equip.weapon);   // equipped weapon, tier applied
 let markTimer = 0;
 function mark(text, color = '#fff') {
@@ -972,7 +973,7 @@ function dealHit(e, zone, base, w, noise) {
   const sneak = !e.boss && e.state !== 'alerted' && !e.seen; // unaware and not looking at you (or smelling you); the boss cannot be sneak-killed
   const guarded = !sneak && e.stun <= 0 && e.T.blockFront < 1 && e.facesPlayer(player);        // a raised shield or guard takes hits from the front
   const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1) * (guarded ? e.T.blockFront : 1)
-    * (inv.buffs.might > 0 ? 1.4 : 1) * (e.resist[zone] || 1) * (e.bs ? bossTakeMul(e, zone) : 1);
+    * (inv.buffs.might > 0 ? 1.4 : 1) * PD.dmgMul * (e.resist[zone] || 1) * (e.bs ? bossTakeMul(e, zone) : 1);
   const killed = e.hurt(dmg, player);
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
@@ -1070,7 +1071,7 @@ function breakWand(w) {
   flash(`The ${WANDS[w.kind].name} crumbles to dust.`);
 }
 function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
-  const killed = e.hurt(dmg * (e.bs ? bossTakeMul(e, 'body') : 1), player);
+  const killed = e.hurt(dmg * PD.dmgMul * (e.bs ? bossTakeMul(e, 'body') : 1), player);
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); }
   return killed;
 }
@@ -1263,7 +1264,7 @@ function updateArrows(dt) {
 // piece of equipment (Rare or better) and gold.
 let winTimer = 0;   // the final boss's delayed Run complete; cleared when a stage is restarted
 function bossDefeated(e) {
-  e.corpseDone = true;
+  e.corpseDone = true; awardKill(e, false);
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
   bossDead[stage] = true;
   const epic = rollEquipment(effFloor(), rng, {});
@@ -1282,7 +1283,7 @@ function bossDefeated(e) {
 
 // A dead enemy leaves a lootable body only if its drop roll gave something.
 function makeCorpse(e, sneak) {
-  e.corpseDone = true;
+  e.corpseDone = true; awardKill(e, sneak);
   if (e.minion) return;   // a boss's summons leave no body or loot (no farming the howl / rally / last call)
   if (e.T.mimic) return mimicCorpse(e);
   const bonus = sneak ? 0.15 : 0;
@@ -1477,10 +1478,10 @@ function moveStatus(mv) { if (pst.apply(mv.status, mv.statusDur)) { discover('st
 // player.startDash does the sliding through the player's own wall and prop collision (never through a wall, door, prop or guard). No i-frames: it is fair, not a dodge.
 // Refused while stunned, dazed, crippled to a crawl, eating, drawing a bow, mid-knockback or already dashing, and on cooldown. Allowed in the safe room and in dev mode. It is loud.
 function tryDash() {
-  if (state !== 'play' || cb.dashCd > 0 || cb.eat || cb.draw || knock.m > 0 || player.dashS.on || pst.has('stun') || pst.has('daze') || pst.moveMul() < 0.3) return false;
+  if (state !== 'play' || cb.dashCd > 0 || (cb.dash.n < 1 && !dev.on) || cb.eat || cb.draw || knock.m > 0 || player.dashS.on || pst.has('stun') || pst.has('daze') || pst.moveMul() < 0.3) return false;
   if (!dev.on && cb.stamina < TUNE.dashStam) { cb.exhT = 0.5; return false; }          // too tired: the bar flashes
-  spend(TUNE.dashStam); cb.dashCd = TUNE.dashCd;
-  player.startDash(TUNE.dashDist, TUNE.dashTime);
+  spend(TUNE.dashStam); cb.dashCd = TUNE.dashCd; if (cb.dash.n > 0) cb.dash.n--; cb.iframe = PD.dashIframe;
+  player.startDash(PD.dashDist, TUNE.dashTime);
   loud(TUNE.dashNoise);
   return true;
 }
@@ -1573,12 +1574,12 @@ function updateCombat(dt) {
   if (mech) { if (mech.seen) seenMul = mech.seen(); discover(mech.disc[0], mech.disc[1]); }
   if (floor.runes) { const k = updateRunes(); if (k > 1) { seenMul *= k; if (discover('item:runes', 'Rune circle')) flash('The runes flare: they show you up!'); } }   // the Final Chamber: inside a flaring circle guards see you farther
   const hidden = hatUpdate(dt);
-  player.stealthMul = hidden ? 0 : (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul;
+  player.stealthMul = hidden ? 0 : (inv.buffs.shadow > 0 ? 0.5 : 1) * seenMul; player.senseMul = PD.senseMul;
   if (inv.refillStamina) { cb.stamina = STAMINA_MAX; inv.refillStamina = false; }
 
   if (player.sprinting) spend(TUNE.sprintDrain * dt);
   else if (cb.delay > 0) cb.delay -= dt;
-  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * (inv.buffs.hearty > 0 ? 1.5 : 1) * (1 + inv.stamBonus) * hunger.regenMul() * dt);
+  else cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.staminaRegen * (inv.buffs.vigor > 0 ? 2 : 1) * (inv.buffs.hearty > 0 ? 1.5 : 1) * (1 + inv.stamBonus) * PD.regenMul * hunger.regenMul() * dt);
   cb.stamina = Math.min(cb.stamina, STAMINA_MAX * hunger.maxStaminaMul());   // Weak: max stamina is cut
   if (dev.on) cb.stamina = STAMINA_MAX;
   if (cb.stamina <= 1) cb.canSprint = false; else if (cb.stamina > 25) cb.canSprint = true;
@@ -1588,6 +1589,9 @@ function updateCombat(dt) {
   if (cb.rageCd > 0) cb.rageCd -= dt;
   if (cb.limpMsg > 0) cb.limpMsg -= dt;
   if (cb.dashCd > 0) cb.dashCd -= dt;
+  if (cb.iframe > 0) cb.iframe -= dt;
+  if (cb.dash.n < PD.dashMax) chargeTick(cb.dash, dt, PD.dashMax, PD.dashRecharge); else cb.dash.t = 0;
+  if (xpT > 0 && (xpT -= dt) <= 0) el('xpgain').style.display = 'none';
   if (cb.exhT > 0) cb.exhT -= dt;
   if (cb.dashReq) { cb.dashReq = false; tryDash(); }
   if (inv.rageReq) { playRage(inv.rageReq); inv.rageReq = null; }
@@ -1699,6 +1703,34 @@ function updateViewmodel(dt) {
   g.rotation.x += (rx - g.rotation.x) * k; g.rotation.z += (rz - g.rotation.z) * k;
 }
 
+// ---- XP and levels (js/progress.js) ----
+let xpT = 0;                                       // seconds the XP popup stays up
+function xpPopup(text, color) { const x = el('xpgain'); x.textContent = text; x.style.color = color; x.style.display = 'block'; xpT = 2.2; }
+// XP for a kill, called once per dead enemy from makeCorpse / bossDefeated. Summons give none; a respawned guard a share; a clean sneak kill a bonus; bosses and quest targets ignore the floor budget.
+function awardKill(e, sneak) {
+  if (e.minion || e.type === 'ally') return;
+  const exempt = !!(e.boss || e.spec.mini);
+  let base = e.boss ? (e.final ? PROG.xpFinalBoss : PROG.xpStageBoss * stageFactor(stage, TUNE)) : killXp(e.T, stage, floorNum, TUNE);
+  if (!e.boss) { if (e.resp) base *= TUNE.xpRespawn; if (sneak) base *= 1 + TUNE.xpSneak; }
+  gainXp(base, exempt);
+}
+function gainXp(base, exempt) {
+  const r = prog.award(base, floorKey(stage, floorNum), xpBudget(stage, floorNum, TUNE), exempt, TUNE);
+  if (r.up) { flash(`Level ${prog.level}! ${prog.pts ? prog.pts + ' stat point' + (prog.pts > 1 ? 's' : '') : ''}${prog.skp ? ' and ' + prog.skp + ' skill point' + (prog.skp > 1 ? 's' : '') : ''} to spend (Tab)`); xpPopup('LEVEL ' + prog.level, '#7fffd4'); }
+  else if (r.capped) xpPopup(r.xp ? `no more XP here (+${r.xp})` : 'no more XP here', '#9a9a9a');
+  else if (r.xp) xpPopup(`+${r.xp} XP`, '#9ad4ff');
+}
+const questXp = () => gainXp(PROG.xpQuest * stageFactor(stage, TUNE), true);   // a quest finished (the reward handed over)
+// Spend a point ('stat' or 'skill'), instantly and for good. Returns true if it was spent.
+function spendPoint(kind, id) {
+  if (!(kind === 'stat' ? prog.spendStat(id) : prog.spendSkill(id))) return false;
+  derive(prog, TUNE, PD);
+  if (id === 'vig') { inv.maxHp += TUNE.lvVigorHp; inv.hp += TUNE.lvVigorHp; }               // (a shrine's max HP price is already in inv.maxHp)
+  else if (id === 'end') { STAMINA_MAX = PD.stamMax; cb.stamina += TUNE.lvEndStam; }
+  else if (id === 'dashCh') cb.dash.n++;                                                       // the new charge is ready
+  return true;
+}
+
 // ---- damage and death ----
 // Getting hit: a red screen flash plus a quick camera shake, both scaled by the damage (shown in dev mode too, with no HP lost).
 const shake = { t: 0, dur: 0.32, mag: 0 };
@@ -1709,7 +1741,7 @@ function hitReaction(n) {
   requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 function damage(n) {
-  if (inSafe) return;                              // the safe room: nothing can hurt you
+  if (inSafe || cb.iframe > 0) return;             // the safe room, or the dash's invulnerable moment: nothing can hurt you
   hitReaction(n);
   hunger.fight = 3;
   if (cb.eat) { cb.eat = null; flash('Interrupted!'); }
@@ -1881,6 +1913,7 @@ function bossHud(def) {                                 // the boss bar's name a
   while (bar.children.length > 1) bar.lastElementChild.remove();
   for (const p of def.phases) { const n = document.createElement('div'); n.className = 'bnotch'; n.style.left = p.at * 100 + '%'; bar.appendChild(n); }
 }
+let pipKey = -1, lvKey = -1;
 function updateHud() {
   let boss = null; for (let i = 0; i < enemies.length; i++) if (enemies[i].boss) { boss = enemies[i]; break; }
   if (boss && boss.def && boss.def !== hudBossDef) bossHud(boss.def);
@@ -1890,8 +1923,11 @@ function updateHud() {
   setPct('hpFill', inv.hp / inv.maxHp * 100);
   setPct('stamFill', cb.stamina / STAMINA_MAX * 100);
   setStyle('stamFill', 'background', cb.exhT > 0 && ((cb.exhT * 8) | 0) % 2 === 0 ? '#e0453a' : cb.stamina < 25 && !dev.on ? '#d7822a' : cb.canSprint ? '#4cc36a' : '#c9a23a');   // flashes red when you try something tired; orange while exhausted (an action there is slow)
-  setPct('dashFill', cb.dashCd > 0 ? (1 - cb.dashCd / TUNE.dashCd) * 100 : 100);   // the dash cooldown under the stamina bar
-  setStyle('dashFill', 'background', cb.dashCd > 0 ? '#6a7a8a' : cb.stamina >= TUNE.dashStam || dev.on ? '#7fd8ff' : '#8a5a4a');
+  setPct('dashFill', cb.dash.n >= PD.dashMax ? 100 : cb.dash.t / PD.dashRecharge * 100);   // the next dash charge coming back, under the stamina bar
+  setStyle('dashFill', 'background', cb.dash.n < 1 && !dev.on ? '#6a7a8a' : cb.dashCd > 0 ? '#6a7a8a' : cb.stamina >= TUNE.dashStam || dev.on ? '#7fd8ff' : '#8a5a4a');
+  const pk = cb.dash.n * 100 + PD.dashMax; if (pk !== pipKey) { pipKey = pk; el('dpips').textContent = '\u25CF'.repeat(cb.dash.n) + '\u25CB'.repeat(Math.max(0, PD.dashMax - cb.dash.n)); }   // charge pips, written only when they change
+  setPct('xpFill', prog.need ? prog.xp / prog.need * 100 : 100);
+  const lk = prog.level * 10000 + prog.pts * 100 + prog.skp; if (lk !== lvKey) { lvKey = lk; el('lvhint').textContent = 'Lv ' + prog.level + (prog.pts || prog.skp ? ` \u00B7 ${prog.pts ? prog.pts + ' stat' : ''}${prog.pts && prog.skp ? ' + ' : ''}${prog.skp ? prog.skp + ' skill' : ''} point${prog.pts + prog.skp > 1 ? 's' : ''} (Tab)` : ''); }
   setPct('hungerFill', hunger.v);
   setStyle('hungerFill', 'background', HUNGER_COLOR[hunger.stage]);
   if (frameCount % 3 !== 0) return;                    // the text part builds strings: 20 times a second is plenty
@@ -1958,6 +1994,7 @@ const bossFloorAt = n => stage === FINAL_STAGE || n === MAX_FLOOR;   // the fina
 
 // A brand new floor n (also what the dev keys and the tests use): any old copy of it is thrown away.
 function startFloor(n) {
+  delete prog.floorXp[floorKey(stage, n)];                // a brand new floor (dev jump, tests) has its XP budget back; changeFloor never does this
   allyReset();                                          // a fresh floor 1 (or a dev jump) starts without an ally
   if (floorCache[n]) { disposeGroup(floorCache[n].group); delete floorCache[n]; }
   generateAndEnter(n, n > 1 ? 'down' : null);
@@ -2100,7 +2137,7 @@ function trySpawnGuard() {
       if (near) continue;
       const others = ok.length > 1 ? ok.filter(q => q !== r) : [r], bt = roomTiles(floor, others[Math.floor(gameRng() * others.length)]), b = bt.length ? bt[Math.floor(gameRng() * bt.length)] : c;   // patrol on to a random spot in one of the other eligible rooms
       const e = new Enemy({ x: c.x, y: c.y, route: [{ x: c.x, y: c.y }, { x: b.x, y: b.y }], seed: (gameRng() * 4294967296) >>> 0, type: respawnType(theme.name, floorNum, gameRng) }, floor);
-      e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e);
+      e.cone.visible = dev.on; e.resp = true; group.add(e.mesh); enemies.push(e);   // resp: pays only xpRespawn of its XP
       return true;
     }
   }
@@ -2274,7 +2311,7 @@ function startStage(s) {
   clearTimeout(winTimer);
   s = Math.max(1, Math.min(FINAL_STAGE, s | 0));
   for (const k of Object.keys(stageCaches)) { disposeCache(stageCaches[k]); delete stageCaches[k]; }
-  allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
+  prog.floorXp = {}; allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
   useStage(s); pinTheme = null; startFloor(1); pruneThemeTextures();
 }
 function finishRun() {
@@ -2384,9 +2421,9 @@ function frame(now) {
     const events = noiseCtx.events; events.length = 0; for (let i = 0; i < pending.length; i++) events.push(pending[i]); pending.length = 0;   // noises guards made last frame (the same two arrays every frame)
     for (const n of events) rings.push({ x: n.x, z: n.z, r: n.r, t: 0 });
     const under = floor.patches.get(player.tileY * floor.w + player.tileX), mt = theme.mechanic.TUNE;
-    const hush = HUSH * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
+    const hush = HUSH * PD.noiseMul * (player.crouching && mt && mt.wind ? mt.wind : 1);          // the Frozen Chapel's wind muffles a crouching player
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * hush }); rings.push({ x: player.x, z: player.z, r: pulse * hush, t: 0 }); }
-    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (under === 'dark' ? mt.darkFoot : 1) * (under === 'crowd' ? mt.din : 1) });   // brush rustles: +3 m while you move in it; the Market din muffles your steps on a crowd patch
+    if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (player.crouching ? PD.crouchNoise : 1) * (under === 'dark' ? mt.darkFoot : 1) * (under === 'crowd' ? mt.din : 1) });   // brush rustles: +3 m while you move in it; the Market din muffles your steps on a crowd patch
     if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
       floor.patches.delete(player.tileY * floor.w + player.tileX);
       const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;
@@ -2442,7 +2479,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, quality, qualityApply, setQualityMode: m => setQualityMode(m, qualityApply), adaptQuality, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; },
+  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, quality, qualityApply, setQualityMode: m => setQualityMode(m, qualityApply), adaptQuality, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; }, prog, PD, spendPoint, gainXp, awardKill, get xpBudgetHere() { return xpBudget(stage, floorNum, TUNE); },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
