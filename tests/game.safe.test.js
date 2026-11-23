@@ -156,7 +156,7 @@ run('The safe room behind the boss', async ({ open, check }) => {
     H.v = 0; I.hp = 60; for (let i = 0; i < 20; i++) updateCombat(0.5); out.starveHp = I.hp;
     H.v = 100; I.hp = 60; cb.stamina = 100; cb.press = true; updateCombat(0.001); cb.press = false; out.swing = cb.atk !== null;
     cb.atk = null; I.hp = 60; H.v = 100;
-    out.bodies = propObjs.some(o => o.p.kind === 'corpse' && o.p.left && o.p.left.length > 0);
+    out.bodies = !!(game.floor.items && game.floor.items.list.length > 0);
     out.chestOpen = !!window.chestRef && window.chestRef.p.opened;
     return out;
   });

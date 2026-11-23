@@ -167,14 +167,15 @@ run('Mimic, locked and trapped chests and bomb goblins', async ({ open, check })
     game.startFloor(2); const o = propObjs.find(q => q.p.mimic), e = o.mimic; Q.only(e);
     game.inv.hp = 1e9; const tier = e.spec.tier | 0;
     dealHit(e, 'body', 500, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0);
+    const items = game.floor.items ? game.floor.items.list.map(i => i.d) : [];   // (the kill drops its loot at once, before any frame can pick it up)
     await T.until(() => e.corpseDone, 3000);
-    const body = propObjs.find(q => q.p.kind === 'corpse' && q.mesh === e.mesh);
-    const gold = body ? body.p.left.find(d => d.type === 'gold') : null;
+    const body = items.length > 0;
+    const gold = items.find(d => d.type === 'gold') || null;
     const want = rollLoot('chest', 2, makeRng((e.seed ^ 0x31c1c) >>> 0), 0, [], undefined, Math.min(4, tier + 1)).find(d => d.type === 'gold');
     const sameGrade = rollLoot('chest', 2, makeRng((e.seed ^ 0x31c1c) >>> 0), 0, [], undefined, tier).find(d => d.type === 'gold');
-    return { tier, dead: e.dead, body: !!body, gear: body ? body.p.left.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield') : false, gold: gold && gold.n, wantGold: want && want.n, sameGold: sameGrade && sameGrade.n };
+    return { tier, dead: e.dead, body: !!body, gear: body ? items.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield') : false, gold: gold && gold.n, wantGold: want && want.n, sameGold: sameGrade && sameGrade.n };
   });
-  check('killing a mimic leaves a body with gear and the loot of a chest one grade up', kill.dead && kill.body && kill.gear && kill.gold === kill.wantGold && (kill.tier >= 4 || kill.wantGold !== kill.sameGold), JSON.stringify(kill));
+  check('killing a mimic drops gear and the loot of a chest one grade up', kill.dead && kill.body && kill.gear && kill.gold === kill.wantGold && (kill.tier >= 4 || kill.wantGold !== kill.sameGold), JSON.stringify(kill));
 
   // 6. Not merged: the mimic's model is its own animated meshes (never in a perf.js chunk) and its chest prop is an empty group.
   const merged = await page.evaluate(() => {

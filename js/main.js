@@ -453,6 +453,7 @@ const DOOR_ANIM = {
 // Free one object's GPU memory. Anything flagged userData.shared (the per-theme textures, creature part geometries, shared merged
 // materials, icons) outlives the floor and is never disposed here.
 function freeObject(o) {
+  if (o.isInstancedMesh && o.dispose) o.dispose();   // (floor drops: the per-instance buffers; geometry and materials are shared)
   if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
   const ms = o.material; if (!ms) return;
   if (Array.isArray(ms)) { for (const m of ms) freeMaterial(m); } else freeMaterial(ms);
@@ -911,11 +912,13 @@ function setDev(on) {
 const cb = { limpMsg: 0, draw: null, bashCd: 0, bash: 0, bashSlow: false, rageCd: 0, zap: null, dashCd: 0, dashReq: false, dash: { n: PD.dashMax, t: 0 }, iframe: 0, exhT: 0, stamina: STAMINA_MAX, delay: 0, atk: null, press: false, want: false, block: false, blockT: 0, canSprint: true };
 let pulse = 0;                                   // noise made by combat this frame, in metres
 const loud = r => { pulse = Math.max(pulse, r); };
+Sfx.alertFn = () => { let n = 0; for (let i = 0; i < enemies.length; i++) { const e = enemies[i]; if (e.state === 'alerted' && !e.dead && !e.dormant && !(e.T && e.T.fleer)) n++; } return n; };   // enemies hunting you: drives the battle music (js/audio.js, 4 times a second)
 const pending = [], rings = [];                  // noises guards made, and expanding rings for the dev minimap
 const spend = n => { cb.stamina = Math.max(0, cb.stamina - n); cb.delay = PD.stamDelay; };
 const wstats = () => weaponStats(inv.equip.weapon);   // equipped weapon, tier applied
 let markTimer = 0;
 function mark(text, color = '#fff') {
+  Sfx.mark(text);
   const m = document.getElementById('hitmark');
   m.textContent = text; m.style.color = color; m.style.opacity = 1; markTimer = 0.8;
   addLog(/KILL/.test(text) ? text : 'Hit: ' + text.toLowerCase(), color);
@@ -938,7 +941,7 @@ function startAttack() {
   if (cb.atk || cb.block || cb.zap || inv.swapT > 0 || pst.has('stun')) return;
   const tired = tiredFor(w.stam);
   spend(w.stam); hunger.fight = 3;                    // (spend stops at 0)
-  cb.atk = { t: 0, hit: false, slow: tired };
+  cb.atk = { t: 0, hit: false, slow: tired }; Sfx.play('swing');
   if (tired) exhaustedHint();
 }
 
@@ -957,7 +960,7 @@ function dealHit(e, zone, base, w, noise) {
   const guarded = !sneak && e.stun <= 0 && e.T.blockFront < 1 && e.facesPlayer(player);        // a raised shield or guard takes hits from the front
   const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1) * (guarded ? e.T.blockFront : 1)
     * (inv.buffs.might > 0 ? 1.4 : 1) * PD.dmgMul * (e.resist[zone] || 1) * (e.bs ? bossTakeMul(e, zone) : 1);
-  const killed = e.hurt(dmg, player);
+  const killed = e.hurt(dmg, player); Sfx.play('hit'); Sfx.play(killed ? 'edie' : 'ehurt');
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
   else {
@@ -1044,7 +1047,7 @@ function castWand(it) {
   const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * WAND.speed, vy: dy * WAND.speed, vz: dz * WAND.speed, gravity: 0, life: WAND.range / WAND.speed, owner: 'player', kind: 'wand', wand: it.kind, stuck: false, wfx: true, mesh: m };
   m.position.set(a.x, a.y, a.z); m.lookAt(a.x + dx, a.y + dy, a.z + dz);
   arrows.push(a);
-  loud(W.noise);
+  loud(W.noise); Sfx.play('wand_' + it.kind);
   discover('wand:' + it.kind, W.name);
   if (--it.charges <= 0) breakWand(it);
   else if (it.charges === 1) flash(`The ${W.name} is nearly spent (1 charge).`);
@@ -1054,7 +1057,7 @@ function breakWand(w) {
   flash(`The ${WANDS[w.kind].name} crumbles to dust.`);
 }
 function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
-  const killed = e.hurt(dmg * PD.dmgMul * (e.bs ? bossTakeMul(e, 'body') : 1), player);
+  const killed = e.hurt(dmg * PD.dmgMul * (e.bs ? bossTakeMul(e, 'body') : 1), player); Sfx.play(killed ? 'edie' : 'ehurt');
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); }
   return killed;
 }
@@ -1195,7 +1198,7 @@ function fireArrow(frac) {
   const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * sp, vy: dy * sp, vz: dz * sp, dmg: w.dmg * (0.4 + 0.6 * frac), owner: 'player', stuck: false, w, mesh: makeArrowMesh() };
   a.mesh.position.set(a.x, a.y, a.z); a.mesh.lookAt(a.x + dx, a.y + dy, a.z + dz);
   group.add(a.mesh); arrows.push(a);
-  if (!dev.on) inv.arrows--;
+  if (!dev.on) inv.arrows--; Sfx.play('bow');
   loud(w.noise);
 }
 function stickArrow(a, hitEnemy) {
@@ -1255,34 +1258,112 @@ function bossDefeated(e) {
   const uniq = epic.tier === 4 ? rollUniqueGear(rng, rng() < 0.5) : null, bust = rollBust(rng, 0.12);    // a Legendary body may hold a one-of-a-kind piece
   const extra = rollEquipment(effFloor(), rng, { boost: 1, minTier: 2 });
   const left = [uniq || epic, extra, { type: 'gold', n: rng.int(120, 200) }, ...(rng() < 0.25 ? [{ type: 'rage' }] : []), ...(bust ? [bust] : [])];
-  propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left },
-    mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
-  });
-  if (e.final) { flash('The Cinder Wyrm falls! The chamber goes quiet.'); clearTimeout(winTimer); winTimer = setTimeout(() => { if (state === 'play') finishRun(); }, 2500); return; }   // its body stays (with its hoard); the run ends
-  flash('The boss falls! Loot its body. A rumble shakes the arena: a hidden door in the north wall grinds open.');
+  dropAll(left, e, true);                                                            // its hoard lies scattered round the body
+  if (e.final) { flash('The Cinder Wyrm falls! The chamber goes quiet.'); clearTimeout(winTimer); winTimer = setTimeout(() => { if (state === 'play') finishRun(); }, 2500); return; }   // the run ends
+  flash('The boss falls! Its loot lies on the floor. A rumble shakes the arena: a hidden door in the north wall grinds open.');
   openSafeDoor();
 }
 
-// A dead enemy leaves a lootable body only if its drop roll gave something.
+// A dead enemy drops what it carried on the floor (same roll and seed as before: the sneak-kill bonus, the lockpick share, the quest key and sack are unchanged).
+// Its body (the dead mesh) despawns DROPS.bodyT s after death (main loop, goneBodies); the items stay until picked up.
 function makeCorpse(e, sneak) {
   e.corpseDone = true; awardKill(e, sneak);
   if (e.minion) return;   // a boss's summons leave no body or loot (no farming the howl / rally / last call)
   if (e.T.mimic) return mimicCorpse(e);
-  const bonus = sneak ? 0.15 : 0;
-  if (!dryRoll(() => rollLoot('corpse', effFloor(), makeRng(e.seed), bonus, e.gear, e.type)).length && !e.loot && !e.spec.carry) return;
-  propObjs.push({
-    p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, bonus, gear: e.gear, type: e.type, extra: e.loot || e.spec.carry ? [...(e.loot ? [{ type: 'gold', n: e.loot }] : []), ...(e.spec.carry ? [e.spec.carry] : [])] : undefined },   // stolen gold, and the cell key a prisoner quest guard carries
-    mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [],
-  });
+  const list = rollLoot('corpse', effFloor(), makeRng(e.seed), sneak ? 0.15 : 0, e.gear, e.type);
+  if (e.loot) list.push({ type: 'gold', n: e.loot });                              // stolen gold
+  if (e.spec.carry) list.push(e.spec.carry);                                       // the cell key a prisoner quest guard carries
+  dropAll(list, e, e.type === 'sackthief' || !!e.spec.mini || !!e.spec.qguard);
 }
 
-// A dead mimic pays out like a chest one grade better, with gear guaranteed (it is a lootable body, like the boss's).
+// A dead mimic pays out like a chest one grade better, with gear guaranteed.
 function mimicCorpse(e) {
   const rng = makeRng((e.seed ^ 0x31c1c) >>> 0), t = Math.min(4, (e.spec.tier | 0) + 1);
   const left = rollLoot('chest', effFloor(), rng, 0, [], undefined, t);
   if (!left.some(d => d.type === 'weapon' || d.type === 'armor' || d.type === 'shield')) left.push(rollEquipment(effFloor(), rng, { boost: t >= 3 ? 1 : 0, minTier: t >= 2 ? t - 1 : 0 }));
-  propObjs.push({ p: { kind: 'corpse', x: Math.floor(e.x / TILE), y: Math.floor(e.z / TILE), opened: false, seed: e.seed, left }, mesh: e.mesh, x: e.x, z: e.z, r: 0, lid: null, mats: [] });
+  dropAll(left, e, true);
+}
+
+// ---- floor drops: each item is one instance of a shared gem (colour = the item's colour, shape = its kind) over a shared additive halo, so a floor costs 2 draw calls
+// whatever it holds. Per floor (floor.items = { list, gem, halo }, made on the first drop, freed with the floor's group). At most DROPS.cap live; past that the oldest
+// non-quest item goes first (a key, the thief's sack, a mini-boss, boss and mimic hoard are never evicted). Items have no timer: they wait for you. ----
+const DROPS = { cap: 60, max: 80, pick: 1.5, retry: 0.5, bodyT: 30, y: 0.26 };   // metres, seconds
+const DROP_SHAPE = { gold: [0.14, 0.05, 0.14], potion: [0.09, 0.17, 0.09], key: [0.06, 0.2, 0.06], weapon: [0.1, 0.22, 0.1], armor: [0.17, 0.15, 0.17], shield: [0.18, 0.18, 0.06] };
+let dropGeo = null, dropMat = null, haloGeo = null, haloMat = null;
+const _dc = new THREE.Color(), _dm = new THREE.Matrix4(), _dq = new THREE.Quaternion(), _dp = new THREE.Vector3(), _ds = new THREE.Vector3(), _dy = new THREE.Vector3(0, 1, 0);
+function dropColor(d) {
+  if (d.type === 'gold') return '#ffd23a';
+  if (d.type === 'arrows') return '#c8b070';
+  if (d.type === 'rage') return '#ff5a30';
+  if (d.type === 'bust') return '#e8e0b0';
+  try { return itemColor(d) || '#ffffff'; } catch (err) { return '#ffffff'; }
+}
+function dropStore() {
+  if (floor.items) return floor.items;
+  if (!dropGeo) {
+    dropGeo = new THREE.OctahedronGeometry(1, 0); dropGeo.userData = { shared: true };
+    haloGeo = new THREE.PlaneGeometry(1, 1); haloGeo.rotateX(-Math.PI / 2); haloGeo.userData = { shared: true };
+    dropMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); dropMat.userData = { shared: true };
+    haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }); haloMat.userData = { shared: true };
+  }
+  const gem = new THREE.InstancedMesh(dropGeo, dropMat, DROPS.max), halo = new THREE.InstancedMesh(haloGeo, haloMat, DROPS.max);
+  gem.count = halo.count = 0; gem.frustumCulled = halo.frustumCulled = false; halo.renderOrder = 2;
+  group.add(gem, halo);
+  return (floor.items = { list: [], gem, halo });
+}
+function dropSet(S, i) {                                                           // write instance i (matrix + colour) from its item; only on spawn / removal, never per frame
+  const it = S.list[i];
+  _dc.set(it.col); _dq.setFromAxisAngle(_dy, it.yaw); _dp.set(it.x, DROPS.y, it.z); _ds.set(it.sx, it.sy, it.sz);
+  _dm.compose(_dp, _dq, _ds); S.gem.setMatrixAt(i, _dm); S.gem.setColorAt(i, _dc);
+  _dp.y = 0.03; _ds.set(0.9, 1, 0.9); _dq.identity(); _dm.compose(_dp, _dq, _ds); S.halo.setMatrixAt(i, _dm); S.halo.setColorAt(i, _dc);
+  S.gem.instanceMatrix.needsUpdate = S.halo.instanceMatrix.needsUpdate = S.gem.instanceColor.needsUpdate = S.halo.instanceColor.needsUpdate = true;
+}
+function dropRemove(S, i) {                                                        // swap-remove: the last item takes slot i
+  const L = S.list, last = L.length - 1;
+  if (i !== last) { L[i] = L[last]; dropSet(S, i); }
+  L.pop(); S.gem.count = S.halo.count = L.length;
+  S.gem.instanceMatrix.needsUpdate = S.halo.instanceMatrix.needsUpdate = true;
+}
+function dropClear() { const S = floor.items; if (S) { S.list.length = 0; S.gem.count = S.halo.count = 0; } }
+function dropSpawn(d, x, z, quest, rng) {
+  const S = dropStore(), L = S.list;
+  if (L.length >= DROPS.cap) { let k = L.findIndex(q => !q.q); if (k < 0 && L.length >= DROPS.max) k = 0; if (k >= 0) dropRemove(S, k); }   // (the oldest non-quest item goes; swap-remove, so the order is only roughly oldest-first)
+  let px = x, pz = z;
+  for (let k = 0; k < 4; k++) {                                                    // scatter a little, onto open floor
+    const a = rng() * 6.2832, r = 0.25 + rng() * 0.55, tx = x + Math.cos(a) * r, tz = z + Math.sin(a) * r, ti = Math.floor(tz / TILE) * floor.w + Math.floor(tx / TILE);
+    if (floor.tiles[ti] === T_FLOOR && !floor.blocked[ti]) { px = tx; pz = tz; break; }
+  }
+  const sh = DROP_SHAPE[d.type] || [0.12, 0.12, 0.12];
+  L.push({ d, x: px, z: pz, q: quest || d.type === 'key', col: dropColor(d), yaw: rng() * 6.2832, sx: sh[0], sy: sh[1], sz: sh[2], fail: false, cd: 0 });
+  const i = L.length - 1; S.gem.count = S.halo.count = L.length; dropSet(S, i);
+}
+function dropAll(list, e, quest) {
+  const rng = makeRng((e.seed ^ 0xd209) >>> 0);
+  for (const d of list) dropSpawn(d, e.x, e.z, quest, rng);
+}
+// Walk within DROPS.pick m of an item to take it. A full bag leaves it (one message; holding interact tries again every DROPS.retry s). One pass over <= 80 items, no allocations.
+function updateDrops(dt) {
+  const S = floor.items; if (!S || !S.list.length) return;
+  haloMat.opacity = 0.4 + 0.15 * Math.sin(gameT * 3);                             // the glow breathes (one shared material)
+  const L = S.list, px = player.x, pz = player.z, R2 = DROPS.pick * DROPS.pick;
+  for (let i = L.length - 1; i >= 0; i--) {
+    const it = L[i], dx = it.x - px, dz = it.z - pz;
+    if (dx * dx + dz * dz > R2) { it.fail = false; continue; }
+    if (it.fail) { if (!player.keys[KEYS.interact] || (it.cd -= dt) > 0) continue; it.cd = DROPS.retry; }
+    const text = inv.add(it.d);
+    if (text) { flash('Found ' + text); dropRemove(S, i); }
+    else { if (!it.fail || player.keys[KEYS.interact]) flash(it.d.type === 'arrows' ? 'Quiver full' : 'Pack full: it stays on the floor'); it.fail = true; it.cd = DROPS.retry; }
+  }
+}
+// Dead bodies despawn DROPS.bodyT s after death (deadT counts while this floor is the live one): out of the scene and the update list, their own geometry and
+// materials freed (disposeGroup skips the shared ones). A body is only counted once its loot has dropped (corpseDone).
+function goneBodies() {
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    if (!e.dead || !e.corpseDone || e.deadT < DROPS.bodyT || e.isAlly) continue;
+    if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
+    disposeGroup(e.mesh); enemies.splice(i, 1);
+  }
 }
 
 // ---- bombs (numbers: BOMB in js/enemytypes.js). One pooled fireball per live blast and a few pooled dropped bombs, built once:
@@ -1465,7 +1546,7 @@ function tryDash() {
   if (!dev.on && cb.stamina < TUNE.dashStam) { cb.exhT = 0.5; return false; }          // too tired: the bar flashes
   spend(TUNE.dashStam); cb.dashCd = TUNE.dashCd; if (cb.dash.n > 0) cb.dash.n--; cb.iframe = PD.dashIframe;
   player.startDash(PD.dashDist, TUNE.dashTime);
-  loud(TUNE.dashNoise);
+  loud(TUNE.dashNoise); Sfx.play('dash');
   return true;
 }
 // Knockback: a short eased slide (about a quarter second) of `metres` along (dx, dz), stepped through the player's own collision (walls and props), so it never carries you
@@ -1699,7 +1780,7 @@ function awardKill(e, sneak) {
 }
 function gainXp(base, exempt) {
   const r = prog.award(base, floorKey(stage, floorNum), xpBudget(stage, floorNum, TUNE), exempt, TUNE);
-  if (r.up) { flash(`Level ${prog.level}! ${prog.pts ? prog.pts + ' stat point' + (prog.pts > 1 ? 's' : '') : ''}${prog.skp ? ' and ' + prog.skp + ' skill point' + (prog.skp > 1 ? 's' : '') : ''} to spend (Tab)`); xpPopup('LEVEL ' + prog.level, '#7fffd4'); }
+  if (r.up) { Sfx.play('levelup'); flash(`Level ${prog.level}! ${prog.pts ? prog.pts + ' stat point' + (prog.pts > 1 ? 's' : '') : ''}${prog.skp ? ' and ' + prog.skp + ' skill point' + (prog.skp > 1 ? 's' : '') : ''} to spend (Tab)`); xpPopup('LEVEL ' + prog.level, '#7fffd4'); }
   else if (r.capped) xpPopup(r.xp ? `no more XP here (+${r.xp})` : 'no more XP here', '#9a9a9a');
   else if (r.xp) xpPopup(`+${r.xp} XP`, '#9ad4ff');
 }
@@ -1725,7 +1806,7 @@ function hitReaction(n) {
 }
 function damage(n) {
   if (inSafe || cb.iframe > 0) return;             // the safe room, or the dash's invulnerable moment: nothing can hurt you
-  hitReaction(n);
+  hitReaction(n); Sfx.play('phurt', Math.min(1.5, 0.5 + n / 20));
   hunger.fight = 3;
   if (cb.eat) { cb.eat = null; flash('Interrupted!'); }
   if (dev.on) return;
@@ -1839,7 +1920,7 @@ function finishSearch(o, smashed) {
     if (state === 'dead') return;
   }
   loud(noise);
-  if (chest) discover('item:chest', 'Chests');
+  if (chest) { discover('item:chest', 'Chests'); Sfx.play('chest'); }
   if (theme.mechanic.kind === 'crowd' && o.p.kind !== 'door' && SEARCH_NOISE[o.p.kind]) watchedSearch();
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
@@ -1864,7 +1945,7 @@ function finishSearch(o, smashed) {
   }
   if (left.length) { o.p.left = left; notes.push(`pack full, ${left.length} left behind`); }
   else markOpened(o);
-  let msg = got.length ? 'Found ' + got.join(', ') : left.length ? '' : 'Nothing useful';
+  if (got.length) Sfx.play('pickup'); let msg = got.length ? 'Found ' + got.join(', ') : left.length ? '' : 'Nothing useful';
   if (notes.length) msg += (msg ? ' ' : '') + `(${notes.join(', ')})`;
   flash(msg);
 }
@@ -1872,7 +1953,7 @@ function finishSearch(o, smashed) {
 // Doors slide up out of the way once unlocked.
 function openDoor(o) {
   floor.tiles[o.p.y * floor.w + o.p.x] = T_FLOOR;
-  o.p.opened = true; o.anim = 0;
+  o.p.opened = true; o.anim = 0; Sfx.play('door');
 }
 function updateDoors(dt) {
   const anim = DOOR_ANIM[theme.doors.openAnim] || DOOR_ANIM.slide;
@@ -2065,7 +2146,7 @@ function warmGpu() {
 // dir: 'down' (you go to floor n and arrive by its stairs up) or 'up' (you arrive by its stairs down).
 function changeFloor(n, dir) {
   if (dir === 'up' && !floorCache[n]) { sealedUp(); return; }   // never rebuild a floor you already left
-  allyDepart();                                       // a following ally within a few metres comes too (js/quests.js)
+  Sfx.play('stairs'); allyDepart();                   // a following ally within a few metres comes too (js/quests.js)
   saveFloor();
   search = null; cb.draw = null; cb.eat = null;
   const c = floorCache[n];
@@ -2253,7 +2334,7 @@ function checkStairs() {
 function useStage(s) {
   prisonerRuns[stage] = prisonerRun;
   stage = s; floorCache = stageCaches[s] || (stageCaches[s] = {});
-  theme = s === FINAL_STAGE ? FINAL_THEME : stageThemes[s - 1];
+  theme = s === FINAL_STAGE ? FINAL_THEME : stageThemes[s - 1]; Sfx.setTheme(theme.id);
   HUSH = theme.mechanic.hush || 1;
   if (s < FINAL_STAGE) planStage(s); else { stageSeed = stageSeedOf(s); questPlan = {}; }
   prisonerRun = prisonerRuns[s] || null;
@@ -2274,7 +2355,7 @@ function trimCaches(cur, dir) {
 // The stairs between stages. dir 'down': into stage s floor 1 (from the previous stage's safe room); 'up': into stage s's boss floor, its safe room, from the stage after it.
 function changeStage(s, dir) {
   if (dir === 'up' && !(stageCaches[s] && stageCaches[s][MAX_FLOOR])) { sealedUp(); return; }
-  allyDepart();
+  Sfx.play('stairs'); allyDepart();
   saveFloor();                                         // into the old stage's cache
   search = null; cb.draw = null; cb.eat = null;
   useStage(s); trimCaches(s, dir);
@@ -2391,9 +2472,9 @@ const perfStats = { logic: 0, dt: 0 };   // average milliseconds of game logic p
 function frame(now) {
   const dt = (now - last) / 1000; last = now; perfStats.dt = dt; const tl0 = performance.now();
   if (state === 'play') {
-    player.update(dt, floor);
+    player.update(dt, floor); Sfx.walk(dt, Math.hypot(player.vx, player.vz), player.sprinting, player.crouching);
     inv.update(dt);
-    updateSearch(dt);
+    updateSearch(dt); updateDrops(dt);
     updateCombat(dt);
     gameT += dt;
     updateRespawn(dt);
@@ -2425,6 +2506,7 @@ function frame(now) {
     separateBodies(enemies, player, floor);
     updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt); bossPuddlesUpdate(dt); bossFlamesUpdate(dt);
     for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
+    goneBodies();
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
     checkStairs();
@@ -2445,7 +2527,7 @@ function frame(now) {
   const dazed = pst.has('daze');
   if (dazed !== dazeOn) { dazeOn = dazed; canvas.style.filter = dazed ? 'blur(2.5px)' : ''; }
   if (dazed) camera.rotation.z += Math.sin(now / 180) * 0.035;
-  bakeFlicker(now); if (torch.visible !== (quality.lamp > 0)) torch.visible = quality.lamp > 0;   // (level 2 drops the lantern: the one change of light count, and the one shader recompile)
+  Sfx.update(dt); bakeFlicker(now); if (torch.visible !== (quality.lamp > 0)) torch.visible = quality.lamp > 0;   // (level 2 drops the lantern: the one change of light count, and the one shader recompile)
   updateViewmodel(dt);
   frameCount++;
   if (frameCount % 3 === 0) updateCulling(player, cullChunks, propObjs, enemies);

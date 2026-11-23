@@ -105,11 +105,11 @@ run('Archer, shaman, brute and the Tavern', async ({ open, check }) => {
     game.startFloor(5); const b = game.enemies.find(e => e.boss);
     b.hp = 1; let error = null;
     try { dealHit(b, 'body', 20, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0); } catch (e) { error = e.message; }
-    const body = propObjs.find(o => o.p.kind === 'corpse' && o.p.left && o.p.left.some(d => d.type === 'gold'));
-    const gold = body ? body.p.left.find(d => d.type === 'gold').n : 0;
-    return { error, dead: b.dead, msg: document.getElementById('msg').textContent, items: body ? body.p.left.length : 0, gold };
+    const drops = game.floor.items ? game.floor.items.list.map(i => i.d) : [];          // (read before any frame runs, so nothing is picked up yet)
+    const gd = drops.find(d => d.type === 'gold'), gold = gd ? gd.n : 0;
+    return { error, dead: b.dead, msg: document.getElementById('msg').textContent, items: drops.length, gold };
   });
-  check('the floor-5 boss falls without an error and its body holds gear and gold', fall.error === null && fall.dead && /boss falls/.test(fall.msg) && fall.items >= 3 && fall.gold >= 120, JSON.stringify(fall));
+  check('the floor-5 boss falls without an error and its loot drops as gear and gold', fall.error === null && fall.dead && /boss falls/.test(fall.msg) && fall.items >= 3 && fall.gold >= 120, JSON.stringify(fall));
   // 7. Patrol pace: a guard on patrol walks slower than a crouching player and stands still at each waypoint for at least patrolWaitMin seconds.
   const pat = await page.evaluate(async () => {
     game.startFloor(1); await T.sleep(100);

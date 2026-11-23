@@ -976,12 +976,12 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
     const K = await pg.evaluate(async () => {
       state = 'play'; const b = DR.up('none'); const body = b.mesh, out = {}; b.hp = 1; let error = null;
       try { dealHit(b, 'body', 99, weaponStats(makeItem({ type: 'weapon', base: 'sword', tier: 0 })), 0); } catch (e) { error = e.message; }
-      out.error = error; out.dead = b.dead; out.alt = b.alt; out.corpse = propObjs.some(o => o.p.kind === 'corpse' && o.mesh === body); out.stillPlaying = game.state === 'play';
+      out.error = error; out.dead = b.dead; out.alt = b.alt; out.corpse = !!(game.floor.items && game.floor.items.list.length >= 3); out.stillPlaying = game.state === 'play';
       const iv = setInterval(() => { if (state !== 'won') state = 'play'; }, 50);   // (a late pointer-lock event from the glossary above must not pause the game before the 2.5 s timer)
       out.won = await T.until(() => game.state === 'won', 6000); clearInterval(iv); out.overlay = document.getElementById('overlayText').textContent;
       return out;
     });
-    check(`${tag} killing it (even in the air) drops it to the floor, leaves its body with loot, flashes that it falls and, 2.5 s later, ends the run with "Run complete" naming the Cinder Wyrm`, K.error === null && K.dead && K.alt === 0 && K.corpse && K.stillPlaying && K.won && /Run complete/.test(K.overlay) && /Cinder Wyrm/.test(K.overlay) && !/placeholder/i.test(K.overlay), JSON.stringify(K));
+    check(`${tag} killing it (even in the air) drops it to the floor, scatters its loot on the floor, flashes that it falls and, 2.5 s later, ends the run with "Run complete" naming the Cinder Wyrm`, K.error === null && K.dead && K.alt === 0 && K.corpse && K.stillPlaying && K.won && /Run complete/.test(K.overlay) && /Cinder Wyrm/.test(K.overlay) && !/placeholder/i.test(K.overlay), JSON.stringify(K));
     await pg.close();
   }
 });

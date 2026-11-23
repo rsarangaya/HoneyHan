@@ -67,13 +67,13 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
 
   // Killing it: a corpse with its loot, the tag goes, and the line goes.
   const kill = await mini.evaluate(async () => {
-    const boss = floor.quest.boss;
+    const boss = floor.quest.boss, g0 = game.inv.gold;
     boss.hurt(1e9, game.player);
     const done = await T.until(() => boss.corpseDone, 5000);
-    const corpse = propObjs.find(o => o.p.kind === 'corpse' && o.p.type === 'miniboss');
+    const corpse = (game.floor.items && game.floor.items.list.length > 0) || game.inv.gold > g0;   // its loot dropped (or was already walked over)
     return { done, corpse: !!corpse, tagHidden: !!boss.tag && !boss.tag.visible, line: questLine(floor), log: document.getElementById('log').textContent };
   });
-  check('killing the mini-boss leaves a corpse with its loot, hides its tag and clears the line', kill.done && kill.corpse && kill.tagHidden && kill.line === '', JSON.stringify({ ...kill, log: undefined }));
+  check('killing the mini-boss drops its loot, hides its tag and clears the line', kill.done && kill.corpse && kill.tagHidden && kill.line === '', JSON.stringify({ ...kill, log: undefined }));
   check('the kill is logged with the mini-boss\'s name', kill.log.includes(m.name), '');
   await mini.close();
 
@@ -226,12 +226,12 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
       npc: () => propObjs.find(o => o.p.kind === 'questnpc'),
       log: () => document.getElementById('log').textContent,
       msg: () => document.getElementById('msg').textContent,
-      corpses: type => propObjs.filter(o => o.p.kind === 'corpse' && o.p.type === type),
-      // The sack on the thief's body, rolled exactly as the game rolls it when the body is opened.
+      corpses: type => type === 'sackthief' ? (floor.items ? floor.items.list.filter(i => i.q) : []) : [],   // (enemy bodies no longer hold loot: the sack lies on the floor as quest items)
+      // The sack the thief dropped, rolled exactly as the game rolls it when it dies (it may already be picked up, so the roll is repeated).
       sack() {
-        const c = Ws.corpses('sackthief')[0];
-        if (!c) return null;
-        const drop = rollLoot('corpse', floorNum, makeRng(c.p.seed), c.p.bonus || 0, c.p.gear || [], c.p.type);
+        const th = floor.quest && floor.quest.thief;
+        if (!th || !th.corpseDone || th.escaped) return null;
+        const drop = rollLoot('corpse', floorNum, makeRng(th.seed), 0, th.gear || [], 'sackthief');
         return { gold: drop.filter(d => d.type === 'gold').reduce((a, d) => a + d.n, 0), gear: drop.filter(d => ['weapon', 'armor', 'shield'].includes(d.type)).map(d => d.tier) };
       },
     };
@@ -307,7 +307,6 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
     const boss = floor.quest.boss, P = game.player;
     Ws.place(boss, 1.2, 'toward'); boss.set('alerted'); boss.last = { x: P.x, z: P.z };
     for (let i = 0; i < 60 && !boss.dead; i++) playerHit();
-    Ws.corpses('wanted').forEach(o => { o.p.opened = true; });       // searched already: the Hold E below is for the defector, not its loot
     return { dead: boss.dead, corpseDone: boss.corpseDone, line: questLine(floor) };
   });
   check('a normal melee kill ends the target and the line asks for the return', kill1.dead && kill1.corpseDone && /is dead\. Return to the defector/.test(kill1.line), JSON.stringify(kill1));
@@ -326,7 +325,6 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
     boss.hp = 1;                                                // a sneak sword does ~110 on a wooden target at most; the stab is what is tested, not the damage sum
     Ws.place(boss, 1.2, 'away'); boss.set('unaware'); boss.aware = 0; boss.last = null; boss.seen = false;
     playerHit();
-    Ws.corpses('wanted').forEach(o => { o.p.opened = true; });
     return { dead: boss.dead, state: boss.state };
   });
   check('a sneak stab from behind kills the target', wsn.dead, JSON.stringify(wsn));
@@ -343,7 +341,6 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
     P.pitch = 0;
     let shots = 0;
     for (let i = 0; i < 8 && !boss.dead; i++) { fireArrow(1); shots++; for (let k = 0; k < 600 && arrows.some(a => a.owner === 'player' && !a.stuck); k++) updateArrows(1 / 120); }
-    Ws.corpses('wanted').forEach(o => { o.p.opened = true; });
     return { dead: boss.dead, shots };
   });
   check('an arrow kills the target too', wr.dead, JSON.stringify(wr));
@@ -496,7 +493,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
           return false;
         },
         cellDoor: () => propObjs.find(o => o.p.room === 'cell'),
-        corpseWithKey: () => propObjs.find(o => o.p.kind === 'corpse' && (o.p.extra || []).some(it => it.type === 'key')),
+        corpseWithKey: () => (floor.items ? floor.items.list : []).find(i => i.d.type === 'key') || (game.inv.has('key', floor.quest.lock) ? { got: true } : null),   // the key lying on the floor (or, if a frame already ran over it, in the pack)
         frames: async n => { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); },
         // Walks the freed prisoner with fixed 1/60 s steps (no frames run inside this call) until it is gone or 90 s of game time pass.
         walk() {
@@ -568,13 +565,13 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
           const done = await T.until(() => c.corpseDone, 5000);
           return { found: true, dead: c.dead, done, corpse: !!PR.corpseWithKey() };
         });
-        check('the guard carrying the cell key dies to a melee kill and leaves a corpse with the key on it', kill.found && kill.dead && kill.done && kill.corpse, JSON.stringify(kill));
+        check('the guard carrying the cell key dies to a melee kill and drops the key on the floor', kill.found && kill.dead && kill.done && kill.corpse, JSON.stringify(kill));
         const loot = await pg.evaluate(async () => {
-          const c = PR.corpseWithKey(); Qs.face(c); Qs.key(true);
-          const ok = await T.until(() => game.inv.has('key', floor.quest.lock), 15000); Qs.key(false);
+          const c = PR.corpseWithKey(); if (c && c.x !== undefined) { game.player.x = c.x + 1; game.player.z = c.z; }   // walk over it (within 1.5 m)
+          const ok = await T.until(() => game.inv.has('key', floor.quest.lock), 5000);
           return { ok, line: questLine(floor) };
         });
-        check('searching that corpse puts the cell key in the pack and the line says so', loot.ok && /You have the cell key/.test(loot.line), JSON.stringify(loot));
+        check('walking over the dropped key puts the cell key in the pack and the line says so', loot.ok && /You have the cell key/.test(loot.line), JSON.stringify(loot));
         // A sneak stab from behind kills the carrier too: a fresh floor 2 (same seed, same carrier).
         const sneak = await pg.evaluate(() => {
           game.startFloor(2);
@@ -585,7 +582,7 @@ run('Encounters: the mini-boss room and the shrine bargain', async ({ open, chec
           playerHit();
           return { found: true, dead: c.dead, corpse: !!PR.corpseWithKey() };
         });
-        check('a sneak stab on the key guard kills it and leaves the key on its corpse', sneak.found && sneak.dead && sneak.corpse, JSON.stringify(sneak));
+        check('a sneak stab on the key guard kills it and drops the key', sneak.found && sneak.dead && sneak.corpse, JSON.stringify(sneak));
       } else {
         await pg.evaluate(() => game.inv.add({ type: 'key', lock: floor.quest.lock, label: 'Cell Key' }));   // the key, as if looted
       }

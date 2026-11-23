@@ -101,7 +101,7 @@ run('The five other themes', async ({ open, check }) => {
     out.stole = await T.until(() => th.stolen, 10000); out.goldAfter = game.inv.gold; out.thiefHas = th.loot;
     out.flees = await T.until(() => th.fleeT > 0 || th.state !== 'alerted', 2000);
     th.hp = 1; th.hurt(10, game.player); makeCorpse(th, false); await T.sleep(100);
-    const corpse = propObjs.find(o => o.p.kind === 'corpse' && o.p.extra); out.dropped = !!corpse && corpse.p.extra[0].n === th.loot;
+    const drop = game.floor.items && game.floor.items.list.find(i => i.d.type === 'gold' && i.d.n === th.loot); out.dropped = !!drop || game.inv.gold >= out.goldAfter + th.loot;   // (on the floor, or already walked over)
     // captain: its bellow alerts everyone in earshot
     T.reset(); game.inv.hp = 1e9;
     const cap = T.guard(4, 'toward', true, 'captain'), far = T.guard(-12, 'toward', false, 'goblin');

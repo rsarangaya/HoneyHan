@@ -160,7 +160,8 @@ const tunePanel = (() => {
 
   function clearGuards() {
     enemies.forEach(e => group.remove(e.mesh));
-    for (let i = propObjs.length - 1; i >= 0; i--) if (propObjs[i].p.kind === 'corpse') propObjs.splice(i, 1);
+    for (let i = propObjs.length - 1; i >= 0; i--) if (propObjs[i].p.kind === 'corpse') propObjs.splice(i, 1);   // (an ally's body prop)
+    dropClear();                                                                     // and the loot on the floor
     enemies.length = 0;
   }
 
