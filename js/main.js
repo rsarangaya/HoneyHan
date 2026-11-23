@@ -187,7 +187,15 @@ const iceWallTexture = base => paintTex(base, 'ice', 256, (g, S, rng, col) => {
 const frostFloorTexture = base => paintTex(base, 'frost', 256, (g, S, rng, col) => {
   g.fillStyle = shade(col, 0.45); g.fillRect(0, 0, S, S);
   for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) for (const dx of [0, -85]) { const x = q * 85 + (r % 2 ? 30 : 0) + dx, y = r * 85, k = 0.85 + rng() * 0.3; g.fillStyle = shade(col, k); g.fillRect(x + 2, y + 2, 81, 81); g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 2, y + 2, 81, 2); }
-  for (let i = 0; i < 40; i++) blob(g, rng() * S, rng() * S, 6 + rng() * 20, 4 + rng() * 12, `rgba(235,245,255,${0.08 + rng() * 0.16})`);
+  for (let i = 0; i < 26; i++) {   // frost as jagged shards (not round blobs): a spiky polygon, a few of them with a bright rim
+    const cx = rng() * S, cy = rng() * S, R = 6 + rng() * 18, n = 5 + Math.floor(rng() * 4), a0 = rng() * 6.28, sq = 0.45 + rng() * 0.5;
+    g.beginPath();
+    for (let k = 0; k < n * 2; k++) { const a = a0 + k / (n * 2) * 6.283, r = R * (k % 2 ? 0.3 + rng() * 0.25 : 0.7 + rng() * 0.5); g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r * sq); }
+    g.closePath(); g.fillStyle = `rgba(235,245,255,${0.08 + rng() * 0.16})`; g.fill();
+    if (rng() < 0.4) { g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 1; g.stroke(); }
+  }
+  g.strokeStyle = 'rgba(255,255,255,0.14)'; g.lineWidth = 1;   // hairline cracks
+  for (let i = 0; i < 14; i++) { let x = rng() * S, y = rng() * S, a = rng() * 6.28; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 4; k++) { a += (rng() - 0.5) * 1.2; x += Math.cos(a) * (6 + rng() * 10); y += Math.sin(a) * (6 + rng() * 10); g.lineTo(x, y); } g.stroke(); }
   for (let i = 0; i < 900; i++) { g.fillStyle = 'rgba(255,255,255,0.2)'; g.fillRect(rng() * S, rng() * S, 1 + rng() * 1.5, 1 + rng() * 1.5); }
 });
 // Chapel vault ceiling: pale stone ribs.
