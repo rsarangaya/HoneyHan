@@ -7,11 +7,13 @@ const STATUS = {
   bleed:   { name: 'Bleed',   color: '#ff4a4a', dur: 4,   dps: 3,    desc: 'Loses health over time. It never kills a player on its own (stops at 1 HP). A Healing Potion stops it.' },
   stun:    { name: 'Stun',    color: '#ffe14a', dur: 1,    immune: 3, desc: 'Locked out: cannot attack, block or move properly. A short immunity follows so it cannot be chained.' },
   stuck:   { name: 'Stuck',   color: '#f4f4ee', dur: 1e9, move: 0, desc: "Glued in place by Aj's Bust. It cannot move at all until it dies, though it can still swing at anything within reach (and archers still shoot). Does not wear off." },
+  burn:    { name: 'Burn',    color: '#ff7a1a', dur: 3,   dps: 6,    bossMul: 0.5, desc: 'Burning: loses health over time and armor does not help (6 per second for about 3 seconds). A new hit refreshes it, it never stacks. Bosses take half. It never kills a player on its own.' },
+  freeze:  { name: 'Freeze',  color: '#8fe4ff', dur: 1.75, move: 0, thaw: 2, immune: 5, bossSlow: 2.5, desc: 'Frozen solid: cannot move or attack for about 1.75 seconds, then crawls (Slow) for 2 more. It cannot be chained: a short immunity follows. Bosses only get slowed.' },
   daze:    { name: 'Daze',    color: '#c58aff', dur: 2.5, drain: 10, desc: 'Blurred, swaying vision and drained stamina. Head hits cause it.' },
 };
 
 class Statuses {
-  constructor() { this.t = {}; this.max = {}; this.cool = {}; }
+  constructor() { this.t = {}; this.max = {}; this.cool = {}; this.burnMul = 1; }   // burnMul: a boss takes less burn damage
   has(n) { return (this.t[n] || 0) > 0; }
   // Starts a status (or refreshes it to the longer of the two durations: stacks never add).
   // Returns false when it is on cooldown (immunity) or unknown.
@@ -31,10 +33,12 @@ class Statuses {
     let dmg = 0;
     if (this.has('bleed')) dmg += STATUS.bleed.dps * dt;
     if (this.has('cripple')) dmg += STATUS.cripple.bleed * dt;
+    if (this.has('burn')) dmg += STATUS.burn.dps * this.burnMul * dt;
     for (const k in this.t) {                                  // (for-in: no key array per call; deleting the current key while looping is safe)
       if ((this.t[k] -= dt) > 0) continue;
       delete this.t[k]; delete this.max[k];
       if (STATUS[k].immune) this.cool[k] = STATUS[k].immune;
+      if (k === 'freeze') { this.t.slow = Math.max(this.t.slow || 0, STATUS.freeze.thaw); this.max.slow = Math.max(this.max.slow || 0, this.t.slow); }   // thaws into a brief slow
     }
     for (const k in this.cool) if ((this.cool[k] -= dt) <= 0) delete this.cool[k];
     return dmg;
@@ -48,12 +52,13 @@ class Statuses {
       m = Math.min(m, STATUS.cripple.move + (1 - STATUS.cripple.move) * f);
     }
     if (this.has('stun')) m = Math.min(m, 0.15);
+    if (this.has('freeze')) m = 0;
     if (this.has('stuck')) m = 0;
     return m;
   }
   list() { return Object.keys(this.t).map(n => [n, this.t[n]]); }
   // Colour for tinting an enemy model, or 0 for none.
-  tint() { return this.has('stuck') ? 0x42423c : this.has('stun') ? 0x555500 : this.has('cripple') ? 0x5a3008 : this.has('bleed') ? 0x3a0606 : this.has('slow') ? 0x0a2a5a : 0; }
+  tint() { return this.has('stuck') ? 0x42423c : this.has('freeze') ? 0x2a6a9a : this.has('stun') ? 0x555500 : this.has('burn') ? 0x7a3200 : this.has('cripple') ? 0x5a3008 : this.has('bleed') ? 0x3a0606 : this.has('slow') ? 0x0a2a5a : 0; }
 }
 
 const pst = new Statuses();   // the player's statuses

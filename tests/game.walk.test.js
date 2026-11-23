@@ -61,5 +61,5 @@ run('Guard walking and turning', async ({ open, check }) => {
     const n = e.path[0], aim = n ? Math.atan2(-((n.x + 0.5) * TILE - e.x), -((n.y + 0.5) * TILE - e.z)) : want;
     return { err: Math.abs(Math.atan2(Math.sin(aim - e.yaw), Math.cos(aim - e.yaw))), turn: TUNE.enemyTurn, alert: TUNE.enemyTurnAlert };
   });
-  check('a guard faces its walking direction within 0.2 s of a 90 degree change', turn.turn === 12 && turn.alert === 9 && turn.err < 0.1, JSON.stringify(turn));
+  check('a guard faces its walking direction within 0.2 s of a 90 degree change', turn.turn === undefined && turn.alert === 12 && turn.err < 0.1, JSON.stringify(turn));
 });

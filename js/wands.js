@@ -4,8 +4,8 @@
 //   It has one fixed effect and limited charges, ignores armor and hit zones, and breaks at 0.
 //   A recharge wand tops up a wand and breaks after one use. Hanahan's Rage turns nearby enemies on each other.
 const WANDS = {
-  fire:      { name: 'Fire Wand',      color: '#ff7a2a', charges: 5, noise: 6,  dmg: 22, desc: 'A fire bolt: 22 damage that ignores armor. Loud-ish (6 m).' },
-  frost:     { name: 'Frost Wand',     color: '#7fd8ff', charges: 6, noise: 1,  dmg: 8,  slow: 8, desc: 'A frost bolt: 8 damage and Slow for 8 s. Nearly silent (1 m), so it is a good opener.' },
+  fire:      { name: 'Fire Wand',      color: '#ff7a2a', charges: 5, noise: 6,  dmg: 22, get desc() { return `A fire bolt: 22 damage that ignores armor, and a ${Math.round(WAND.burnChance * 100)}% chance to set the target Burning (6 damage a second for 3 s, armor ignored; bosses take half). Loud-ish (6 m).`; } },
+  frost:     { name: 'Frost Wand',     color: '#7fd8ff', charges: 6, noise: 1,  dmg: 8,  slow: 8, get desc() { return `A frost bolt: 8 damage and Slow for 8 s, and a ${Math.round(WAND.freezeChance * 100)}% chance to Freeze the target solid for about 1.75 s (bosses are only slowed). Nearly silent (1 m), so it is a good opener.`; } },
   lightning: { name: 'Lightning Wand', color: '#ffe84a', charges: 4, noise: 12, dmg: 14, stun: 1.6, chain: 4, chainDmg: 8, chainStun: 1, desc: 'Lightning: 14 damage and a 1.6 s Stun, and it arcs to another enemy within 4 m (8 damage, 1 s). Very loud (12 m).' },
   force:     { name: 'Force Wand',     color: '#c58aff', charges: 5, noise: 8,  dmg: 6,  push: 4, wallDmg: 8, desc: 'A blast of force: 6 damage and it throws the target 4 m away, 8 more damage if it hits a wall. Bosses are only damaged. 8 m noise.' },
   sleep:     { name: 'Sleep Wand',     color: '#8a9aff', charges: 3, noise: 1,  sleep: 10, desc: 'Puts an enemy to sleep for 10 s, silently (1 m). A sleeper cannot see or hear you, so it is an easy sneak kill, but any damage wakes it. Bosses do not sleep.' },
@@ -17,6 +17,8 @@ const WAND = {
   cd: 0.5,                 // seconds the zap animation and recovery take (no second zap, melee or block meanwhile)
   speed: 38, range: 30,    // bolt speed in m/s and how far it flies
   rechargeGain: 3,         // charges a recharge wand restores
+  burnChance: 0.4,         // chance a fire bolt sets the target burning (status burn, js/status.js)
+  freezeChance: 0.25,      // chance a frost bolt freezes the target solid (status freeze); it always slows
   rechargeFull: 0.15,      // chance a recharge wand found is the rare kind that refills completely
 };
 const RAGE = {

@@ -2,7 +2,7 @@
 // Pickups go to the backpack only. Quickslots, equipping and dropping are the player's choice.
 const QUIVER_MAX = 25;
 const SWAP_TIME = 0.5;
-const PACK_MAX = 16;
+const PACK_MAX = 20;
 const POTION_HEAL = 40;
 
 // ---- tiers: every weapon and armor piece has one. The multiplier scales damage or protection ----

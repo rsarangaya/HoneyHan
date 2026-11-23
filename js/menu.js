@@ -117,7 +117,7 @@ const pauseMenu = (() => {
   }
 
   function statusCards() {
-    const src = { slow: 'Leg hits from guards, and some wands and bows.', cripple: 'Sword leg hits (sometimes) and the boss\'s leg hits.', bleed: 'A dagger\'s body hits.', stun: 'A mace\'s head hits and some wands. The boss cannot be stunned.', daze: 'Head hits from guards.', stuck: "Aj's Bust (a legendary wand). Never on elites or bosses." };
+    const src = { slow: 'Leg hits from guards, and some wands and bows.', cripple: 'Sword leg hits (sometimes) and the boss\'s leg hits.', bleed: 'A dagger\'s body hits.', stun: 'A mace\'s head hits and some wands. The boss cannot be stunned.', daze: 'Head hits from guards.', stuck: "Aj's Bust (a legendary wand). Never on elites or bosses.", burn: 'The Fire Wand (a chance on every hit). Bosses take half.', freeze: 'The Frost Wand (a chance on every hit). Bosses are only slowed.' };
     return Object.keys(STATUS).map(k => card('status:' + k, STATUS[k].name, STATUS[k].color, [STATUS[k].desc, 'Comes from: ' + src[k], 'Works the same on you and on enemies (daze only affects you).']));
   }
 

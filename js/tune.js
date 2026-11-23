@@ -1,10 +1,10 @@
 // Dev tuning panel: edit combat numbers live, spawn guards to practise on, copy the values out.
 // Shown while dev mode is on. Press Esc to free the mouse, then click the panel (the game pauses).
 const tunePanel = (() => {
-  const KEY = 'prototype-test-tune-34';   // bumped so old saved values don't override the new defaults (last: the exhausted-attack and dash numbers)
+  const KEY = 'prototype-test-tune-35';   // bumped so old saved values don't override the new defaults (last: the exhausted-attack and dash numbers)
   const WEAPON_FIELDS = [['dmg', 1], ['spd', 0.05], ['dur', 0.05], ['hitAt', 0.05], ['reach', 0.1], ['stam', 1], ['sneak', 0.5], ['parryWin', 0.05], ['blockCost', 1]];
   const sections = [
-    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurn', 1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
+    ['Enemy', TUNE, [['enemyHp', 1], ['enemyDmg', 1], ['floorHpScale', 0.01], ['floorDmgScale', 0.01], ['windup', 0.05], ['enemyCooldown', 0.1], ['enemyAtkSpd', 0.1], ['enemyReach', 0.1], ['chaseSpeed', 0.2], ['patrolSpeed', 0.1], ['enemyTurnAlert', 1], ['patrolWaitMin', 0.5], ['patrolWaitMax', 0.5], ['patrolRestChance', 0.05], ['patrolRestMin', 0.5], ['patrolRestMax', 0.5]]],
     ['Stages', TUNE, [['stageHpScale', 0.05], ['stageDmgScale', 0.05], ['stageBossHp', 0.05], ['stageBossDmg', 0.05], ['finalBossHp', 0.1], ['finalBossDmg', 0.1], ['stageLootDepth', 0.5]]],
     ['Boss', TUNE, [['bossHp', 5], ['bossDmgMul', 0.1], ['bossWake', 1], ['bossSpeed', 0.2], ['bossWindMul', 0.05], ['bossReachMul', 0.05], ['bossAtkSpd', 0.05], ['bossWeaponTier', 1], ['bossLegendary', 0.01]]],
     ['Respawn', TUNE, [['respawnMin', 5], ['respawnSpan', 5], ['respawnMinDist', 1], ['roomCapTiles', 1]]],
@@ -48,7 +48,7 @@ const tunePanel = (() => {
     ['stun', STATUS.stun, [['dur', 0.1], ['immune', 0.5]]],
     ['daze', STATUS.daze, [['dur', 0.5], ['drain', 1]]],
     ...['sword', 'dagger', 'mace'].map(w => [w, WSTATS[w], WEAPON_FIELDS]),
-    ['wands', WAND, [['stam', 1], ['cd', 0.1], ['speed', 1], ['range', 1], ['rechargeGain', 1], ['rechargeFull', 0.05]]],
+    ['wands', WAND, [['stam', 1], ['cd', 0.1], ['speed', 1], ['range', 1], ['rechargeGain', 1], ['rechargeFull', 0.05], ['burnChance', 0.05], ['freezeChance', 0.05]]],
     ['rage', RAGE, [['charges', 1], ['radius', 1], ['dur', 1], ['noise', 1], ['cd', 0.5]]],
     ['bow', WSTATS.bow, [['dmg', 1], ['draw', 0.05], ['stam', 1], ['noise', 1], ['sneak', 0.5]]],
     ['arrows', BOW, [['speedMin', 1], ['speedMax', 1], ['gravity', 0.5], ['minDraw', 0.05], ['recoverWorld', 0.05], ['recoverHit', 0.05], ['impactNoise', 1]]],

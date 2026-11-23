@@ -3,18 +3,18 @@ const ZONE_MUL = { head: 1.75, body: 1.0, legs: 0.65 };
 // Global combat numbers, editable live from the dev tuning panel (js/tune.js).
 const TUNE = {
   enemyHp: 55, enemyDmg: 13, floorHpScale: 0.12, floorDmgScale: 0.06, windup: 0.35, enemyCooldown: 0.6,
-  enemyAtkSpd: 1.4,                   // attack speed stat: x its weapon's spd. Cooldown / this, wind-up / sqrt(this)
+  enemyAtkSpd: 1.68,                   // attack speed stat: x its weapon's spd. Cooldown / this, wind-up / sqrt(this)
   enemyReach: 1.7,                    // how close an alerted guard must be to start a swing
   chaseSpeed: 5.0,                    // alerted guards run faster than a sprinting player
   playerAtkSpd: 1,                    // attack speed stat: x the weapon's spd. Swing time / this
   walkSpeed: 3.0, sprintSpeed: 4.6, crouchSpeed: 1.4,
-  enemyTurn: 12, enemyTurnAlert: 9,    // rad/s a guard turns to face where it walks / to face its target while alerted (wind-up and charge telegraphs stay slower on purpose)
+  enemyTurnAlert: 12,                  // rad/s a guard turns in EVERY state (walking, patrol look-around, searching, alerted); wind-up and charge telegraphs stay slower on purpose
   patrolSpeed: 1.1,                   // unaware patrol pace: slower than a crouching player (1.4), so a sneaker can catch up
   patrolWaitMin: 3, patrolWaitMax: 7, patrolRestChance: 0.25, patrolRestMin: 8, patrolRestMax: 12,   // seconds a guard stands at a waypoint; sometimes a long rest
   bossHp: 220, bossDmgMul: 1.4,       // the boss wears Rare plate, so its real toughness is higher than its HP
   bossWake: 12,                       // metres: the boss stays asleep until you are this close
   bossSpeed: 4.2,                     // a sprinting player (4.6) can outrun it
-  bossWindMul: 1.35, bossReachMul: 1.4, bossAtkSpd: 0.7, bossWeaponTier: 3,   // wind-up x (longer telegraph), reach x, own attack-speed stat, mace tier
+  bossWindMul: 1.35, bossReachMul: 1.4, bossAtkSpd: 0.84, bossWeaponTier: 3,   // wind-up x (longer telegraph), reach x, own attack-speed stat, mace tier
   bossLegendary: 0.10,                // chance its guaranteed Epic drop upgrades to Legendary
   // Stages (js/main.js): per stage past the first, enemies get HP x (1 + stageHpScale) and damage x (1 + stageDmgScale) on top of the per-floor scaling;
   // stage bosses HP x (1 + stageBossHp) and damage x (1 + stageBossDmg). The final boss (the Cinder Wyrm) is the stage 1 boss x finalBossHp / finalBossDmg.

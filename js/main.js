@@ -1078,8 +1078,8 @@ function applyWand(kind, e) {
   const W = WANDS[kind], tag = s => { discover('status:' + s, STATUS[s].name); };
   const cy = Math.max(0.3, Math.min(1.5, (e.T.height || 1.7) * 0.6 * (e.scaleK || 1))) + (e.alt || 0);   // about its chest
   wandImpact(group, kind, e.x, cy, e.z);                                      // (a flash on the target; lightning adds one on the arc below)
-  if (kind === 'fire') { hurtByWand(e, W.dmg); mark(`FIRE ${W.dmg}`, '#ff9a3a'); }
-  else if (kind === 'frost') { if (!hurtByWand(e, W.dmg) && e.addStatus('slow', W.slow)) tag('slow'); mark('FROST +SLOW', '#7fd8ff'); }
+  if (kind === 'fire') { const dead = hurtByWand(e, W.dmg), burn = !dead && gameRng() < WAND.burnChance && e.addStatus('burn'); if (burn) tag('burn'); mark(burn ? `FIRE ${W.dmg} +BURN` : `FIRE ${W.dmg}`, '#ff9a3a'); }
+  else if (kind === 'frost') { let fz = false; if (!hurtByWand(e, W.dmg)) { if (e.addStatus('slow', W.slow)) tag('slow'); if (gameRng() < WAND.freezeChance && e.addStatus('freeze')) { fz = true; tag('freeze'); } } mark(fz ? (e.boss ? 'FROST +SLOW' : 'FROZEN SOLID') : 'FROST +SLOW', '#7fd8ff'); }
   else if (kind === 'lightning') {
     if (!hurtByWand(e, W.dmg) && e.addStatus('stun', W.stun)) tag('stun');
     const o = nearestOther(e, enemies, W.chain);

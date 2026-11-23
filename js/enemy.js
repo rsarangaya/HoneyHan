@@ -154,7 +154,7 @@ function iconTexture(text, color) {
   g.fillStyle = color; g.fillText(text, 32, 34);
   return new THREE.CanvasTexture(c);
 }
-// Status marks above a head (wands and Rage): drawn once, shared. z: sleep Z's; x: stun star; f: frost flake (slow); g: goo blob (stuck); r: rage.
+// Status marks above a head (wands and Rage): drawn once, shared. z: sleep Z's; x: stun star; f: frost flake (slow); g: goo blob (stuck); b: flame (burn); r: rage.
 function statusIconTexture(kind) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d'); g.lineCap = 'round'; g.lineJoin = 'round';
@@ -166,6 +166,9 @@ function statusIconTexture(kind) {
     g.lineWidth = 5; g.strokeStyle = '#000'; g.stroke(); g.fillStyle = '#ffe84a'; g.fill();
   } else if (kind === 'f') {
     for (const [w, col] of [[9, '#000'], [4, '#9fe4ff']]) { g.lineWidth = w; g.strokeStyle = col; g.beginPath(); for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; g.moveTo(32 + Math.cos(a) * 24, 32 + Math.sin(a) * 24); g.lineTo(32 - Math.cos(a) * 24, 32 - Math.sin(a) * 24); } g.stroke(); }
+  } else if (kind === 'b') {
+    g.beginPath(); g.moveTo(32, 5); g.bezierCurveTo(52, 26, 54, 42, 44, 54); g.bezierCurveTo(38, 60, 26, 60, 20, 54); g.bezierCurveTo(10, 44, 14, 30, 24, 24); g.bezierCurveTo(24, 34, 30, 36, 32, 30); g.bezierCurveTo(34, 20, 30, 12, 32, 5); g.closePath();
+    g.lineWidth = 5; g.strokeStyle = '#000'; g.stroke(); g.fillStyle = '#ff7a1a'; g.fill(); g.beginPath(); g.arc(32, 46, 8, 0, 7); g.fillStyle = '#ffd23a'; g.fill();
   } else if (kind === 'g') {
     g.beginPath(); g.arc(32, 28, 18, 0, 7); g.lineWidth = 5; g.strokeStyle = '#000'; g.stroke(); g.fillStyle = '#f4f4ee'; g.fill(); g.fillRect(24, 40, 7, 16); g.fillRect(38, 40, 6, 11);
   } else {
@@ -173,6 +176,15 @@ function statusIconTexture(kind) {
     g.strokeText('!!', 32, 34); g.fillText('!!', 32, 34);
   }
   return new THREE.CanvasTexture(c);
+}
+// An animal's death: roll 90 degrees about its long (z) axis onto its side. The body centre stays over the spot it died on, drops from standing height (QUAD_C) to half its body
+// width (QUAD_W) above the floor so it neither floats nor sinks; the sideways shift is computed once the fall ends and reused (no trig per frame after that).
+const QUAD_C = 0.6, QUAD_W = 0.25, QUAD_LEG = 0.65;   // model units (x scaleK): body centre height, torso half width, how far the legs reach sideways
+function deadQuadPose(e, m, k) {
+  const S = e.scaleK, th = e.deadSide * (k * k * (3 - 2 * k)) * Math.PI / 2, c = QUAD_C * S;
+  m.rotation.x = 0; m.rotation.z = th; m.position.y = c + (QUAD_W * S - c) * k - c * Math.cos(th);
+  if (k < 1 || e.deadOx === undefined) { const a = c * Math.sin(th), cy = Math.cos(e.yaw), sy = Math.sin(e.yaw); if (k < 1) { m.position.x = e.x + a * cy; m.position.z = e.z - a * sy; return; } e.deadOx = a * cy; e.deadOz = -a * sy; }
+  m.position.x = e.x + e.deadOx; m.position.z = e.z + e.deadOz;
 }
 let ICONS = null;
 
@@ -248,9 +260,9 @@ class Enemy {
     this.yaw = (spec.seed % 628) / 100;
     this.state = 'unaware'; this.aware = 0;
     this.last = null; this.path = []; this.pk = ''; this.rp = 0; this.smT = 0;
-    this.wait = spec.pause || 0; this.lookT = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0; this.slideSide = 1;
+    this.wait = spec.pause || 0; this.lookT = 0; this.lookBase = 0; this.lostT = 0; this.atkCd = 0; this.walkT = 0; this.stuckT = 0; this.slideSide = 1;
     this.seen = false;
-    this.st = new Statuses();           // slow, cripple, bleed, stun (js/status.js)
+    this.st = new Statuses(); this.st.burnMul = this.boss ? STATUS.burn.bossMul : 1;           // slow, cripple, bleed, stun (js/status.js)
     this.healCd = 3; this.healFx = 0; this.cast = null; this.castTarget = null;   // shaman: heals wounded allies
     this.fleeT = 0; this.fleeTo = null; this.stolen = false; this.loot = 0;   // thieves
     this.fgoal = -1; this.fre = 0; this.cower = false; this.escaped = false;   // sack thief (fleer): index of its flee spot, seconds to the next think, cornered, gone down the stairs
@@ -270,12 +282,12 @@ class Enemy {
     this.bossDmg = this.final ? TUNE.finalBossDmg : 1 + TUNE.stageBossDmg * sg;
     this.hp = this.maxHp = this.boss ? TUNE.bossHp * this.def.hpMul * (this.final ? TUNE.finalBossHp : 1 + TUNE.stageBossHp * sg) : TUNE.enemyHp * this.T.hpMul * (1 + TUNE.floorHpScale * fl) * (1 + TUNE.stageHpScale * sg); this.stun = 0; this.hitT = 0;
     this.winding = false; this.windT = 0; this.zone = 'body';
-    this.dead = false; this.deadT = 0;
+    this.dead = false; this.deadT = 0; this.deadSide = 1; this.deadOx = undefined;
     this.build();
   }
 
   build() {
-    if (!ICONS) { ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a'), z: statusIconTexture('z'), x: statusIconTexture('x'), f: statusIconTexture('f'), g: statusIconTexture('g'), r: statusIconTexture('r') }; for (const k in ICONS) ICONS[k].userData = { shared: true }; }
+    if (!ICONS) { ICONS = { q: iconTexture('?', '#ffd23a'), s: iconTexture('?', '#ff8a2a'), a: iconTexture('!', '#ff3a3a'), z: statusIconTexture('z'), x: statusIconTexture('x'), f: statusIconTexture('f'), g: statusIconTexture('g'), b: statusIconTexture('b'), r: statusIconTexture('r') }; for (const k in ICONS) ICONS[k].userData = { shared: true }; }
     // Every guard rolls its own look from its seed: skin and cloth colours, size, headgear
     // (iron helmet, hood or bare with a tuft), a vest, shoulder pads, a sack, and a club or cleaver.
     const rg = makeRng(this.seed || 1);
@@ -698,7 +710,7 @@ class Enemy {
     if (!colBlocked(this.floor, this.x, nz)) this.z = nz;
     if (step > 0.005 && Math.hypot(this.x - ox, this.z - oz) < step * 0.3) glideRound(this, this.floor, nx, nz, ux, uz, step);   // blocked head-on by a round prop: slide along it instead of stopping
     if (step > 0.005 && Math.hypot(this.x - ox, this.z - oz) < step * 0.3) this.stuckT += dt; else this.stuckT = Math.max(0, this.stuckT - dt * 2);
-    this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurn * dt);
+    this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt); this.lookT = 0;
     this.walkT += step * 5;
     return Math.hypot(tx - this.x, tz - this.z);
   }
@@ -715,12 +727,16 @@ class Enemy {
 
   updateBoss(dt, player, noise, dist, los) { return bossUpdate(this, dt, player, noise, dist, los); }
 
-  lookAround(dt) { this.lookT += dt; this.yaw += Math.cos(this.lookT * 2.2) * 1.4 * dt; }
+  lookAround(dt, k = 1) { if (this.lookT === 0) this.lookBase = this.yaw; this.lookT += dt * k; this.yaw = turnToward(this.yaw, this.lookBase + Math.sin(this.lookT * 2.2) * 0.65, TUNE.enemyTurnAlert * dt); }   // a sweep of the head at the one guard turn rate
 
   set(state) { this.state = state; this.wait = 0; this.lookT = 0; this.rp = 0; if (state === 'alerted') { this.aware = 1; this.atkCd = 0.5; if (this.T.bomb && this.fuse < 0) this.fuse = BOMB.fuse; } }   // a bomb goblin lights up when it is alerted
 
   die() {
     if (this.tag) this.tag.visible = false;                                                           // a mini-boss's name tag goes with it
+    if (this.T.model === 'quad') {                                                                   // fall toward the side that has room: the legs end up on the +side
+      const s = (this.seed | 0) & 1 ? 1 : -1, L = QUAD_LEG * this.scaleK, cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+      this.deadSide = !colBlocked(this.floor, this.x + s * cy * L, this.z - s * sy * L) ? s : !colBlocked(this.floor, this.x - s * cy * L, this.z + s * sy * L) ? -s : s;
+    }
     this.dead = true; this.winding = false; this.chargeT = 0; this.chargeWind = 0; this.icon.visible = false; this.cone.visible = false;
     if (this.bs) { this.alt = 0; this.mv = null; bossTeleHide(); }                                 // its ground marks go with it
     if (this.T.onDeath === 'spores' && Enemy.burst) Enemy.burst(this);   // a spore puffer bursts
@@ -751,7 +767,9 @@ class Enemy {
   addStatus(n, dur) {
     if (n === 'stun' && (this.boss || this.T.noStagger)) return false;
     if (n === 'bleed' && this.T.resistBleed) return false;
+    if (n === 'freeze' && this.boss) n = 'slow', dur = STATUS.freeze.bossSlow;   // a boss is only slowed, never frozen
     const ok = this.st.apply(n, dur);
+    if (ok && n === 'freeze') this.winding = false;
     if (ok && n === 'stun') { this.stun = Math.max(this.stun, dur || STATUS.stun.dur); this.winding = false; }
     return ok;
   }
@@ -811,7 +829,7 @@ class Enemy {
       if (best >= 0 && cur > -1e9 && bs < cur + Q.keep) best = this.fgoal;               // keep the old goal unless the new one is clearly better
       this.fgoal = best; this.cower = best < 0;
     }
-    if (this.cower) this.yaw = turnToward(this.yaw, Math.atan2(-(player.x - this.x), -(player.z - this.z)), 5 * dt);
+    if (this.cower) this.yaw = turnToward(this.yaw, Math.atan2(-(player.x - this.x), -(player.z - this.z)), TUNE.enemyTurnAlert * dt);
     else { const g = F.fleeSpots[this.fgoal]; this.goTo((g.x + 0.5) * T, (g.y + 0.5) * T, this.chase, dt); }
     if (this.seen) this.lostT = 0;
     else if ((this.lostT += dt) > Q.giveUp) { this.aware = 0; this.last = null; this.fgoal = -1; this.cower = false; this.fre = 0; this.set('unaware'); }   // lost you: back to wandering
@@ -847,7 +865,7 @@ class Enemy {
     }
     if (this.seen && los && dist < R.min) {                                  // too close: back away, still facing you
       this.goTo(this.x - dx / dist * 4, this.z - dz / dist * 4, this.chase, dt);
-      this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurn * dt);
+      this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
     } else if (!this.seen || !los || dist > R.max) {
       if (this.goTo(this.last.x, this.last.z, this.chase, dt) < 0.8 && !this.seen) this.lostT += dt;
     } else this.yaw = turnToward(this.yaw, Math.atan2(-dx, -dz), TUNE.enemyTurnAlert * dt);
@@ -979,6 +997,7 @@ class Enemy {
     if (this.state !== 'alerted' && this.aware >= 1) this.set('alerted');
     if (this.state === 'alerted' && !this.shouted) { this.shouted = true; noise.emit(this.x, this.z, SHOUT_R * this.T.shout, this); }   // calls nearby guards
     if (this.state !== 'alerted') this.shouted = false;
+    if (this.st.t.freeze > 0) { this.winding = false; this.sync(dt); return null; }                              // frozen solid: no move, no swing
     if (this.stun > 0) { this.stun -= dt; this.winding = false; if (this.bs) bossStagger(this); this.sync(dt); return null; }
 
     if (this.foe) {                                                              // fighting the player's ally (set from js/quests.js on its think tick)
@@ -990,11 +1009,11 @@ class Enemy {
       case 'unaware': {
         if (this.aware >= 0.35 && this.last) { this.set('suspicious'); break; }
         if (hd) {                                   // a wolf trots after its handler, and just waits if the handler is gone
-          if (hd.dead) { this.lookAround(dt * 0.4); break; }
-          if (Math.hypot(hd.x - this.x, hd.z - this.z) > 2.6) this.goTo(hd.x + 1.1, hd.z + 0.8, TUNE.patrolSpeed * 1.6, dt); else this.lookAround(dt * 0.4);
+          if (hd.dead) { this.lookAround(dt, 0.4); break; }
+          if (Math.hypot(hd.x - this.x, hd.z - this.z) > 2.6) this.goTo(hd.x + 1.1, hd.z + 0.8, TUNE.patrolSpeed * 1.6, dt); else this.lookAround(dt, 0.4);
           break;
         }
-        if (this.wait > 0) { this.wait -= dt; this.lookAround(dt * 0.25); break; }
+        if (this.wait > 0) { this.wait -= dt; this.lookAround(dt, 0.25); break; }
         const p = this.route[this.ri];
         if (this.goTo(p.x, p.z, TUNE.patrolSpeed, dt) < 0.7) { this.ri = (this.ri + 1) % this.route.length; this.wait = gameRng() < TUNE.patrolRestChance ? TUNE.patrolRestMin + gameRng() * (TUNE.patrolRestMax - TUNE.patrolRestMin) : TUNE.patrolWaitMin + gameRng() * (TUNE.patrolWaitMax - TUNE.patrolWaitMin); }   // a guard stops at each waypoint (seeded random wait, sometimes a long rest)
         break;
@@ -1094,8 +1113,9 @@ class Enemy {
     this.altPrev = this.alt;
     this.shadow.visible = !this.dead && !this.T.mimic;                   // a chest casts no disc: that would give a mimic away
     if (this.dead && this.T.mimic) { this.lid.rotation.x = -1.0; if (!this.teeth.visible) this.showTeeth(); return; }   // the mimic stays put, lid hanging open
-    if (this.dead) {   // tip over backward, then stay down
+    if (this.dead) {   // tip over backward, then stay down (an animal collapses onto its side)
       const k = Math.min(1, this.deadT / 0.4);
+      if (this.T.model === 'quad') { deadQuadPose(this, m, k); return; }
       m.rotation.x = k * Math.PI / 2; m.position.y = k * 0.18;
       return;
     }
@@ -1146,7 +1166,7 @@ class Enemy {
     const fl = this.hitT > 0 ? 0xaa2010 : this.healFx > 0 ? 0x1a6a2a : this.rageT > 0 ? 0x701010 : warn ? 0xdd3a10 : this.st.tint();
     for (let i = 0; i < this.mats.length; i++) this.mats[i].emissive.setHex(fl || (this.baseEm ? this.baseEm[i] : 0));
 
-    const sk = this.dead ? null : this.sleepT > 0 ? 'z' : this.rageT > 0 ? 'r' : this.stun > 0 || this.st.has('stun') ? 'x' : this.st.has('stuck') ? 'g' : this.st.has('slow') ? 'f' : null;   // a status mark (wands, Rage) shows instead of the awareness mark
+    const sk = this.dead ? null : this.sleepT > 0 ? 'z' : this.rageT > 0 ? 'r' : this.stun > 0 || this.st.has('stun') ? 'x' : this.st.has('stuck') ? 'g' : this.st.has('freeze') ? 'f' : this.st.has('burn') ? 'b' : this.st.has('slow') ? 'f' : null;   // a status mark (wands, Rage) shows instead of the awareness mark
     const show = sk !== null || this.state !== 'unaware' || this.aware > 0.2;
     this.icon.visible = show;
     this.icon.material.depthTest = !!sk;                                                                      // a wand or Rage mark hides behind walls; the awareness marks (?, !) still show through them

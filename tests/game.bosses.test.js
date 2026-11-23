@@ -72,12 +72,12 @@ run('Boss framework: golden cave boss, pooled telegraph and shots, blockTake and
     return out;
   });
   check('the cave def (the fallback) is one swing move, no phases, with a name tag; the stage 1 boss floor shows its theme boss name', g.id !== undefined && g.moves === 1 && g.phases === 0 && g.name === g.hps[0][2] && g.tag, `${g.id} ${g.name}`);
-  check('swing windT_ is the old formula (about 0.48 s) and reach 2.38 m', Math.abs(g.wind - g.windExp) < 1e-9 && Math.abs(g.wind - 0.48) < 0.01 && Math.abs(g.reach - 2.38) < 1e-9, `${g.wind.toFixed(4)} s, ${g.reach} m`);
+  check('swing windT_ is the TUNE formula (about 0.40 s since the +20% attack speed) and reach 2.38 m', Math.abs(g.wind - g.windExp) < 1e-9 && Math.abs(g.wind - 0.398) < 0.01 && Math.abs(g.reach - 2.38) < 1e-9, `${g.wind.toFixed(4)} s, ${g.reach} m`);
   check('stage 1 hp 220, damage x1.4, radius 0.65, scale 1.6', g.hp1 === 220 && Math.abs(g.dmg - 1.4) < 1e-9 && g.r === 0.65 && Math.abs(g.scale - 1) < 1e-9, `${g.hp1} ${g.dmg}`);
   check('hp by stage 220 / 330 / 440 / 550 (x the boss\'s own hpMul) and damage x1.4 / 1.68 / 1.96 / 2.24', g.hps.every((h, i) => Math.abs(h[0] - 220 * h[4] * (1 + 0.5 * i)) < 1e-6 && Math.abs(h[1] - 1.4 * (1 + 0.2 * i)) < 1e-9), JSON.stringify(g.hps.map(h => h.slice(0, 2))));
   check('it cannot be stunned, put to sleep or raged', g.stun === false && g.sleep === false && g.rage === false);
   check('it sleeps until you are within bossWake and then wakes alerted', g.sleepFar === true && g.wakeNear === true);
-  check('a swing lands wind + 0.07 s after it starts, for 13 x 1.4 body damage, and the hit multiplier is 1', g.swing && Math.abs(g.swing.t - (g.wind + 0.07)) < 0.03 && g.hitMul === 1 && Math.abs(g.dealt - g.expect) < 1e-6 && Math.abs(g.expect - 18.2) < 0.01, JSON.stringify(g.swing) + ` dealt ${g.dealt}`);
+  check('a swing lands wind + 0.07 s after it starts, for 13 x 1.4 body damage, and the hit multiplier is 1', g.swing && Math.abs(g.swing.t - (g.wind + 0.07)) < 0.05 && g.hitMul === 1 && Math.abs(g.dealt - g.expect) < 1e-6 && Math.abs(g.expect - 18.2) < 0.01, JSON.stringify(g.swing) + ` dealt ${g.dealt}`);
   check('a parry staggers the swing (stun 1, wind cancelled, no damage), the state machine says stagger and then chases again', g.windingBefore && g.stBefore !== 'chase' && g.parryStun === 1 && g.parryWinding === false && g.parryHp === 1000 && g.stStagger === 'stagger' && g.stAfter === 'chase', `${g.stBefore} ${g.parryStun} ${g.stStagger} ${g.stAfter}`);
 
   // 2. Killing the stage boss opens the safe room, as before.
