@@ -72,7 +72,7 @@ run('Performance, round props and chest grades', async ({ open, check }) => {
     const P = game.player, f = game.floor, en = game.enemies;
     const far = en.map(e => ({ e, d: Math.hypot(e.x - P.x, e.z - P.z) })).sort((a, b) => b.d - a.d)[0];
     updateCulling(P, cullChunks, propObjs, en);
-    const farHidden = far.d > PERF.cull ? !far.e.mesh.visible : null, nearShown = en.filter(e => Math.hypot(e.x - P.x, e.z - P.z) < PERF.cull - 3).every(e => e.mesh.visible);
+    const farHidden = far.d > cullRadius() ? !far.e.mesh.visible : null, nearShown = en.filter(e => Math.hypot(e.x - P.x, e.z - P.z) < cullRadius() - 3).every(e => e.mesh.visible);
     const visibleChunks = cullChunks.filter(c => c.group.visible).length;
     P.x = far.e.x + 2; P.z = far.e.z; updateCulling(P, cullChunks, propObjs, en);
     return { farD: far.d, farHidden, nearShown, visibleChunks, total: cullChunks.length, shownAgain: far.e.mesh.visible };

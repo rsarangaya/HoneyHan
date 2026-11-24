@@ -109,9 +109,15 @@ function bakeMeshes(root, skip, ctx) {
   for (const b of buckets.values()) root.add(new THREE.Mesh(mergeItems(b.items, b.n), b.material));
 }
 
+// How far anything can still be seen: the quality level's distance, cut to where the fog (FogExp2: alpha 1 - exp(-(d * density)^2)) is over 99% so a dense theme draws less. A boss arena always draws out to PERF.arena.
+function cullRadius() {
+  if (PERF.floorBoss) return Math.max(PERF.cull, PERF.arena);
+  const f = typeof scene !== 'undefined' && scene.fog;
+  return f && f.density > 0 ? Math.min(PERF.cull, 2.2 / f.density) : PERF.cull;
+}
 // Hide what is past the fog. chunks: from mergeStatic. Called every few frames and on arrival.
 function updateCulling(player, chunks, props, enemies) {
-  const px = player.x, pz = player.z, R = PERF.floorBoss ? Math.max(PERF.cull, PERF.arena) : PERF.cull, R2 = R * R, RC = (R + PERF.chunk * 0.71) ** 2;   // a boss floor (one big arena) always draws out to PERF.arena metres, and a boss itself is never culled
+  const px = player.x, pz = player.z, R = cullRadius(), R2 = R * R, RC = (R + PERF.chunk * 0.71) ** 2;   // a boss floor (one big arena) always draws out to PERF.arena metres, and a boss itself is never culled
   for (const c of chunks) { const dx = c.x - px, dz = c.z - pz; c.group.visible = dx * dx + dz * dz < RC; }
   for (const o of props) { if (o.mesh && !o.gone) { const dx = o.x - px, dz = o.z - pz; o.mesh.visible = dx * dx + dz * dz < R2; } }
   for (const e of enemies) { const dx = e.x - px, dz = e.z - pz; e.mesh.visible = e.boss || dx * dx + dz * dz < R2; }

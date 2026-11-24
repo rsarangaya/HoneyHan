@@ -74,7 +74,7 @@ function finishTexture(c, repeatX = 1, repeatY = 1) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  t.anisotropy = Math.min(2, renderer.capabilities.getMaxAnisotropy());
   t.repeat.set(repeatX, repeatY);
   return t;
 }
@@ -567,7 +567,7 @@ function buildFloor() {
   const floorTex = themeFloorTex();
   const fl = new THREE.Mesh(new THREE.ShapeGeometry(floorShape), themeTexture('floormat', () => new THREE.MeshPhongMaterial({ map: floorTex, shininess: 12, specular: 0x222222 })));
   fl.rotation.x = -Math.PI / 2;
-  const ceilMat = () => themeTexture('ceilmat', () => new THREE.MeshPhongMaterial({ map: themeCeilTex(), shininess: 2, specular: 0x050505 }));
+  const ceilMat = () => themeTexture('ceilmat', () => new THREE.MeshLambertMaterial({ map: themeCeilTex() }));
   group.add(fl);
   if (theme.sky) {   // open air: no ceiling plane, one unlit sky dome that follows the camera (frame loop; shared geometry, material and texture, never disposed per floor)
     const sky = new THREE.Mesh(themeTexture('skygeo', () => new THREE.SphereGeometry(60, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)),
