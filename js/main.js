@@ -1352,13 +1352,22 @@ function dropColor(d) {
   if (d.type === 'bust') return '#e8e0b0';
   try { return itemColor(d) || '#ffffff'; } catch (err) { return '#ffffff'; }
 }
+function dropInit() {
+  if (haloGeo) return;
+  haloGeo = new THREE.PlaneGeometry(1, 1); haloGeo.rotateX(-Math.PI / 2); haloGeo.userData = { shared: true };
+  dropMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); dropMat.userData = { shared: true };
+  haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }); haloMat.userData = { shared: true };
+}
+// The first drop on a run used to compile the instanced-colour shader programs in the middle of a fight (a visible hitch). warmGpu compiles them with two throwaway instances instead.
+let dropProbes = null;
+function dropWarm() {
+  dropInit();
+  if (!dropProbes) dropProbes = [dropMat, haloMat].map(m => { const p = new THREE.InstancedMesh(haloGeo, m, 1); p.count = 0; p.setColorAt(0, _dc.set(0xffffff)); return p; });
+  for (const p of dropProbes) scene.add(p);
+}
 function dropStore() {
   if (floor.items) return floor.items;
-  if (!haloGeo) {
-    haloGeo = new THREE.PlaneGeometry(1, 1); haloGeo.rotateX(-Math.PI / 2); haloGeo.userData = { shared: true };
-    dropMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); dropMat.userData = { shared: true };
-    haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }); haloMat.userData = { shared: true };
-  }
+  dropInit();
   const halo = new THREE.InstancedMesh(haloGeo, haloMat, DROPS.max);
   halo.count = 0; halo.frustumCulled = false; halo.renderOrder = 2; group.add(halo);
   return (floor.items = { list: [], halo, m: {} });                                // m: shape id -> { mesh, arr } (made on the first item of that shape)
@@ -2201,7 +2210,9 @@ function warmGpu() {
   for (const o of propObjs) if (o.mesh && !o.gone) o.mesh.visible = true;
   for (const e of enemies) e.mesh.visible = true;
   camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0);
-  renderer.compile(scene, camera); renderer.render(scene, camera);
+  dropWarm(); renderer.compile(scene, camera); renderer.render(scene, camera);
+  const lit = torch.visible; torch.visible = !lit; renderer.compile(scene, camera); torch.visible = lit;   // and the other lantern state, so the quality switch (lantern on/off) finds its programs ready instead of recompiling every material in one frame
+  for (const p of dropProbes) scene.remove(p);
   for (let i = 0; i < warmList.length; i++) warmList[i].frustumCulled = true;
   warmList.length = 0;
 }
