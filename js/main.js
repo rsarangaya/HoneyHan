@@ -245,7 +245,14 @@ const plankWallTexture = base => paintTex(base, 'plankwall', 256, (g, S, rng, co
 const wetWoodTexture = base => paintTex(base, 'wetwood', 256, (g, S, rng, col) => {
   g.fillStyle = shade(col, 0.4); g.fillRect(0, 0, S, S);
   for (let p = 0; p < 6; p++) for (let y = -rng() * 60; y < S;) { const len = 70 + rng() * 90; g.fillStyle = shade(col, 0.6 + rng() * 0.3); g.fillRect(p * 42.6 + 1.5, y + 1.5, 39.6, len - 3); y += len; }
-  for (let i = 0; i < 30; i++) blob(g, rng() * S, rng() * S, 8 + rng() * 22, 5 + rng() * 12, 'rgba(60,100,125,0.2)');   // wet sheen
+  for (let i = 0; i < 22; i++) {   // wet sheen: thin ragged streaks that run along the plank grain, with a bright core (not round blobs)
+    const x = rng() * S, y = rng() * S, w = 2 + rng() * 5, len = 24 + rng() * 60, wob = (rng() - 0.5) * 3;
+    g.beginPath(); g.moveTo(x, y);
+    for (let k = 1; k <= 5; k++) g.lineTo(x + w * (0.5 + 0.5 * Math.sin(k * 1.7 + i)) + wob * k / 5, y + len * k / 5);
+    for (let k = 5; k >= 0; k--) g.lineTo(x - w * (0.5 + 0.5 * Math.cos(k * 1.3 + i)) + wob * k / 5, y + len * k / 5);
+    g.closePath(); g.fillStyle = 'rgba(60,100,125,0.17)'; g.fill();
+    g.fillStyle = 'rgba(150,190,210,0.12)'; g.fillRect(x - 0.5, y + len * 0.1, 1, len * 0.7);
+  }
   speckle(g, S, 1400, rng);
 });
 // Orchard: a clipped hedge for the walls, short grass for the floor, a starry night for the sky.
@@ -1285,11 +1292,58 @@ function mimicCorpse(e) {
 }
 
 // ---- floor drops: each item is one instance of a shared gem (colour = the item's colour, shape = its kind) over a shared additive halo, so a floor costs 2 draw calls
-// whatever it holds. Per floor (floor.items = { list, gem, halo }, made on the first drop, freed with the floor's group). At most DROPS.cap live; past that the oldest
+// whatever it holds. Per floor (floor.items = { list, halo, m: shape id -> {mesh, arr} }, made on the first drop, freed with the floor's group). At most DROPS.cap live; past that the oldest
 // non-quest item goes first (a key, the thief's sack, a mini-boss, boss and mimic hoard are never evicted). Items have no timer: they wait for you. ----
 const DROPS = { cap: 60, max: 80, pick: 1.5, retry: 0.5, bodyT: 30, y: 0.26 };   // metres, seconds
-const DROP_SHAPE = { gold: [0.14, 0.05, 0.14], potion: [0.09, 0.17, 0.09], key: [0.06, 0.2, 0.06], weapon: [0.1, 0.22, 0.1], armor: [0.17, 0.15, 0.17], shield: [0.18, 0.18, 0.06] };
-let dropGeo = null, dropMat = null, haloGeo = null, haloMat = null;
+// Shapes: one merged low-poly geometry per category (built once, on first use, shared by every floor), one InstancedMesh per category on a floor made only when
+// an item of that category lies there (normally 2-4 draw calls plus the halo). The old gem is the fallback. Item colour tints the whole shape.
+const DROP_SHAPE = { gem: [0.12, 0.12, 0.12] };                                     // fallback gem scale
+const DROP_SCALE = { dagger: 0.75, spear: 1.6, arrows: 0.8, rage: 0.8, lockpick: 0.5, shield: 1.2, rechargewand: 0.9 };   // per-kind size on top of the shared shape
+const DROP_WEAPON = { dagger: 'blade', sword: 'blade', mace: 'mace', bow: 'bow', spear: 'stick' };
+function dropShape(d) {                                                            // item -> shape id (cheap; only on spawn)
+  switch (d.type) {
+    case 'gold': return 'coins';
+    case 'potion': return 'potion';
+    case 'food': return 'food';
+    case 'key': return 'key';
+    case 'wand': case 'rechargewand': case 'bust': return 'stick';
+    case 'weapon': return DROP_WEAPON[d.base] || 'blade';
+    case 'armor': return d.slot === 'helmet' ? 'helm' : 'plate';
+    case 'shield': return 'plate';
+    case 'lockpick': case 'rage': case 'arrows': return 'scroll';
+    default: return 'gem';
+  }
+}
+function dropScale(d) { return d.type === 'key' ? 1.5 : DROP_SCALE[d.type === 'weapon' ? d.base : d.type] || 1; }
+const _dg = { box: (w, h, d) => new THREE.BoxGeometry(w, h, d), cyl: (r, h, n) => new THREE.CylinderGeometry(r, r, h, n), oct: r => new THREE.OctahedronGeometry(r, 0) };
+function dropMerge(parts) {                                                        // parts: [geometry, x, y, z, rx, ry, rz] -> one position-only BufferGeometry
+  const pos = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+  for (const p of parts) {
+    const g = p[0].index ? p[0].toNonIndexed() : p[0];
+    m.compose(v.set(p[1], p[2], p[3]), q.setFromEuler(e.set(p[4] || 0, p[5] || 0, p[6] || 0)), one); g.applyMatrix4(m);
+    for (const x of g.attributes.position.array) pos.push(x);
+    g.dispose(); p[0].dispose();
+  }
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); out.userData = { shared: true };
+  return out;
+}
+const DH = Math.PI / 2;
+const DROP_BUILD = {                                                               // each shape lies flat, centred on the origin, <= 60 triangles
+  coins: () => [[_dg.cyl(0.12, 0.03, 5), 0, -0.04, 0], [_dg.cyl(0.12, 0.03, 5), 0.01, 0, 0.01, 0, 0.6], [_dg.cyl(0.09, 0.03, 5), -0.03, 0.04, 0, 0, 1.1]],
+  potion: () => [[_dg.cyl(0.08, 0.12, 6), 0, -0.04, 0], [_dg.cyl(0.03, 0.1, 5), 0, 0.07, 0], [_dg.box(0.05, 0.03, 0.05), 0, 0.14, 0]],
+  food: () => [[_dg.box(0.26, 0.1, 0.13), 0, -0.02, 0], [_dg.box(0.2, 0.06, 0.1), 0, 0.05, 0]],
+  key: () => [[_dg.cyl(0.06, 0.02, 6), -0.12, 0, 0, DH], [_dg.box(0.22, 0.025, 0.03), 0.02, 0, 0], [_dg.box(0.03, 0.025, 0.07), 0.1, 0, 0.04]],
+  scroll: () => [[_dg.cyl(0.05, 0.26, 6), 0, 0, 0, 0, 0, DH], [_dg.cyl(0.058, 0.04, 6), 0, 0, 0, 0, 0, DH]],
+  blade: () => [[_dg.box(0.26, 0.015, 0.07), 0.08, 0, 0], [_dg.box(0.03, 0.03, 0.15), -0.07, 0, 0], [_dg.cyl(0.02, 0.1, 5), -0.14, 0, 0, 0, 0, DH]],
+  mace: () => [[_dg.cyl(0.02, 0.3, 5), 0, 0, 0, 0, 0, DH], [_dg.oct(0.08), 0.15, 0, 0]],
+  stick: () => [[_dg.cyl(0.015, 0.34, 5), 0, 0, 0, 0, 0, DH], [_dg.oct(0.045), 0.19, 0, 0]],
+  bow: () => { const a = []; for (const t of [-0.75, -0.25, 0.25, 0.75]) a.push([_dg.box(0.02, 0.025, 0.16), -0.2 + 0.2 * Math.cos(t), 0, 0.2 * Math.sin(t), 0, -t]); return a; },
+  plate: () => [[_dg.box(0.2, 0.05, 0.22), 0, 0, 0], [_dg.box(0.12, 0.05, 0.1), 0, 0.05, 0], [_dg.box(0.06, 0.04, 0.26), 0, 0.01, 0]],
+  helm: () => [[_dg.oct(0.1), 0, 0.02, 0], [_dg.box(0.22, 0.02, 0.22), 0, -0.03, 0]],
+  gem: () => [[new THREE.OctahedronGeometry(1, 0), 0, 0, 0]],
+};
+const dropGeos = {};                                                               // shape id -> shared geometry (built lazily)
+let dropMat = null, haloGeo = null, haloMat = null;
 const _dc = new THREE.Color(), _dm = new THREE.Matrix4(), _dq = new THREE.Quaternion(), _dp = new THREE.Vector3(), _ds = new THREE.Vector3(), _dy = new THREE.Vector3(0, 1, 0);
 function dropColor(d) {
   if (d.type === 'gold') return '#ffd23a';
@@ -1300,31 +1354,40 @@ function dropColor(d) {
 }
 function dropStore() {
   if (floor.items) return floor.items;
-  if (!dropGeo) {
-    dropGeo = new THREE.OctahedronGeometry(1, 0); dropGeo.userData = { shared: true };
+  if (!haloGeo) {
     haloGeo = new THREE.PlaneGeometry(1, 1); haloGeo.rotateX(-Math.PI / 2); haloGeo.userData = { shared: true };
     dropMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); dropMat.userData = { shared: true };
     haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }); haloMat.userData = { shared: true };
   }
-  const gem = new THREE.InstancedMesh(dropGeo, dropMat, DROPS.max), halo = new THREE.InstancedMesh(haloGeo, haloMat, DROPS.max);
-  gem.count = halo.count = 0; gem.frustumCulled = halo.frustumCulled = false; halo.renderOrder = 2;
-  group.add(gem, halo);
-  return (floor.items = { list: [], gem, halo });
+  const halo = new THREE.InstancedMesh(haloGeo, haloMat, DROPS.max);
+  halo.count = 0; halo.frustumCulled = false; halo.renderOrder = 2; group.add(halo);
+  return (floor.items = { list: [], halo, m: {} });                                // m: shape id -> { mesh, arr } (made on the first item of that shape)
 }
-function dropSet(S, i) {                                                           // write instance i (matrix + colour) from its item; only on spawn / removal, never per frame
-  const it = S.list[i];
+function dropShapeMesh(S, id) {
+  let M = S.m[id]; if (M) return M;
+  let g = dropGeos[id]; if (!g) g = dropGeos[id] = dropMerge(DROP_BUILD[id]());
+  const mesh = new THREE.InstancedMesh(g, dropMat, DROPS.max); mesh.count = 0; mesh.frustumCulled = false; group.add(mesh);
+  return (S.m[id] = { mesh, arr: [] });
+}
+function dropPlace(S, it) {                                                        // write the shape instance (matrix + colour) for an item; only on spawn / removal, never per frame
+  const mesh = S.m[it.sh].mesh;
   _dc.set(it.col); _dq.setFromAxisAngle(_dy, it.yaw); _dp.set(it.x, DROPS.y, it.z); _ds.set(it.sx, it.sy, it.sz);
-  _dm.compose(_dp, _dq, _ds); S.gem.setMatrixAt(i, _dm); S.gem.setColorAt(i, _dc);
-  _dp.y = 0.03; _ds.set(0.9, 1, 0.9); _dq.identity(); _dm.compose(_dp, _dq, _ds); S.halo.setMatrixAt(i, _dm); S.halo.setColorAt(i, _dc);
-  S.gem.instanceMatrix.needsUpdate = S.halo.instanceMatrix.needsUpdate = S.gem.instanceColor.needsUpdate = S.halo.instanceColor.needsUpdate = true;
+  _dm.compose(_dp, _dq, _ds); mesh.setMatrixAt(it.slot, _dm); mesh.setColorAt(it.slot, _dc);
+  mesh.instanceMatrix.needsUpdate = mesh.instanceColor.needsUpdate = true;
 }
-function dropRemove(S, i) {                                                        // swap-remove: the last item takes slot i
-  const L = S.list, last = L.length - 1;
+function dropSet(S, i) {                                                           // halo instance i from list item i
+  const it = S.list[i], h = S.halo;
+  _dc.set(it.col); _dp.set(it.x, 0.03, it.z); _ds.set(it.hs, 1, it.hs); _dq.identity(); _dm.compose(_dp, _dq, _ds); h.setMatrixAt(i, _dm); h.setColorAt(i, _dc);
+  h.instanceMatrix.needsUpdate = h.instanceColor.needsUpdate = true;
+}
+function dropRemove(S, i) {                                                        // swap-remove from the list (and halo), and from the item's shape mesh
+  const L = S.list, last = L.length - 1, it = L[i], M = S.m[it.sh], a = M.arr, sl = a.length - 1;
+  if (it.slot !== sl) { const o = a[sl]; a[it.slot] = o; o.slot = it.slot; dropPlace(S, o); }
+  a.pop(); M.mesh.count = a.length; M.mesh.instanceMatrix.needsUpdate = true;
   if (i !== last) { L[i] = L[last]; dropSet(S, i); }
-  L.pop(); S.gem.count = S.halo.count = L.length;
-  S.gem.instanceMatrix.needsUpdate = S.halo.instanceMatrix.needsUpdate = true;
+  L.pop(); S.halo.count = L.length; S.halo.instanceMatrix.needsUpdate = true;
 }
-function dropClear() { const S = floor.items; if (S) { S.list.length = 0; S.gem.count = S.halo.count = 0; } }
+function dropClear() { const S = floor.items; if (S) { S.list.length = 0; S.halo.count = 0; for (const id in S.m) { S.m[id].arr.length = 0; S.m[id].mesh.count = 0; } } }
 function dropSpawn(d, x, z, quest, rng) {
   const S = dropStore(), L = S.list;
   if (L.length >= DROPS.cap) { let k = L.findIndex(q => !q.q); if (k < 0 && L.length >= DROPS.max) k = 0; if (k >= 0) dropRemove(S, k); }   // (the oldest non-quest item goes; swap-remove, so the order is only roughly oldest-first)
@@ -1333,9 +1396,10 @@ function dropSpawn(d, x, z, quest, rng) {
     const a = rng() * 6.2832, r = 0.25 + rng() * 0.55, tx = x + Math.cos(a) * r, tz = z + Math.sin(a) * r, ti = Math.floor(tz / TILE) * floor.w + Math.floor(tx / TILE);
     if (floor.tiles[ti] === T_FLOOR && !floor.blocked[ti]) { px = tx; pz = tz; break; }
   }
-  const sh = DROP_SHAPE[d.type] || [0.12, 0.12, 0.12];
-  L.push({ d, x: px, z: pz, q: quest || d.type === 'key', col: dropColor(d), yaw: rng() * 6.2832, sx: sh[0], sy: sh[1], sz: sh[2], fail: false, cd: 0 });
-  const i = L.length - 1; S.gem.count = S.halo.count = L.length; dropSet(S, i);
+  const id = dropShape(d), M = dropShapeMesh(S, id), sc = id === 'gem' ? DROP_SHAPE.gem : null, k = dropScale(d), isKey = d.type === 'key';
+  const it = { d, x: px, z: pz, q: quest || isKey, col: dropColor(d), yaw: rng() * 6.2832, sh: id, slot: M.arr.length, sx: sc ? sc[0] : k, sy: sc ? sc[1] : k, sz: sc ? sc[2] : k, hs: isKey ? 1.5 : 0.9, fail: false, cd: 0 };
+  L.push(it); M.arr.push(it); M.mesh.count = M.arr.length; S.halo.count = L.length;
+  dropPlace(S, it); dropSet(S, L.length - 1);
 }
 function dropAll(list, e, quest) {
   const rng = makeRng((e.seed ^ 0xd209) >>> 0);
