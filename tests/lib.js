@@ -72,18 +72,41 @@ async function run(title, body, opts = {}) {   // opts.args: extra Chromium flag
   const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', ...(opts.args || [])] });
   const errors = [];
   // A fresh page on the given seed, started and with the helpers installed. 320 x 180 keeps software rendering playable.
-  const open = async seed => {
+  const open = async (seed, { start = true } = {}) => {       // start: false leaves the page on the welcome screen (the co-op lobby)
     const page = await browser.newPage({ viewport: { width: 320, height: 180 } });
     page.on('pageerror', e => errors.push(`seed ${seed}: ${e.message}`));
     await page.goto(`${base}?seed=${seed}&norender=1`);
     await page.waitForFunction(() => window.game && game.floor);
-    await page.click('#overlay', { position: { x: 5, y: 5 } });           // start the run (pointer lock is refused headless; play goes on)
-    await page.waitForFunction(() => game.state === 'play');
+    if (start) {
+      await page.click('#overlay', { position: { x: 5, y: 5 } });         // start the run (pointer lock is refused headless; play goes on)
+      await page.waitForFunction(() => game.state === 'play');
+    }
     await page.evaluate(HELPERS);
     return page;
   };
+  // Co-op: connect two pages on the welcome screen through the copy-paste codes (host's invite, guest's answer).
+  const link = async (host, guest) => {
+    const invite = await host.evaluate(() => coop.hostInvite());
+    const answer = await guest.evaluate(c => coop.join(c), invite);
+    await host.evaluate(c => coop.hostConnect(c), answer);
+    const up = () => T.until(() => coop.on && coopS.ready, 20000);
+    return { invite, answer, ok: (await host.evaluate(up)) && (await guest.evaluate(up)) };
+  };
+  // The host presses Start in the lobby: both begin floor 1.
+  const startBoth = async (host, guest) => {
+    await host.evaluate(() => coopMenu.open());
+    await host.click('[data-a="start"]');
+    await host.waitForFunction(() => game.state === 'play');
+    await guest.waitForFunction(() => game.state === 'play');
+  };
+  const pair = async (s1, s2) => {
+    const host = await open(s1, { start: false }), guest = await open(s2, { start: false });
+    const c = await link(host, guest);
+    if (c.ok) await startBoth(host, guest);
+    return { host, guest, ...c };
+  };
   try {
-    await body({ open, check });
+    await body({ open, check, link, startBoth, pair });
     check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   } finally {
     await browser.close();

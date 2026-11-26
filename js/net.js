@@ -6,7 +6,7 @@ const coop = { on: false, host: false, guest: false, down: false };
 const Net = (() => {
   const STUN = [{ urls: 'stun:stun.l.google.com:19302' }];
   const STATES = ['unaware', 'suspicious', 'alerted', 'searching'];
-  const F = { CROUCH: 1, SPRINT: 2, ATTACK: 4, DOWN: 8, BLOCK: 16 };                         // player flag bits
+  const F = { CROUCH: 1, SPRINT: 2, ATTACK: 4, DOWN: 8, BLOCK: 16, DASH: 32, DRAW: 64, ZAP: 128 };                         // player flag bits
   const E = { DEAD: 4, STUN: 8, WIND: 16, SEEN: 32, DORM: 64, SLEEP: 128 };                  // enemy flag bits (low 2 bits: state index)
   const BOSS_ST = ['idle', 'chase', 'telegraph', 'attack', 'recover', 'phase', 'chain', 'spin', 'sweep', 'special', 'stagger'], BOSS_LEN = 33, T_BOSS = 3;
   const SNAP_MAX = 60, T_PLAYER = 1, T_SNAP = 2, HB_TIMEOUT = 12000;   // ms of silence before the partner counts as gone
@@ -133,6 +133,10 @@ const Net = (() => {
     o.dx = d.getInt8(22) / 127; o.dz = d.getInt8(23) / 127; o.dl = d.getUint16(24) / 100; o.exp = d.getUint16(26) / 1000; o.expMul = d.getUint8(28) / 50; o.lowT = d.getUint8(29) / 50; o.phase = d.getUint8(30); o.stun = d.getUint8(31) / 50;
     return o;
   }
+  // The partner's recruited ally (9 bytes): type, floor, x u16 (cm), z u16 (cm), yaw u8, flags (1 dead, 2 winding), pad
+  const T_ALLY = 4;
+  function packAlly(floorKey, x, z, yaw, flags) { dv.setUint8(0, T_ALLY); dv.setUint8(1, floorKey); dv.setUint16(2, q16(x, 100)); dv.setUint16(4, q16(z, 100)); dv.setUint8(6, Math.round(wrapYaw(yaw) / TAU * 255) & 255); dv.setUint8(7, flags); dv.setUint8(8, 0); return 9; }
+  function unpackAlly(d, o) { o.floor = d.getUint8(1); o.x = d.getUint16(2) / 100; o.z = d.getUint16(4) / 100; o.yaw = d.getUint8(6) / 255 * TAU; o.flags = d.getUint8(7); return o; }
   const kindOf = d => d.byteLength ? d.getUint8(0) : 0;
 
   // ---- interpolation: two samples per thing, drawn 100 ms in the past. No arrays, no allocation per snapshot. ----
@@ -226,9 +230,10 @@ const Net = (() => {
   }
   // A reliable message -> a fresh object holding only checked fields, or null. role: who SENT it. A message the sender's role may not send is dropped.
   const FROM = {
-    host: ['hello', 'eh', 'sp', 'ln', 'fl', 'cl', 'sm', 'ff', 'ed', 'xp', 'bd', 'dr', 'dy', 'dg', 'op', 'sg', 'bl', 'go', 'dn', 'rv', 'end'],
+    host: ['hello', 'start', 'eh', 'sp', 'ln', 'fl', 'cl', 'sm', 'ff', 'ed', 'es', 'xp', 'bd', 'dr', 'dy', 'dg', 'op', 'ps', 'mv', 'gt', 'sg', 'bl', 'go', 'sa', 'dn', 'rv', 'end'],
     guest: ['ready', 'hit', 'pa', 'wz', 'rg', 'ff', 'dc', 'du', 'op', 'se', 'sr', 'mw', 'sa', 'dn', 'rv', 'end'],
   };
+  for (const r in FROM) FROM[r].push('pr', 'as', 'ag', 'fx', 'bt', 'lk', 'al', 'rp');        // what each player does that the other only has to see
   function cleanMsg(m, role, T) {
     if (!m || typeof m !== 'object' || !FROM[role].includes(m.k)) return null;
     const o = { k: m.k };
@@ -260,7 +265,25 @@ const Net = (() => {
       case 'cl': return fk() && pos() && put('r', num(m.r, 0, 10)) && put('dur', num(m.dur, 0, 30)) && put('daze', num(m.daze, 0, 10)) ? o : null;
       case 'sm': return nid() && fk() && pos() && own(T.ENEMY_TYPES, m.type) && put('bn', int(m.bn, 0, 65535)) && put('seed', int(m.seed, 0, 4294967295)) ? (o.type = m.type, o) : null;
       case 'ff': return zone() && put('d', num(m.d, 0, 500)) ? o : null;
-      case 'ed': return nid() ? o : null;
+      case 'ed': if (!nid()) return null; o.g = m.g ? 1 : 0; return o;
+      case 'es': return nid() && fk() && put('m', int(m.m, 0, 32767)) ? o : null;       // an enemy's statuses, alertness and attack zone
+      case 'pr':                                                                         // the partner's arrow or wand bolt (looks only)
+        if (!(fk() && pos() && put('y', num(m.y, 0, 40)) && put('vx', num(m.vx, -80, 80)) && put('vy', num(m.vy, -80, 80)) && put('vz', num(m.vz, -80, 80)))) return null;
+        if (m.w !== undefined) { if (!own(T.WANDS, m.w)) return null; o.w = m.w; }
+        return o;
+      case 'as': return fk() && id() && pos() && put('yaw', num(m.yaw, -10, 10)) ? o : null;
+      case 'ag': return fk() && id() ? o : null;
+      case 'fx':                                                                         // 0 wand impact, 1 shock ring, 2 trap gas
+        if (!(fk() && put('t', int(m.t, 0, 2)) && pos() && put('y', num(m.y, 0, 40)) && put('r', num(m.r, 0, 20)))) return null;
+        if (o.t < 2) { if (!(m.w === 'rage' && o.t === 1) && !own(T.WANDS, m.w)) return null; o.w = m.w; }
+        return o;
+      case 'ps': return fk() && idx() ? o : null;
+      case 'bt': if (!(fk() && idx())) return null; o.r = m.r ? 1 : 0; return o;
+      case 'mv': return fk() && idx() && put('s', int(m.s, 0, 1)) ? o : null;
+      case 'gt': return put('t', num(m.t, 0, 1e7)) ? o : null;
+      case 'lk': if (!own(T.WEAPON_NAMES, m.w) || !(put('t', int(m.t, 0, 4)) && put('s', int(m.s, -1, 4)))) return null; o.w = m.w; o.l = m.l ? 1 : 0; return o;
+      case 'al': return fk() ? o : null;
+      case 'rp': o.v = m.v ? 1 : 0; return o;
       case 'bl': return nid() && pos() ? o : null;
       case 'xp': if (!put('b', num(m.b, 0, 5000))) return null; o.ex = m.ex ? 1 : 0; return o;
       case 'bd': o.f = m.f ? 1 : 0; return o;
@@ -282,12 +305,13 @@ const Net = (() => {
       case 'mw': return fk() && idx() ? o : null;
       case 'go': return fk() ? o : null;
       case 'sa': o.v = m.v ? 1 : 0; return o;
-      default: return o;                                                                   // ready, rg, dn, rv, end: no fields
+      default: return o;                                                                   // ready, start, rg, dn, rv, end: no fields
     }
   }
   // An unreliable packet: long enough for what it claims, and (player) finite, on-the-map coordinates.
   function packetOk(d) {
     if (d.byteLength >= 19 && d.getUint8(0) === T_PLAYER) { const x = d.getFloat32(1), z = d.getFloat32(5); return x >= 0 && x <= 655 && z >= 0 && z <= 655; }   // (NaN fails every comparison)
+    if (d.byteLength === 9 && d.getUint8(0) === T_ALLY) return true;                      // (u16 coordinates: always finite and on the map)
     if (d.byteLength >= BOSS_LEN && d.getUint8(0) === T_BOSS) return d.getUint8(8) < BOSS_ST.length && d.getUint8(10) < 3;
     if (d.byteLength >= 5 && d.getUint8(0) === T_SNAP) { const n = d.getUint8(4); return n <= SNAP_MAX && d.byteLength >= 5 + n * 9; }
     return false;
@@ -318,7 +342,7 @@ const Net = (() => {
       if (ch.readyState === 'open') this._chOpen(); else ch.onopen = () => this._chOpen();
     }
     _chOpen() {
-      if (this.open || !this.rel || !this.unrel || this.rel.readyState !== 'open' || this.unrel.readyState !== 'open') return;
+      if (this.closed || this.open || !this.rel || !this.unrel || this.rel.readyState !== 'open' || this.unrel.readyState !== 'open') return;
       this.open = true; this.lastRx = performance.now(); this.hbT = 0;
       this.timer = setInterval(() => { if (!this.open) return; if (performance.now() - this.lastRx > HB_TIMEOUT) this._lost('Your partner stopped responding.'); else if ((this.hbT += 1) % 2 === 0) this.send({ k: 'pg' }); }, 1000);
       this.h.onStatus('Connected.'); this.h.onOpen();
@@ -371,6 +395,6 @@ const Net = (() => {
     }
   }
 
-  return { Link, STUN, STATES, F, E, SNAP_MAX, T_PLAYER, T_SNAP, compactSdp, expandSdp, encodeCode, decodeCode, packPlayer, unpackPlayer, snapBegin, snapAdd, snapEnd, snapHead, snapAt, sendView, kindOf, Track, angDiff, ffDamage, xpInRange, meleeOk, ClaimBook, Revive, StairGate, cleanDrop, cleanMsg, packetOk, sdpOk, BOSS_ST, BOSS_LEN, T_BOSS, ZONES, packBoss, unpackBoss };
+  return { Link, STUN, STATES, F, E, SNAP_MAX, T_PLAYER, T_SNAP, compactSdp, expandSdp, encodeCode, decodeCode, packPlayer, unpackPlayer, snapBegin, snapAdd, snapEnd, snapHead, snapAt, sendView, kindOf, Track, angDiff, ffDamage, xpInRange, meleeOk, ClaimBook, Revive, StairGate, cleanDrop, cleanMsg, packetOk, sdpOk, BOSS_ST, BOSS_LEN, T_BOSS, ZONES, packBoss, unpackBoss, T_ALLY, packAlly, unpackAlly };
 })();
 if (typeof module !== 'undefined') module.exports = { Net, coop };

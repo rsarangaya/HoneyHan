@@ -193,7 +193,7 @@ function allyTalk(A) {
     A.recruited = true; A.mode = 'follow'; A.ptile = -1; A.think = 0;
     const i = A.f.solids.indexOf(A.sol); if (i >= 0) A.f.solids.splice(i, 1);
     A.dist = new Int32Array(A.f.w * A.f.h);                                                  // the follow path's distance field: one buffer per floor it walks
-    Enemy.ally = A.e; discover('quest:ally', 'Ally recruit');
+    Enemy.ally = A.e; discover('quest:ally', 'Ally recruit'); if (coop.on) coop.recruited();
     flash(`"Thank you. I will fight beside you." The ${A.name} joins you (hold E on it to make it wait).`); addLog(`The ${A.name} joined you.`, '#7ad8ff');
     return;
   }

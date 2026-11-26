@@ -391,7 +391,7 @@ class Enemy {
       box(0.19, 0.1, 0.2, leather, 0, -0.5, 0, g);                                                // wristband
       up.add(g); return g;
     });
-    if (rg() < 0.3 || this.T.shield) { const sh = box(0.06, 0.46, 0.46, leather, -0.14, -0.4, -0.14, this.arms[0]); box(0.07, 0.1, 0.1, metal, -0.17, -0.4, -0.14, this.arms[0]); sh.rotation.x = 0; }   // small shield
+    if ((rg() < 0.3 || this.T.shield) && !this.spec.noArms) { const sh = box(0.06, 0.46, 0.46, leather, -0.14, -0.4, -0.14, this.arms[0]); box(0.07, 0.1, 0.1, metal, -0.17, -0.4, -0.14, this.arms[0]); sh.rotation.x = 0; }   // small shield
     // weapon in the right hand: a knobbed club or a chipped cleaver
     const wpn = new THREE.Group(); wpn.position.set(0, -0.62, -0.04);
     const blade = lam(weapon.tier >= 2 ? TIERS[weapon.tier].color : 0x8a8e96);
@@ -417,7 +417,7 @@ class Enemy {
       box(0.14, 0.04, 0.06, metal, 0, -0.2, 0, wpn);
       box(0.04, 0.3, 0.1, blade, 0, -0.38, -0.04, wpn);                                           // short dagger blade
     }
-    this.arms[1].add(wpn);
+    if (!this.spec.noArms) this.arms[1].add(wpn);                                 // noArms: the co-op avatar holds the partner's real weapon instead (js/coop.js)
     // type dressing: what makes a cook, a bandit or a bouncer look like one
     if (this.type === 'cook') {
       part(0.5, 0.62, 0.05, lam(0xf2efe6), 0, 0.35, -0.2); part(0.36, 0.3, 0.36, lam(0xf2efe6), 0, 1.2, 0); part(0.4, 0.06, 0.4, lam(0xf2efe6), 0, 1.04, 0);   // apron and chef's hat

@@ -2,21 +2,21 @@
 // node tests/game.coop.test.js
 const { run } = require('./lib');
 
-// Connect two pages: the host's invite code to the guest, the guest's answer code back.
-async function connect(host, guest) {
-  const invite = await host.evaluate(() => coop.hostInvite());
-  const answer = await guest.evaluate(c => coop.join(c), invite);
-  await host.evaluate(c => coop.hostConnect(c), answer);
-  const up = () => T.until(() => coop.on && coopS.ready, 20000);
-  return { invite, answer, ok: (await host.evaluate(up)) && (await guest.evaluate(up)) };
-}
 const signature = () => JSON.stringify([stage, floorNum, floor.w, floor.h, floor.start, floor.stairs, theme.name, floor.tiles.reduce((s, t, i) => (s * 31 + t + i) % 1000003, 7), enemies.map(e => [e.nid, e.type, Math.round(e.maxHp)])]);
 
-run('co-op', async ({ open, check }) => {
+run('co-op', async ({ open, check, link, startBoth, pair }) => {
   let at0;
-  const host = await open(4242), guest = await open(999);
-  const c = await connect(host, guest);
+  const host = await open(4242, { start: false }), guest = await open(999, { start: false });
+  const c = await link(host, guest);
   check('two pages connect through the copy-paste codes', c.ok);
+  await guest.evaluate(() => coopMenu.hide()); await guest.click('#overlay', { position: { x: 5, y: 5 } });
+  check('the guest cannot start the run: it waits in the lobby', await guest.evaluate(() => state === 'menu' && !session.started && coopMenu && coop.on));
+  await host.evaluate(() => coopMenu.hide()); await host.click('#overlay', { position: { x: 5, y: 5 } });
+  check('nor can a click behind the lobby start the host', await host.evaluate(() => state === 'menu' && !session.started));
+  await startBoth(host, guest);
+  check('the host presses Start and both begin floor 1 together', await host.evaluate(() => state === 'play' && floorNum === 1 && stage === 1) && await guest.evaluate(() => state === 'play' && floorNum === 1 && stage === 1));
+  const refused = () => Promise.all([coop.hostInvite(), coop.join('HH1opAAAA'), coop.hostConnect('x')].map(p => p.then(() => false, () => true))).then(r => { coopMenu.open(); return r.every(Boolean) && coopMenu && document.querySelector('[data-a="host"]').closest('div[style*="fixed"]').style.display === 'none' && coop.on; });
+  check('once the run has started no one can host, join or rejoin', await host.evaluate(refused) && await guest.evaluate(refused));
   check('codes are short enough to paste into a chat', c.invite.length < 900 && c.answer.length < 900, `invite ${c.invite.length}, answer ${c.answer.length} chars`);
   check('roles: one host, one guest', await host.evaluate(() => coop.host && !coop.guest) && await guest.evaluate(() => coop.guest && !coop.host));
   const sh = await host.evaluate(signature), sg = await guest.evaluate(signature);
@@ -180,12 +180,29 @@ run('co-op', async ({ open, check }) => {
   // ---- disconnect ----
   await host.evaluate(() => coop.leave());
   check('host leaves: the host plays on solo', await host.evaluate(() => !coop.on && state === 'play'));
-  check('the guest returns to the menu with a message', await guest.evaluate(() => T.until(() => state === 'dead' && /Co-op ended/.test(hud.overlayText.textContent), 15000)));
+  check('and the guest carries on solo too', await guest.evaluate(() => T.until(() => !coop.on && state === 'play' && /Continuing solo/.test(document.getElementById('log').textContent), 15000)));
+  const solo = await guest.evaluate(async () => {
+    const e = enemies.find(e => !e.dead && !e.boss), own = Object.prototype.hasOwnProperty.call(e, 'hurt');
+    const hp = e.hp; e.sleepT = 0; e.hurt(1, player);
+    const x = e.x, z = e.z; e.set('suspicious'); e.aware = 0.9; e.last = { x: player.x, z: player.z }; e.stun = 0;
+    const moved = await T.until(() => Math.hypot(e.x - x, e.z - z) > 0.3 || e.state !== 'suspicious', 8000);
+    return { own, hurt: e.hp < hp, moved };
+  });
+  check('the guest took over the enemies: they can be hurt and think for themselves', !solo.own && solo.hurt && solo.moved, JSON.stringify(solo));
+  const again = () => coop.hostInvite().then(() => false, () => true);
+  check('after a disconnect there is no rejoin', await host.evaluate(again) && await guest.evaluate(again));
   await host.close(); await guest.close();
 
+  // ---- the host drops while both are still in the lobby: the guest's enemies must be real again ----
+  const h3 = await open(51, { start: false }), g3 = await open(52, { start: false });
+  await link(h3, g3);
+  await g3.evaluate(() => T.until(() => coop.on && enemies.length > 0, 5000));
+  await h3.evaluate(() => coop.leave());
+  check('lobby drop: the guest\'s enemies are no longer puppets', await g3.evaluate(() => T.until(() => !coop.on, 15000)) && await g3.evaluate(() => enemies.length > 0 && enemies.every(e => !Object.prototype.hasOwnProperty.call(e, 'hurt'))));
+  await h3.close(); await g3.close();
+
   // ---- both down ends the run ----
-  const h2 = await open(31), g2 = await open(32);
-  const c2 = await connect(h2, g2);
+  const c2 = await pair(31, 32), h2 = c2.host, g2 = c2.guest;
   await h2.evaluate(() => { for (const e of enemies) e.sleepT = 1e9; });
   await g2.evaluate(() => { cb.iframe = 0; damage(9999); });
   await h2.evaluate(() => T.until(() => coopS.rp.down, 3000));

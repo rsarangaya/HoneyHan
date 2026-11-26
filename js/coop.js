@@ -1,13 +1,19 @@
 // Co-op, the game side (2 players, host + guest, js/net.js has the wire). HOST-AUTHORITATIVE: the host runs enemy AI, drops, bosses and
 // floor changes. The guest generates the same floors from the host's seed, moves itself (client-side prediction), and shows enemies
 // interpolated from the host's snapshots. Everything here is behind `coop.on`; solo play never runs any of it.
-// Known limits: quests/allies/prisoners are not synced; going back up stairs is sealed. Everything a peer
+// A run can only be joined before it starts (a lobby on the welcome screen; the host presses Start). A disconnect mid run leaves the one
+// left playing solo (a guest takes over the enemies), with no rejoin.
+// What the partner does or changes is sent so it can be SEEN here: look and poses, arrows and bolts, wand and trap effects, enemy statuses and
+// alert marks, shelves, bells, prints, the ally. Per player by design: quest talk and rewards, the shrine, prayer, the shop's stock.
+// Known limits: going back up stairs is sealed; the host's guards do not react to the guest's ally. Everything a peer
 // sends goes through Net.cleanMsg / Net.packetOk first, and no peer string is ever shown or used as markup.
 const COOP = { names: ['Host', 'Guest'], hex: ['#e8a838', '#4aa8ff'], col: [0xe8a838, 0x4aa8ff], stateEvery: 0.05, snapEvery: 1 / 15, snapR: 45, delay: 100 };
 
 const coopS = {
   link: null, role: -1, ready: false, status: '', onStatus: null,
-  rp: { x: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0, eye: 1.6, radius: 0.35, crouching: false, sprinting: false, stealthMul: 1, senseMul: 1, tileX: 0, tileY: 0, noiseRadius: 0, on: false, down: false, hp: 1, atk: false, noise: 0, noiseT: 0 },   // the partner as the AI sees it
+  sid: 0, gtT: 0, lkW: null, lkS: null, lkL: false, look: null, avRole: -1, zapKind: '', plx: 1e9, plz: 1e9, reviving: false, peerRevive: false, mine: new Net.Revive(3),
+  ally: null, allyTrack: new Net.Track(), allyIn: { floor: 0, x: 0, z: 0, yaw: 0, flags: 0 }, allyAt: -1e9,
+  rp: { block: false, dash: false, draw: false, zap: false, x: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0, eye: 1.6, radius: 0.35, crouching: false, sprinting: false, stealthMul: 1, senseMul: 1, tileX: 0, tileY: 0, noiseRadius: 0, on: false, down: false, hp: 1, atk: false, noise: 0, noiseT: 0 },   // the partner as the AI sees it
   av: null, avTrack: new Net.Track(), avSeq: -1, avList: [null], avWind: 0,
   ps: { x: 0, z: 0, yaw: 0, pitch: 0, flags: 0, hp: 1, floor: 0, seq: 0, noise: 0, speed: 0 }, pu: { x: 0, z: 0, yaw: 0, pitch: 0, flags: 0, hp: 1, floor: 0, seq: 0, noise: 0, speed: 0 }, sh: { floor: 0, seq: 0, n: 0 }, se: { nid: 0, x: 0, z: 0, yaw: 0, flags: 0, hp: 0 },
   seq: 0, putBack: false, hudNum: -1, sT: 0, nT: 0, snapSeq: 0, snapIn: -1, pulseMax: 0, fk: -1,
@@ -37,10 +43,12 @@ function coopLink() {
   return coopS.link;
 }
 function coopOpened() {
+  if (session.started) { coop.leave(); return; }                                  // too late: nobody joins a run that has begun
   coop.on = true; coop.host = coopS.role === 0; coop.guest = coopS.role === 1; coop.down = false;
   coopS.revive.secs = TUNE.coopRevive; coopS.gate.wait = TUNE.coopStairWait;
+  coopS.mine.secs = TUNE.coopRevive; coopS.mine.t = 0; coopS.reviving = coopS.peerRevive = false; coopS.lkW = coopS.lkS = null; coopS.look = null; coopS.ally = null; coopS.byRef = null;
   coopS.claims.reset(); coopS.fk = -1; coopS.snapIn = -1; coopS.avSeq = -1; coopS.rp.on = false; coopS.rp.down = false; coopS.stairMe = coopS.stairPeer = false;
-  if (coop.host) coop.send({ k: 'hello', seed: runSeed, stage, floor: floorNum, v: 1 });
+  if (coop.host) coop.send({ k: 'hello', seed: runSeed, stage: 1, floor: 1, v: 1 });
   coopHud(true);
   if (coopMenu) coopMenu.opened();
 }
@@ -52,28 +60,93 @@ function coopClosed(why) {
   for (const e of enemies) if (e.boss) e.other = e.coopFx = null;
   for (const o of propObjs) if (o.p.busy) { o.p.busy = false; o.p.left = o.grant; o.grant = null; }   // a container the partner was emptying: still there
   coopHud(false);
-  if (wasGuest && state !== 'dead' && state !== 'won') {                          // the guest cannot go on without the host: back to the menu (a click reloads)
-    coopCloseScreens(); state = 'dead'; document.exitPointerLock();
-    hud.overlayText.innerHTML = `<h1>Co-op ended</h1><p>${why}</p><p>Click to return to the menu.</p>`; hud.overlay.style.display = 'flex';
-  } else if (state === 'play') flash(`${why} Continuing solo.`);
+  if (coopS.ally && coopS.ally.mesh.parent) coopS.ally.mesh.parent.remove(coopS.ally.mesh);
+  coopS.ally = null;
+  if (wasGuest) coopTakeover();                                                   // lobby or mid run: puppets must never outlive the link
+  if (session.started && state !== 'dead' && state !== 'won') {                   // mid run: the one left carries on alone, and nobody can rejoin
+    flash(`${why} Continuing solo.`);
+  }
   if (coopMenu) coopMenu.closed(why);
 }
+// The host is gone: the guest's puppets become real enemies again, on this floor and every cached one.
+function coopTakeover() {
+  coopS.byRef = null; coopS.byNid.clear(); bossTeleHide();
+  enemies.forEach(coopFree);
+  for (const s in stageCaches) for (const n in stageCaches[s]) stageCaches[s][n].enemies.forEach(coopFree);
+}
+function coopFree(e) {
+  delete e.hurt; delete e.addStatus; delete e.sleep; delete e.enrage;
+  const glued = e.st.has('stuck'); e.net = null; e.st.clear(); if (glued) e.st.apply('stuck'); e.stun = 0; e.sleepT = 0; e.rageT = 0; e.healFx = 0; e.winding = false; e.path = []; e.pk = ''; e.rp = 0; e.lostT = 0; e.shouted = false;
+  if (e.dead) { e.rq = true; return; }                                            // (long dead: no burst of replacement guards)
+  if (e.state !== 'unaware') e.last = { x: player.x, z: player.z };               // an alerted puppet had no idea where to go
+  const bs = e.bs;
+  if (!bs) return;
+  e.mv = bs.mv = null; bs.nx = null; bs.combo = 0; e.teleOn = false; e.altT = undefined;
+  if (e.dormant) return;
+  const p = e.def.phases[bs.phase - 1];
+  if (p) { bs.spd = (p.speedMul || 1) * (p.enrage || 1); bs.windMul = p.windMul || 1; bs.gcdMul = p.gcdMul || 1; }
+  bs.st = 'chase';
+  if (e.def.fly) { bs.hx = e.route[0].x; bs.hz = e.route[0].z; bs.hp0 = e.hp; bs.cyc = bossCyc(e, bs.air); bs.R = bossOrbitR(e); } else e.alt = 0;
+}
 coop.send = o => { if (coopS.link) coopS.link.send(o); };
-coop.hostInvite = async () => { coopS.role = 0; return coopLink().createInvite(); };
-coop.hostConnect = code => coopS.link.acceptAnswer(code);
-coop.join = async code => { coopS.role = 1; return coopLink().join(code); };
+// Host and Join exist only before the run has begun.
+function coopBefore() { if (session.started) throw new Error('Co-op can only be started before a run begins.'); }
+coop.hostInvite = async () => { coopBefore(); coopS.role = 0; return coopLink().createInvite(); };
+coop.hostConnect = async code => { coopBefore(); if (!coopS.link) throw new Error('Create an invite first.'); return coopS.link.acceptAnswer(code); };
+coop.join = async code => { coopBefore(); coopS.role = 1; return coopLink().join(code); };
 coop.leave = () => { if (coopS.link) { const l = coopS.link; coopS.link = null; l.close(); if (coop.on) coopClosed('You left the co-op game.'); } };
+// main.js begin(): a connected lobby waits for the host's Start; starting solo drops any half-made connection.
+coop.beforeStart = () => { if (coop.on) { coopMenu.open(); return false; } coop.leave(); coopMenu.hide(); return true; };
+function coopRunStart() { coopMenu.hide(); pauseMenu.close(); startRun(); }
+coop.start = () => {                                                              // host only: both begin floor 1 together
+  if (!coop.host || !coopS.ready || session.started) return false;
+  coop.send({ k: 'start' }); coopRunStart();
+  try { const p = canvas.requestPointerLock(); if (p) p.catch(() => {}); } catch (e) { /* no gesture: a click on the canvas takes it */ }
+  return true;
+};
 coop.partner = coopS.rp;                                                           // for tests and the HUD
 
 // ---- the avatar: one existing humanoid (a goblin), tinted by its skin colour, a name tag, and the usual limb animation. Not in `enemies`: no AI, no loot. ----
 function coopAvatar() {
-  if (coopS.av) return coopS.av;
+  if (coopS.av && coopS.avRole === coopS.role) return coopS.av;
+  if (coopS.av) scene.remove(coopS.av.mesh);                                      // (hosted before, joined now: another name and colour)
   const idx = 1 - coopS.role;
-  const e = new Enemy({ x: 0, y: 0, route: [{ x: 0, y: 0 }, { x: 0, y: 0 }], seed: 4242, type: 'goblin', skin: COOP.col[idx] }, floor);
+  const e = new Enemy({ x: 0, y: 0, route: [{ x: 0, y: 0 }, { x: 0, y: 0 }], seed: 4242, type: 'goblin', skin: COOP.col[idx], noArms: true }, floor);
   nameTag(e, COOP.names[idx], COOP.hex[idx]);
   e.mesh.visible = false; scene.add(e.mesh); e.wait = 1e9;
-  coopS.avList[0] = e;
+  // what the partner holds: the weapon in the right hand, the shield and a zapped wand on the left
+  e.hold = new THREE.Group(); e.hold.position.set(0, -0.62, -0.04); e.hold.rotation.x = -Math.PI / 2; e.arms[1].add(e.hold);
+  e.off = new THREE.Group(); e.off.position.set(-0.14, -0.42, -0.14); e.arms[0].add(e.off);
+  e.zapW = new THREE.Group(); e.zapW.position.set(0, -0.62, -0.04); e.zapW.rotation.x = -Math.PI / 2; e.zapW.visible = false; e.arms[0].add(e.zapW);
+  e.lookKey = undefined; e.zapKind = '';
+  coopS.avList[0] = e; coopS.avRole = coopS.role;
   return coopS.av = e;
+}
+// The weapon, shield and wand models are shared geometry: swapping them frees nothing.
+function coopDress(av) {
+  const L = coopS.look;
+  if (av.lookKey === L) return;
+  av.lookKey = L;
+  while (av.hold.children.length) av.hold.remove(av.hold.children[0]);
+  while (av.off.children.length) av.off.remove(av.off.children[0]);
+  av.hold.add(buildWeaponModel(L ? L.w + (L.l ? ':limp' : '') : 'sword', L ? L.t : 0));
+  if (L && L.s >= 0) { const sh = buildShieldMesh(L.s); sh.scale.setScalar(0.7); av.off.add(sh); }
+}
+// Poses on top of the usual limb animation (sync() resets them every frame): crouch, dash, zap, bow draw, block high or low.
+function coopPose(av, rp) {
+  const sy = av.scaleK * (rp.crouching && !rp.down ? 0.72 : 1);
+  if (av.mesh.scale.y !== sy) av.mesh.scale.y = sy;
+  const zap = rp.zap && !rp.down && !!coopS.zapKind;
+  if (av.zapW.visible !== zap) av.zapW.visible = zap;
+  if (zap && av.zapKind !== coopS.zapKind) { while (av.zapW.children.length) av.zapW.remove(av.zapW.children[0]); av.zapW.add(buildWeaponModel('wand:' + coopS.zapKind, 0)); av.zapKind = coopS.zapKind; }
+  if (!rp.down) {
+    const L = av.arms[0], R = av.arms[1];
+    if (rp.dash) { av.upper.rotation.x = -0.6; L.rotation.x = R.rotation.x = -0.8; }
+    else if (rp.zap) L.rotation.x = 1.5;
+    else if (rp.draw) { L.rotation.x = 1.55; R.rotation.x = 1.45; }
+    else if (rp.block) L.rotation.x = R.rotation.x = rp.pitch <= LOWGUARD.pitch ? 0.55 : 1.5;
+  }
+  av.off.rotation.x = -av.arms[0].rotation.x;                                     // the shield stays facing forward
 }
 function coopAvatarStep(dt, now) {
   const rp = coopS.rp, av = coopAvatar();
@@ -87,7 +160,99 @@ function coopAvatarStep(dt, now) {
   if (av.dead) av.deadT += dt;
   else if (rp.atk) { if (!av.winding) { av.winding = true; av.windT = 0; av.windT_ = TUNE.windup; av.zone = 'body'; } av.windT += dt; if (av.windT > av.windT_ + 0.5) av.windT = 0; }
   else av.winding = false;
+  coopDress(av);
   av.sync(dt);
+  coopPose(av, rp);
+  const P = floor.prints;                                                         // the partner leaves footprints in the snow too
+  if (P && !rp.down) {
+    const d = Math.hypot(av.x - coopS.plx, av.z - coopS.plz);
+    if (d >= theme.mechanic.TUNE.printGap) {
+      if (d < 4) layPrint(P, -Math.sin(av.yaw), -Math.cos(av.yaw), av.x, av.z);
+      coopS.plx = av.x; coopS.plz = av.z;
+    }
+  }
+}
+function coopDot(ctx, S) {                                                        // drawMinimap
+  const rp = coopS.rp; if (!rp.on) return;
+  ctx.fillStyle = COOP.hex[1 - coopS.role]; ctx.beginPath(); ctx.arc(rp.x / TILE * S, rp.z / TILE * S, 3.5, 0, 7); ctx.fill();
+}
+
+// ---- seeing what the partner does ----
+coop.shot = a => coop.send({ k: 'pr', fk: coopFloorKey(), x: a.x, y: a.y, z: a.z, vx: a.vx, vy: a.vy, vz: a.vz, w: a.kind === 'wand' ? a.wand : undefined });
+coop.stuck = a => { a.sid = ++coopS.sid; coop.send({ k: 'as', fk: coopFloorKey(), id: a.sid, x: a.x, z: a.z, yaw: a.mesh.rotation.y }); };
+coop.unstuck = a => coop.send({ k: 'ag', fk: coopFloorKey(), id: a.sid });
+coop.fx = (t, w, x, y, z, r) => coop.send({ k: 'fx', fk: coopFloorKey(), t, w, x, y, z, r });
+coop.bell = (i, rang) => coop.send({ k: 'bt', fk: coopFloorKey(), i, r: rang });
+coop.mover = (j, s) => coop.send({ k: 'mv', fk: coopFloorKey(), i: j, s });
+coop.propState = o => coop.send({ k: 'ps', fk: coopFloorKey(), i: propObjs.indexOf(o) });
+coop.recruited = () => coop.send({ k: 'al', fk: coopFloorKey() });
+function coopGhostShot(m) {                                                       // drawn only: the shooter's machine decides what it hits
+  if (arrows.length > 80) return;
+  const wand = !!m.w, mesh = wand ? wandFxBolt(group, m.w) : makeArrowMesh();
+  const a = { ghost: true, owner: 'player', stuck: false, x: m.x, y: m.y, z: m.z, vx: m.vx, vy: m.vy, vz: m.vz, life: wand ? WAND.range / WAND.speed : 4, mesh };
+  if (wand) { a.kind = 'wand'; a.wand = m.w; a.wfx = true; a.gravity = 0; coopS.zapKind = m.w; } else group.add(mesh);
+  mesh.position.set(a.x, a.y, a.z); mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+  arrows.push(a);
+}
+function coopGhostArrow(a, i, dt) {                                               // updateArrows
+  if (a.stuck) return;
+  const ev = stepArrow(a, dt, floor, enemies, player);
+  a.life -= dt; a.mesh.position.set(a.x, a.y, a.z);
+  if (a.kind === 'wand') wandBoltAnim(a.mesh, gameT); else a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+  const atMe = (a.x - player.x) ** 2 + (a.z - player.z) ** 2 < (player.radius + 0.1) ** 2 && a.y < player.eye + 0.2;
+  if (!ev && !atMe && a.life > 0) return;
+  if (a.kind === 'wand' && ev && ev.type !== 'hit') wandImpact(group, a.wand, a.px === undefined ? a.x : a.px, a.y, a.pz === undefined ? a.z : a.pz, 0.6);
+  dropArrowMesh(a); arrows.splice(i, 1);
+}
+function coopStuckArrow(m) {
+  let n = 0, old = -1;
+  for (let i = 0; i < arrows.length; i++) if (arrows[i].ghost && arrows[i].stuck) { n++; if (old < 0) old = i; }
+  if (n >= BOW.maxStuck) { group.remove(arrows[old].mesh); arrows.splice(old, 1); }
+  const mesh = makeArrowMesh(); mesh.position.set(m.x, 0.05, m.z); mesh.rotation.set(0, m.yaw, 0); group.add(mesh);
+  arrows.push({ ghost: true, owner: 'player', stuck: true, sid: m.id, x: m.x, y: 0.05, z: m.z, mesh });
+}
+// An enemy's status marks, alertness and attack zone as 15 bits; sent only when they change.
+const COOP_ST = ['burn', 'freeze', 'slow', 'stun', 'stuck', 'bleed', 'cripple', 'daze'], COOP_ZONES = ['head', 'body', 'legs', 'shoot'];
+const COOP_CALM = 1 << 13;                                                        // the mask of an enemy with nothing to show
+function coopMask(e) {
+  let m = 0;
+  for (let i = 0; i < COOP_ST.length; i++) if (e.st.t[COOP_ST[i]] > 0) m |= 1 << i;
+  if (e.rageT > 0) m |= 256;
+  if (e.healFx > 0) m |= 512;
+  if (e.fuse > 0) m |= 1024;
+  const z = e.winding ? COOP_ZONES.indexOf(e.zone) : -1;
+  return m | ((e.aware > 0.8 ? 3 : e.aware > 0.5 ? 2 : e.aware > 0.2 ? 1 : 0) << 11) | ((z < 0 ? 1 : z) << 13);
+}
+function coopUnmask(e, m) {                                                       // guest: the puppet's marks (its status timers never run)
+  for (let i = 0; i < COOP_ST.length; i++) { if (m & (1 << i)) e.st.t[COOP_ST[i]] = 99; else delete e.st.t[COOP_ST[i]]; }
+  e.rageT = m & 256 ? 1 : 0;
+  if (m & 512 && !(e.stm & 512)) e.healFx = 0.7;
+  e.fuse = m & 1024 ? (e.fuse > 0 ? e.fuse : BOMB.fuse) : -1;
+  e.aware = [0, 0.35, 0.65, 1][(m >> 11) & 3];
+  if (!e.bs) e.zone = COOP_ZONES[(m >> 13) & 3];
+  e.stm = m;
+}
+// The partner's recruited ally: its idle NPC here becomes a puppet that follows the packets.
+function coopAllyTaken() {
+  const A = allyRun;
+  if (!A || A.recruited || A.mode === 'gone' || A.f !== floor) return;
+  A.mode = 'gone'; A.o.p.opened = true;
+  const i = A.f.solids.indexOf(A.sol); if (i >= 0) A.f.solids.splice(i, 1);
+  const j = propObjs.indexOf(A.o); if (j >= 0) propObjs.splice(j, 1);
+  coopS.ally = A.e; coopS.allyTrack.n = 0; coopS.allyAt = -1e9;
+  addLog(`${COOP.names[1 - coopS.role]} recruited the ${A.name}.`, '#7ad8ff');
+}
+function coopAllyStep(dt, now) {
+  const e = coopS.ally; if (!e) return;
+  const p = coopS.allyIn, on = now - coopS.allyAt < 1000 && p.floor === coopS.fk;
+  if (!on) { if (e.mesh.parent) e.mesh.parent.remove(e.mesh); return; }
+  if (e.mesh.parent !== group) group.add(e.mesh);                                 // it came down the stairs with them
+  const tr = coopS.allyTrack.at(now - COOP.delay), dead = !!(p.flags & 1), wd = !!(p.flags & 2);
+  e.floor = floor; e.x = tr.x; e.z = tr.z; e.yaw = tr.yaw; e.walkT += tr.speed * dt * 5; e.mesh.visible = true;
+  if (dead !== e.dead) { e.dead = dead; e.deadT = 0; }
+  if (dead) e.deadT += dt;
+  if (wd) { if (!e.winding) e.windT = 0; e.windT += dt; }
+  e.winding = wd; e.sync(dt); e.icon.visible = false;
 }
 
 // ---- per frame (state === 'play', coop.on) ----
@@ -96,7 +261,7 @@ coop.tick = function (dt) {
   if (!link || !link.open) return;
   const fk = coopFloorKey();
   if (coop.guest) coopByNid(0);                                                   // (new floor: make its enemies puppets at once)
-  if (fk !== S.fk) { S.fk = fk; S.granted.clear(); S.claims.reset(); S.stairMe = S.stairPeer = false; S.avTrack.n = 0; rp.on = false; S.snapIn = -1; }
+  if (fk !== S.fk) { S.plx = S.plz = 1e9; S.peerRevive = false; S.fk = fk; S.granted.clear(); S.claims.reset(); S.stairMe = S.stairPeer = false; S.avTrack.n = 0; rp.on = false; S.snapIn = -1; }
   if (coop.down && inv.hp > 0) inv.hp = 0;
   if (pulse > S.pulseMax) S.pulseMax = pulse;
   // send my state (20 Hz)
@@ -104,18 +269,24 @@ coop.tick = function (dt) {
     S.sT = COOP.stateEvery;
     const p = S.ps;
     p.x = player.x; p.z = player.z; p.yaw = player.yaw; p.pitch = player.pitch; p.hp = inv.hp / inv.maxHp; p.floor = fk; p.seq = ++S.seq;
-    p.flags = (player.crouching ? Net.F.CROUCH : 0) | (player.sprinting ? Net.F.SPRINT : 0) | (cb.atk || cb.draw || cb.zap ? Net.F.ATTACK : 0) | (coop.down ? Net.F.DOWN : 0) | (cb.block ? Net.F.BLOCK : 0);
+    p.flags = (player.crouching ? Net.F.CROUCH : 0) | (player.sprinting ? Net.F.SPRINT : 0) | (cb.atk || cb.bash > 0 ? Net.F.ATTACK : 0) | (coop.down ? Net.F.DOWN : 0) | (cb.block ? Net.F.BLOCK : 0) | (player.dashS.on ? Net.F.DASH : 0) | (cb.draw ? Net.F.DRAW : 0) | (cb.zap ? Net.F.ZAP : 0);
     p.noise = Math.max(player.noiseRadius * (player.crouching ? PD.crouchNoise : 1), S.pulseMax) * HUSH * PD.noiseMul; S.pulseMax = 0;
     p.speed = Math.hypot(player.vx, player.vz);
     link.sendState(Net.sendView(Net.packPlayer(p)));
+    const w = inv.equip.weapon, sh = shield(), limp = !!w && isLimp(w);           // what I hold, sent only when it changes
+    if (w && (w !== S.lkW || sh !== S.lkS || limp !== S.lkL)) { S.lkW = w; S.lkS = sh; S.lkL = limp; coop.send({ k: 'lk', w: w.base, t: w.tier | 0, s: sh ? sh.tier | 0 : -1, l: limp ? 1 : 0 }); }
+    const A = allyRun;                                                            // my ally, if it is here with me
+    if (A && A.recruited && A.mode !== 'gone' && A.f === floor) link.sendState(Net.sendView(Net.packAlly(fk, A.e.x, A.e.z, A.e.yaw, (A.e.dead ? 1 : 0) | (A.e.winding ? 2 : 0))));
   }
   if (coop.host) {
     if (rp.on && rp.noise > 0 && now - rp.noiseT < 400 && !rp.down) { const n = S.noiseEv; n.x = rp.x; n.z = rp.z; n.r = rp.noise; pending.push(n); }   // what the partner makes is heard by the guards (one reused event)
     if (S.ready && (S.nT -= dt) <= 0) { S.nT = COOP.snapEvery; coopSnapshot(fk); }
+    if (floor.runes && (S.gtT -= dt) <= 0) { S.gtT = 2; coop.send({ k: 'gt', t: gameT }); }   // the rune circle flares by the clock: keep the clocks together
     const act = S.ready && rp.on;
     if (S.stairMe || S.stairPeer) { if (S.gate.step(dt, S.stairMe, S.stairPeer, !coop.down, act && !rp.down)) coopGo(); } else S.gate.t = 0;
   }
   coopAvatarStep(dt, now);
+  coopAllyStep(dt, now);
   coopArrows();
   coopRevive(dt);
   coopHud(false, dt);
@@ -137,7 +308,7 @@ coop.enemies = function (dt, noise) {
     coop.shotTgt = tgt === rp ? rp : null;
     const zone = e.update(dt, tgt, noise);
     if (zone) { if (tgt === rp) coopHitGuest(e, zone); else resolveEnemyAttack(e, zone); }
-    if (e.dead && !e.sentDead && e.nid !== undefined) { e.sentDead = true; coop.send({ k: 'ed', n: e.nid }); }
+    if (e.dead && !e.sentDead && e.nid !== undefined) { e.sentDead = true; coop.send({ k: 'ed', n: e.nid, g: e.escaped ? 1 : 0 }); }
   }
   coop.shotTgt = null;
 };
@@ -207,9 +378,10 @@ function coopSnapshot(fk) {
   Net.snapBegin(fk, ++coopS.snapSeq);
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
-    if (e.nid === undefined || (e.dead && e.deadT > 3)) continue;
+    if (e.nid === undefined || (e.dead && (e.deadT > 3 || e.exploded || e.escaped))) continue;   // (a blast or an escape arrives as its own message)
     const dx = e.x - player.x, dz = e.z - player.z;
     if (!e.boss && dx * dx + dz * dz > R2) { const rx = e.x - rp.x, rz = e.z - rp.z; if (!rp.on || rx * rx + rz * rz > R2) continue; }
+    if (!e.dead) { const m = coopMask(e); if (m !== (e.stm === undefined ? COOP_CALM : e.stm)) { e.stm = m; coop.send({ k: 'es', fk, n: e.nid, m }); } }
     const si = S.indexOf(e.state);
     if (!Net.snapAdd(e.nid, e.x, e.z, e.yaw, (si < 0 ? 0 : si) | (e.dead ? E.DEAD : 0) | (e.stun > 0 ? E.STUN : 0) | (e.winding ? E.WIND : 0) | (e.seen ? E.SEEN : 0) | (e.dormant ? E.DORM : 0) | (e.sleepT > 0 ? E.SLEEP : 0), e.hp / e.maxHp)) break;
   }
@@ -238,6 +410,7 @@ function coopPuppets(dt) {
     if (e.dead) { e.deadT += dt; e.sync(dt); continue; }
     if (tr) { tr.at(t); e.x = tr.x; e.z = tr.z; e.yaw = tr.yaw; e.walkT += tr.speed * dt * 5; }
     if (e.winding) e.windT += dt;
+    if (e.fuse > 0.05) e.fuse -= dt;                                               // a lit bomb flashes
     if (e.bs) coopBossStep(e, dt);
     e.sync(dt);
   }
@@ -320,11 +493,15 @@ function coopArrows() {                                                         
   if (!arrows.length || !rp.on || rp.down || !av || !av.mesh.visible) return;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
-    if (a.stuck || a.owner !== 'player') continue;
+    if (a.stuck || a.ghost) continue;
     const dx = a.x - av.x, dz = a.z - av.z;
+    if (a.owner !== 'player') {                                                    // an enemy's arrow or bolt that struck the partner stops there (looks only; not one that is also at me)
+      if (!a.pool && a.ring < 0 && !(a.mv && a.mv.puddle) && dx * dx + dz * dz < av.r * av.r && a.y < 1.8 && (a.x - player.x) ** 2 + (a.z - player.z) ** 2 > 1.4) { dropArrowMesh(a); arrows.splice(i, 1); }
+      continue;
+    }
     if (dx * dx + dz * dz > (av.r + 0.05) * (av.r + 0.05)) continue;
     const zone = zoneAtHeight(a.y, av); if (!zone) continue;
-    const base = a.kind === 'wand' ? (WANDS[a.wand.kind].dmg || 8) : a.dmg * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * PD.dmgMul;
+    const base = a.kind === 'wand' ? (WANDS[a.wand].dmg || 8) : a.dmg * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * PD.dmgMul;
     if (a.kind === 'wand') wandFxRelease(a.mesh); else group.remove(a.mesh);
     arrows.splice(i, 1);
     coopFriendly(Net.ffDamage(base, TUNE.coopFF), zone);
@@ -348,14 +525,16 @@ function coopEnd() {
 const coopNearBody = () => coopS.rp.on && coopS.rp.down && !coop.down && Math.hypot(coopS.rp.x - player.x, coopS.rp.z - player.z) < 2.2;
 function coopRevive(dt) {
   const S = coopS, rp = S.rp;
-  const near = coopNearBody();
-  if (S.revive.step(dt, near && !!player.keys[KEYS.interact])) {
+  const near = coopNearBody(), holding = near && !!player.keys[KEYS.interact];
+  if (holding !== S.reviving) { S.reviving = holding; coop.send({ k: 'rp', v: holding ? 1 : 0 }); }
+  S.mine.step(dt, coop.down && S.peerRevive);                                     // the downed player sees the progress too
+  if (S.revive.step(dt, holding)) {
     rp.down = false; coop.send({ k: 'rv' }); addLog(`You revived ${COOP.names[1 - S.role]}.`, '#9aff9a');
   }
   if (!near && S.revive.t > 0) S.revive.step(dt, false);
 }
 function coopRevived() {
-  coop.down = false; inv.hp = inv.maxHp * TUNE.coopReviveHp; cb.iframe = 1.5; knock.m = 0;
+  coopS.peerRevive = false; coopS.mine.t = 0; coop.down = false; inv.hp = inv.maxHp * TUNE.coopReviveHp; cb.iframe = 1.5; knock.m = 0;
   flash('Your partner revived you.');
 }
 
@@ -371,7 +550,7 @@ coop.stairs = function () {
   } else if (S.stairMe && Math.hypot(player.x - (b.x0 + b.x1) / 2, player.z - b.z0) > 2.5) { S.stairMe = false; coopStairSend(); }
   return true;
 };
-function coopStairSend() { if (coop.guest) coop.send({ k: 'sa', v: coopS.stairMe ? 1 : 0 }); }
+function coopStairSend() { coop.send({ k: 'sa', v: coopS.stairMe ? 1 : 0 }); }
 function coopGo() {                                                               // host decided: both go (the guest gets the message and does the same)
   coop.send({ k: 'go', fk: coopFloorKey() });
   coopDoGo();
@@ -425,10 +604,15 @@ function coopState(dv) {                                                        
     if (((p.seq - S.avSeq) & 65535) > 32768 && S.avSeq >= 0) return;               // an old packet overtaken by a newer one
     S.avSeq = p.seq;
     if (p.floor !== S.fk) { rp.on = false; return; }
+    if (rp.on && p.hp < rp.hp - 0.01 && S.av) S.av.hitT = 0.14;                     // the partner is being hurt: they flash
+    rp.block = !!(p.flags & Net.F.BLOCK); rp.dash = !!(p.flags & Net.F.DASH); rp.draw = !!(p.flags & Net.F.DRAW); rp.zap = !!(p.flags & Net.F.ZAP);
     rp.on = true; rp.x = p.x; rp.z = p.z; rp.yaw = p.yaw; rp.pitch = p.pitch; rp.hp = p.hp; rp.atk = !!(p.flags & Net.F.ATTACK);
     rp.crouching = !!(p.flags & Net.F.CROUCH); rp.sprinting = !!(p.flags & Net.F.SPRINT);
     rp.vx = -Math.sin(p.yaw) * p.speed; rp.vz = -Math.cos(p.yaw) * p.speed; rp.noise = p.noise; rp.noiseRadius = p.noise; rp.noiseT = now; rp.tileX = Math.floor(p.x / TILE); rp.tileY = Math.floor(p.z / TILE);
     S.avTrack.push(now, p.x, p.z, p.yaw);
+  } else if (k === Net.T_ALLY) {
+    const p = Net.unpackAlly(dv, S.allyIn);
+    if (p.floor === S.fk) { S.allyAt = now; S.allyTrack.push(now, p.x, p.z, p.yaw); }
   } else if (k === Net.T_BOSS) {
     if (coop.guest) coopBossState(dv);
   } else if (k === Net.T_SNAP && coop.guest) {
@@ -443,7 +627,8 @@ function coopState(dv) {                                                        
       const f = se.flags;
       if (e.boss && e.dormant && !(f & E.DORM)) e.justWoke = true;
       e.state = ST[f & 3]; e.seen = !!(f & E.SEEN); e.dormant = !!(f & E.DORM); e.sleepT = f & E.SLEEP ? 1 : 0; e.stun = f & E.STUN ? 1 : 0;
-      const wd = !!(f & E.WIND); if (wd && !e.winding && !e.bs) { e.windT = 0; e.zone = 'body'; } e.winding = wd;
+      const wd = !!(f & E.WIND); if (wd && !e.winding && !e.bs) e.windT = 0; e.winding = wd;
+      if (e.propObj && !e.dormant && !e.propObj.p.opened) { e.propObj.p.opened = true; e.propObj.r = 0; }   // a woken mimic is no chest
       const hp = se.hp * e.maxHp; if (hp < e.hp - 0.5) e.hitT = 0.14; e.hp = hp;
       if (f & E.DEAD) coopKill(e);
     }
@@ -455,12 +640,45 @@ function coopMsg(raw) {                                                         
   if (!m) return;
   switch (m.k) {
     case 'hello': {                                                               // guest: play the host's run
-      if (S.ready) return;
-      setRunSeed(m.seed); startStage(m.stage); if (m.floor > 1) startFloor(m.floor);
+      if (S.ready || session.started) return;                                     // only ever in the lobby, before the run
+      setRunSeed(m.seed); startStage(1);                                          // both begin at floor 1
       coopByNid(0); S.fk = -1; S.ready = true; coop.send({ k: 'ready' });
       if (coopMenu) coopMenu.joined(); break;
     }
-    case 'ready': S.ready = true; break;
+    case 'ready': S.ready = true; if (coopMenu) coopMenu.ready(); break;
+    case 'start': if (S.ready && !session.started) { coopRunStart(); flash('The host started the run. Click to take the mouse.'); } break;
+    case 'pr': if (m.fk === coopFloorKey()) coopGhostShot(m); break;
+    case 'as': if (m.fk === coopFloorKey() && arrows.length <= 120) coopStuckArrow(m); break;
+    case 'ag': { const i = arrows.findIndex(a => a.ghost && a.sid === m.id); if (i >= 0) { group.remove(arrows[i].mesh); arrows.splice(i, 1); } break; }
+    case 'fx':
+      if (m.fk !== coopFloorKey()) return;
+      if (m.t === 0) wandImpact(group, m.w, m.x, m.y, m.z, m.r || 1); else if (m.t === 1) wandRing(group, m.w, m.x, m.z, m.r, m.w === 'rage' ? 0.7 : 0.35); else showGas(m.x, m.z);
+      break;
+    case 'es': { const e = m.fk === coopFloorKey() && coopByNid(m.n); if (e && !e.dead) coopUnmask(e, m.m); break; }
+    case 'ps': { const o = m.fk === coopFloorKey() && propObjs[m.i]; if (o && o.p.kind === 'chest') { o.p.locked = false; o.p.trap = null; dropTell(o); } break; }
+    case 'bt': {
+      if (m.fk !== coopFloorKey() || floor.patches.get(m.i) !== 'bell') return;
+      floor.patches.delete(m.i);
+      const x = m.i % floor.w, y = Math.floor(m.i / floor.w), bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === x && o.p.y === y);
+      if (bo) bo.mesh.visible = false;
+      if (m.r) { addLog(`DING! ${COOP.names[1 - S.role]} rang a tripwire bell.`, '#d8a030'); if (coop.host) pending.push({ x: (x + 0.5) * TILE, z: (y + 0.5) * TILE, r: 14 }); }
+      break;
+    }
+    case 'mv': {                                                                  // guest: a shelf starts to slide
+      const sm = floor.movers && floor.movers[m.i];
+      if (m.fk !== coopFloorKey() || !sm || !floor.moverMesh) return;
+      if (sm.k !== m.s) {                                                         // out of step: put it where the host has it
+        for (let i = 0; i < 4; i++) floor.tiles[moverTile(sm, i)] = i >> 1 === m.s ? T_WALL : T_FLOOR;
+        sm.k = m.s; sm.sliding = false; posMover(sm, m.i, 0);
+        const im = floor.moverMesh.instanceMatrix; im.updateRange.offset = floor.moverBase * 16; im.updateRange.count = floor.movers.length * 32; im.needsUpdate = true;
+      }
+      if (!sm.sliding) { sm.t = theme.mechanic.TUNE.shelfEvery - theme.mechanic.TUNE.shelfSlide; sm.go = 1; }
+      break;
+    }
+    case 'gt': gameT = m.t; break;
+    case 'lk': S.look = m; break;
+    case 'al': if (m.fk === coopFloorKey()) coopAllyTaken(); break;
+    case 'rp': S.peerRevive = !!m.v; break;
     case 'hit': {                                                                 // host: the guest hit one of its enemies
       if (!coop.host) return;
       const e = coopByNid(m.n);
@@ -535,7 +753,12 @@ function coopMsg(raw) {                                                         
       addLog(`${COOP.names[1 - S.role]} hit you for ${Math.round(n)}!`, '#ff6a4a'); damage(n);
       break;
     }
-    case 'ed': { const e = coopByNid(m.n); if (e && coop.guest) coopKill(e); break; }
+    case 'ed': {
+      const e = coopByNid(m.n); if (!e || !coop.guest) break;
+      if (!m.g) coopKill(e);
+      else if (!e.dead) { e.escaped = e.dead = e.corpseDone = true; e.icon.visible = false; questThiefEscaped(e); }   // the sack thief got away
+      break;
+    }
     case 'xp': gainXp(m.b, !!m.ex); break;
     case 'bd': {
       if (!coop.guest) return;
@@ -581,8 +804,8 @@ function coopMsg(raw) {                                                         
       if (coop.host) {                                                            // from the guest only a door: containers are the host's
         if (!m.d || !coopNearProp(o)) return;
         openDoor(o); questDoorOpened(o);
-        if (theme.doors.style === 'spore') { const T = theme.mechanic.TUNE; spawnCloud(o.x, o.z, T.puffR, T.puffDur, T.puffDaze, true); }
-      } else if (m.d) openDoor(o); else markOpened(o);
+        if (theme.doors.style === 'spore') { const T = theme.mechanic.TUNE; coop.mute = true; spawnCloud(o.x, o.z, T.puffR, T.puffDur, T.puffDaze, true); coop.mute = false; }   // (the guest already has its own cloud)
+      } else if (m.d) { openDoor(o); questDoorOpened(o); } else markOpened(o);   // (a cell door frees the prisoner on both)
       break;
     }
     case 'sa': S.stairPeer = !!m.v; break;
@@ -608,11 +831,12 @@ function coopHud(reset) {
   if (!coop.on) return;
   const rp = S.rp, hp = Math.round(rp.hp * 100), rv = Math.round(S.revive.frac * 100);
   const near = coopNearBody();
-  const num = hp + rv * 128 + (rp.on ? 1 << 20 : 0) + (rp.down ? 1 << 21 : 0) + (coop.down ? 1 << 22 : 0) + (S.stairMe ? 1 << 23 : 0) + (near ? 1 << 24 : 0);
+  const mine = Math.round(S.mine.frac * 100);
+  const num = hp + rv * 128 + (rp.on ? 1 << 20 : 0) + (rp.down ? 1 << 21 : 0) + (coop.down ? 1 << 22 : 0) + (S.stairMe ? 1 << 23 : 0) + (near ? 1 << 24 : 0) + (S.stairPeer ? 1 << 25 : 0) + mine * (1 << 26);
   if (num === S.hudNum) return;                                                   // nothing changed: no strings built, no DOM write
   S.hudNum = num;
   const txt = !rp.on ? `${COOP.names[1 - S.role]}: elsewhere` : rp.down ? (coop.down ? 'Both down' : near ? `Hold E to revive ${COOP.names[1 - S.role]} ${rv}%` : `${COOP.names[1 - S.role]} is down: go to them`) : `${COOP.names[1 - S.role]} ${hp}%`;
-  S.hudTxt.textContent = txt + (coop.down ? '  (you are down: wait for a revive)' : S.stairMe ? '  (waiting at the stairs)' : '');
+  S.hudTxt.textContent = txt + (coop.down ? (mine ? `  (being revived ${mine}%)` : '  (you are down: wait for a revive)') : S.stairMe ? '  (waiting at the stairs)' : S.stairPeer ? '  (partner is at the stairs)' : '');
   S.hudTxt.style.color = COOP.hex[1 - S.role]; S.hudBar.style.width = (rp.down ? 0 : hp) + '%';
 }
 
@@ -620,11 +844,12 @@ function coopHud(reset) {
 const coopMenu = (() => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:#000c;font:13px system-ui,sans-serif;color:#eee';
-  root.innerHTML = `<div style="width:min(560px,94vw);background:#15130f;border:1px solid #e8c860;padding:14px 16px;box-sizing:border-box">
+  root.innerHTML = `<div style="width:min(560px,94vw);max-height:96vh;overflow:auto;background:#15130f;border:1px solid #e8c860;padding:14px 16px;box-sizing:border-box">
     <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:#e8c860">Co-op (2 players)</b><button data-a="close">Close</button></div>
     <p style="opacity:.8;margin:8px 0">Play together online with one friend, friendly fire on. No server: you swap two codes (paste them into a chat). It uses Google's public STUN server, so two players on very strict networks (symmetric NAT) may not be able to connect.</p>
     <p style="color:#ff9a6a;margin:8px 0">The code you share includes your IP address: share it only with people you trust.</p>
     <div data-p="pick"><button data-a="host">Host a game</button> <button data-a="join">Join a game</button></div>
+    <div data-p="lobby" style="display:none"><p data-r="lobby"></p><button data-a="start" disabled>Start the run</button></div>
     <div data-p="host" style="display:none"><p>1. Send this invite code to your friend:</p><textarea data-r="invite" readonly rows="3" style="width:100%;box-sizing:border-box"></textarea><button data-a="copyInvite">Copy</button>
       <p>2. Paste the answer code they send back, then connect:</p><textarea data-r="answerIn" rows="3" style="width:100%;box-sizing:border-box"></textarea><button data-a="connect">Connect</button></div>
     <div data-p="join" style="display:none"><p>1. Paste the invite code from the host:</p><textarea data-r="inviteIn" rows="3" style="width:100%;box-sizing:border-box"></textarea><button data-a="answer">Create answer code</button>
@@ -633,13 +858,14 @@ const coopMenu = (() => {
   document.body.appendChild(root);
   const q = s => root.querySelector(s), r = n => q(`[data-r="${n}"]`), pane = n => q(`[data-p="${n}"]`);
   const say = t => { r('status').textContent = t; };
-  const show = n => { for (const p of ['pick', 'host', 'join']) pane(p).style.display = p === n ? 'block' : 'none'; };
+  const show = n => { for (const p of ['pick', 'host', 'join', 'lobby']) pane(p).style.display = p === n ? 'block' : 'none'; };
   for (const ta of root.querySelectorAll('textarea')) { ta.addEventListener('keydown', e => e.stopPropagation()); ta.addEventListener('keyup', e => e.stopPropagation()); }   // typing must not move the player
   root.addEventListener('click', e => e.stopPropagation());
   const copy = n => { const t = r(n); t.select(); try { navigator.clipboard.writeText(t.value); say('Copied.'); } catch (err) { document.execCommand && document.execCommand('copy'); say('Copied (or press Ctrl+C).'); } };
   const fail = e => say('Problem: ' + (e && e.message || e));
   const act = {
     close() { root.style.display = 'none'; },
+    start() { coop.start(); },
     host() { show('host'); coopS.onStatus = say; say('Creating invite...'); coop.hostInvite().then(c => { r('invite').value = c; }, fail); },
     join() { show('join'); coopS.onStatus = say; say('Paste the invite code.'); },
     copyInvite() { copy('invite'); }, copyAnswer() { copy('answer'); },
@@ -647,10 +873,17 @@ const coopMenu = (() => {
     answer() { say('Creating answer...'); coop.join(r('inviteIn').value).then(c => { r('answer').value = c; }, fail); },
   };
   root.addEventListener('click', e => { const a = e.target.dataset && e.target.dataset.a; if (a && act[a]) act[a](); });
+  const go = q('[data-a="start"]');
   return {
-    open() { root.style.display = 'flex'; if (!coop.on) show('pick'); },
-    opened() { say('Connected! Close this and click the game to start.'); },
-    joined() { say('Connected to the host. Close this and click the game to start.'); setTimeout(() => { root.style.display = 'none'; }, 1200); },
-    closed(why) { say(why); },
+    open() { if (session.started) return; root.style.display = 'flex'; if (!coop.on) show('pick'); },
+    hide() { root.style.display = 'none'; },
+    opened() {
+      show('lobby'); go.disabled = true; go.style.display = coop.host ? '' : 'none';
+      r('lobby').textContent = coop.host ? 'Your friend is connected. Press Start to begin floor 1 together.' : 'Connected. Waiting for the host to start the run.';
+      say('Connected!');
+    },
+    ready() { go.disabled = false; },
+    joined() { say('Connected to the host. The run begins when they press Start.'); },
+    closed(why) { if (!session.started) show('pick'); say(why); },
   };
 })();

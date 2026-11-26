@@ -6,13 +6,6 @@ const { run } = require('./lib');
 const BOSSES = ['scarecrow', 'mushroom', 'lich', 'giant', 'werewolf', 'innkeeper', 'warlord', 'dragon'];
 const only = process.argv.slice(2);
 
-async function connect(host, guest) {
-  const invite = await host.evaluate(() => coop.hostInvite());
-  const answer = await guest.evaluate(c => coop.join(c), invite);
-  await host.evaluate(c => coop.hostConnect(c), answer);
-  const up = () => T.until(() => coop.on && coopS.ready, 20000);
-  return (await host.evaluate(up)) && (await guest.evaluate(up));
-}
 
 // page side: build the boss's arena the same way on both pages
 const arena = id => {
@@ -221,9 +214,9 @@ async function fight(host, guest, id, check, first) {
   ok('the stage advance takes both', waited && went);
 }
 
-run('co-op bosses', async ({ open, check }) => {
-  const host = await open(4242), guest = await open(999);
-  check('connected', await connect(host, guest));
+run('co-op bosses', async ({ check, pair }) => {
+  const { host, guest, ok } = await pair(4242, 999);
+  check('connected', ok);
   for (const p of [host, guest]) await p.evaluate(`window.near = ${near}; window.heal = ${heal};`);
   const list = only.length ? only : BOSSES;
   for (let i = 0; i < list.length; i++) {

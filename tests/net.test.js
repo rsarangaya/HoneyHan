@@ -110,6 +110,13 @@ const SDP = ['v=0', 'o=- 123 2 IN IP4 127.0.0.1', 's=-', 't=0 0', 'a=group:BUNDL
   check('boss shots and summons are checked: kinds from the tables, finite numbers, the right sender', !!Net.cleanMsg(sp, 'host', TB) && Net.cleanMsg({ ...sp, kind: 'constructor' }, 'host', TB) === null && Net.cleanMsg({ ...sp, vx: NaN }, 'host', TB) === null && Net.cleanMsg(sp, 'guest', TB) === null
     && !!Net.cleanMsg({ k: 'sm', n: 1001, fk: 0, x: 1, z: 1, bn: 0, seed: 5, type: 'wolf' }, 'host', TB) && Net.cleanMsg({ k: 'sm', n: 1001, fk: 0, x: 1, z: 1, bn: 0, seed: 5, type: '__proto__' }, 'host', TB) === null);
 
+  // ---- the messages that let a player see the other ----
+  const see = { k: 'pr', fk: 0, x: 1, y: 1, z: 1, vx: 1, vy: 0, vz: 1 };
+  check('shots, effects, looks and statuses are checked, from either side where both send them', !!cm(see, 'host') && !!cm(see, 'guest') && cm({ ...see, vx: NaN }, 'host') === null && cm({ ...see, w: '__proto__' }, 'guest') === null
+    && cm({ k: 'fx', fk: 0, t: 0, w: '<img>', x: 1, y: 1, z: 1, r: 1 }, 'guest') === null && cm({ k: 'es', fk: 0, n: 1, m: 5 }, 'guest') === null && !!cm({ k: 'es', fk: 0, n: 1, m: 5 }, 'host') && cm({ k: 'start' }, 'guest') === null && !!cm({ k: 'start' }, 'host'));
+  const al = Net.packAlly(3, 10.5, 20.25, 1, 2), av = dv(al), ar = Net.unpackAlly(av, {});
+  check('ally packet round trip (9 bytes)', al === 9 && Net.packetOk(av) && ar.floor === 3 && near(ar.x, 10.5, 0.02) && near(ar.z, 20.25, 0.02) && ar.flags === 2);
+
   console.log(fails ? `${fails} failed` : 'all passed');
   process.exit(fails ? 1 : 0);
 })();

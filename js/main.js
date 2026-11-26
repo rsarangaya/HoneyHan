@@ -680,9 +680,9 @@ function buildPrints() {
   mesh.frustumCulled = false; mesh.renderOrder = 1; group.add(mesh);
   return { list: Array.from({ length: PRINT_N }, () => ({ x: 0, z: 0, t: -1e9, id: 0 })), next: 0, id: 0, lx: 1e9, lz: 1e9, side: 1, chk: 0, pos, geo };
 }
-function layPrint(P, fx, fz) {                     // (fx, fz): the unit direction you are walking
-  const p = P.list[P.next], a = P.next * 12, pos = P.pos, rx = -fz, rz = fx, ox = player.x + rx * 0.12 * P.side, oz = player.z + rz * 0.12 * P.side;
-  p.x = player.x; p.z = player.z; p.t = gameT; p.id = ++P.id; P.side = -P.side;
+function layPrint(P, fx, fz, x = player.x, z = player.z) {   // (fx, fz): the unit direction walked; (x, z): who walked (co-op lays the partner's too)
+  const p = P.list[P.next], a = P.next * 12, pos = P.pos, rx = -fz, rz = fx, ox = x + rx * 0.12 * P.side, oz = z + rz * 0.12 * P.side;
+  p.x = x; p.z = z; p.t = gameT; p.id = ++P.id; P.side = -P.side;
   for (let k = 0; k < 4; k++) { const sx = k === 0 || k === 3 ? -1 : 1, sf = k < 2 ? -1 : 1; pos[a + k * 3] = ox + rx * 0.08 * sx + fx * 0.17 * sf; pos[a + k * 3 + 1] = 0.03; pos[a + k * 3 + 2] = oz + rz * 0.08 * sx + fz * 0.17 * sf; }
   P.geo.attributes.position.needsUpdate = true; P.next = (P.next + 1) % PRINT_N;
 }
@@ -724,14 +724,14 @@ function updateMovers(dt) {
   for (let j = 0; j < ms.length; j++) {
     const m = ms[j]; m.t += dt;
     if (!m.sliding) {
-      if (m.t < every - slide) continue;
+      if (coop.guest ? !m.go : m.t < every - slide) continue;                          // co-op guest: the shelf slides when the host's does
       for (let i = 0; i < 4; i++) floor.tiles[moverTile(m, i)] = T_WALL;   // the strip turns solid; the shelf grinds
       let stuck = false;
       const sp = shoveOut(player, player.radius, m); if (sp === 1) { player.vx = player.vz = 0; flash('A shelf shoves you aside.'); } else if (sp < 0) stuck = true;
       for (const e of enemies) if (!e.dead && shoveOut(e, 0.4, m) < 0) stuck = true;
       const al = Enemy.ally; if (al && !al.dead && al.floor === floor && shoveOut(al, 0.4, m) < 0) stuck = true;
       if (stuck) { for (let i = 2 * (1 - m.k); i < 2 * (1 - m.k) + 2; i++) floor.tiles[moverTile(m, i)] = T_FLOOR; continue; }   // someone cannot be moved clear: the shelf waits a tick and tries again
-      m.sliding = true;
+      m.sliding = true; m.go = 0; if (coop.host) coop.mover(j, m.k);
       pending.push({ x: (m.x + m.dx * 1.5 + 0.5) * TILE, z: (m.y + m.dy * 1.5 + 0.5) * TILE, r: T.shelfRing, src: null });
       if (discover('item:shelf', 'Moving shelves')) flash('Stone grinds on stone: a whole shelf is moving.');
     }
@@ -748,7 +748,7 @@ function updateMovers(dt) {
 // the player only for the seal). Nothing runs unless a cloud is up. ----
 const clouds = []; let cloudsOn = 0;
 function spawnCloud(x, z, r, dur, daze, hitPlayer) {
-  if (coop.host && hitPlayer) coop.send({ k: 'cl', fk: coopFloorKey(), x, z, r, dur, daze });   // co-op: the guest breathes it too
+  if (coop.host && hitPlayer && !coop.mute) coop.send({ k: 'cl', fk: coopFloorKey(), x, z, r, dur, daze });   // co-op: the guest breathes it too
   let c = null; for (let i = 0; i < clouds.length; i++) if (!clouds[i].on) { c = clouds[i]; break; }
   if (!c) {
     if (clouds.length >= 6) c = clouds[0];
@@ -1058,7 +1058,7 @@ function castWand(it) {
   const m = wandFxBolt(group, it.kind);                                    // a pooled bolt, turned to face its flight direction once
   const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * WAND.speed, vy: dy * WAND.speed, vz: dz * WAND.speed, gravity: 0, life: WAND.range / WAND.speed, owner: 'player', kind: 'wand', wand: it.kind, stuck: false, wfx: true, mesh: m };
   m.position.set(a.x, a.y, a.z); m.lookAt(a.x + dx, a.y + dy, a.z + dz);
-  arrows.push(a);
+  arrows.push(a); if (coop.on) coop.shot(a);
   loud(W.noise); Sfx.play('wand_' + it.kind);
   discover('wand:' + it.kind, W.name);
   if (--it.charges <= 0) breakWand(it);
@@ -1078,12 +1078,16 @@ function applyWand(kind, e) {
   const W = WANDS[kind], tag = s => { discover('status:' + s, STATUS[s].name); };
   const cy = Math.max(0.3, Math.min(1.5, (e.T.height || 1.7) * 0.6 * (e.scaleK || 1))) + (e.alt || 0);   // about its chest
   wandImpact(group, kind, e.x, cy, e.z);                                      // (a flash on the target; lightning adds one on the arc below)
+  if (coop.host && !coop.src) coop.fx(0, kind, e.x, cy, e.z, 1);              // (the guest's own zap already flashed on its screen)
   if (kind === 'fire') { const dead = hurtByWand(e, W.dmg), burn = !dead && gameRng() < WAND.burnChance && e.addStatus('burn'); if (burn) tag('burn'); mark(burn ? `FIRE ${W.dmg} +BURN` : `FIRE ${W.dmg}`, '#ff9a3a'); }
   else if (kind === 'frost') { let fz = false; if (!hurtByWand(e, W.dmg)) { if (e.addStatus('slow', W.slow)) tag('slow'); if (gameRng() < WAND.freezeChance && e.addStatus('freeze')) { fz = true; tag('freeze'); } } mark(fz ? (e.boss ? 'FROST +SLOW' : 'FROZEN SOLID') : 'FROST +SLOW', '#7fd8ff'); }
   else if (kind === 'lightning') {
     if (!hurtByWand(e, W.dmg) && e.addStatus('stun', W.stun)) tag('stun');
     const o = nearestOther(e, enemies, W.chain);
-    if (o) wandImpact(group, 'lightning', o.x, Math.max(0.3, Math.min(1.5, (o.T.height || 1.7) * 0.6 * (o.scaleK || 1))) + (o.alt || 0), o.z, 0.7);
+    if (o) {
+      const oy = Math.max(0.3, Math.min(1.5, (o.T.height || 1.7) * 0.6 * (o.scaleK || 1))) + (o.alt || 0);
+      wandImpact(group, 'lightning', o.x, oy, o.z, 0.7); if (coop.host) coop.fx(0, 'lightning', o.x, oy, o.z, 0.7);
+    }
     if (o && !hurtByWand(o, W.chainDmg) && o.addStatus('stun', W.chainStun)) tag('stun');
     mark(o ? 'LIGHTNING ARCS' : 'LIGHTNING +STUN', '#ffe84a');
   } else if (kind === 'force') {
@@ -1100,6 +1104,7 @@ function applyWand(kind, e) {
     }
     hurtByWand(e, W.dmg + (hitWall ? W.wallDmg : 0));
     wandRing(group, 'force', e.x, e.z, hitWall ? 2.6 : 1.8, 0.35);                  // a shock ring where it lands
+    if (coop.host) coop.fx(1, 'force', e.x, 0, e.z, hitWall ? 2.6 : 1.8);
     mark(hitWall ? 'FORCE: SLAMMED' : 'FORCE', '#c58aff');
   } else if (kind === 'bust') {
     if (e.elite) mark('TOO BIG TO STICK', '#aaa');                                // elites and bosses shrug it off
@@ -1113,6 +1118,7 @@ const SPEAK = typeof speechSynthesis !== 'undefined' && !params.has('mute') && !
 function playRage(it) {
   if (cb.rageCd > 0) { flash('The recorder is still rewinding.'); return; }
   cb.rageCd = RAGE.cd; loud(RAGE.noise); wandRing(group, 'rage', player.x, player.z, RAGE.radius, 0.7);   // the shout rolls out as a red ring
+  if (coop.host) coop.fx(1, 'rage', player.x, 0, player.z, RAGE.radius);
   const victims = coop.guest ? coop.rage() : rageVictims(enemies, player.x, player.z).filter(e => e.enrage(RAGE.dur, player.x, player.z));
   discover('item:rage', "Hanahan's Rage");
   try { if (SPEAK) { SPEAK.cancel(); const u = new SpeechSynthesisUtterance(RAGE_LINES[Math.floor(Math.random() * RAGE_LINES.length)]); u.pitch = 0.55; u.rate = 1.15; SPEAK.speak(u); } } catch (err) {}
@@ -1213,7 +1219,7 @@ function fireArrow(frac) {
   const sp = BOW.speedMin + (BOW.speedMax - BOW.speedMin) * frac;
   const a = { x: player.x + dx * 0.5, y: eyeY() - 0.1, z: player.z + dz * 0.5, vx: dx * sp, vy: dy * sp, vz: dz * sp, dmg: w.dmg * (0.4 + 0.6 * frac), owner: 'player', stuck: false, w, mesh: makeArrowMesh() };
   a.mesh.position.set(a.x, a.y, a.z); a.mesh.lookAt(a.x + dx, a.y + dy, a.z + dz);
-  group.add(a.mesh); arrows.push(a);
+  group.add(a.mesh); arrows.push(a); if (coop.on) coop.shot(a);
   if (!dev.on) inv.arrows--; Sfx.play('bow');
   loud(w.noise);
 }
@@ -1223,14 +1229,16 @@ function stickArrow(a, hitEnemy) {
   if (!keep) { group.remove(a.mesh); arrows.splice(arrows.indexOf(a), 1); return; }
   if (!hitEnemy && a.px !== undefined) { a.x = a.px; a.z = a.pz; }                     // lie in front of the wall, not inside it
   a.y = 0.05; a.mesh.position.set(a.x, 0.05, a.z); a.mesh.rotation.set(0, Math.atan2(a.dirx || 0, a.dirz || 1), 0);
+  if (coop.on) coop.stuck(a);
 }
 const dropArrowMesh = a => { if (a.pool) bossFxRelease(a.mesh); else if (a.wfx) wandFxRelease(a.mesh); else group.remove(a.mesh); };   // a boss shot's mesh goes back to its pool
 function updateArrows(dt) {
   wandFxUpdate(group, dt);                                                          // impact flashes and the shock ring fade out
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
+    if (a.ghost) { coopGhostArrow(a, i, dt); continue; }                           // co-op: the partner's arrow or bolt, drawn only (js/coop.js)
     if (a.stuck) {
-      if (a.kind !== 'wand' && Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
+      if (a.kind !== 'wand' && Math.hypot(a.x - player.x, a.z - player.z) < 1.0 && inv.arrows < QUIVER_MAX) { inv.arrows++; if (coop.on && a.sid) coop.unstuck(a); group.remove(a.mesh); arrows.splice(i, 1); addLog('Picked up an arrow.', '#cfc'); }
       continue;
     }
     if (a.owner === 'enemy') {
@@ -1516,13 +1524,14 @@ function updateBombs(dt) {
 // ---- trapped chests (numbers: TRAP in js/loot.js). The gas cloud is one pooled translucent sphere built once, no light; its effects are
 // applied in a single pass over the enemies when it spawns, and nothing runs per frame once it has faded. ----
 const gasFx = (() => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x9bd86a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); m.visible = false; scene.add(m); return { m, t: 0, on: false }; })();
+function showGas(x, z) { gasFx.on = true; gasFx.t = 0; gasFx.m.position.set(x, 0.9, z); gasFx.m.visible = true; }
 function springTrap(kind, o) {
   if (kind === 'dart') {
     damage(TRAP.dart);
     if (pst.apply('bleed', TRAP.bleed)) discover('status:bleed', 'Bleed');
     hitReaction(TRAP.dart); flash('A dart shoots out of the chest!'); addLog(`A trap dart hits you: ${TRAP.dart} damage and bleeding.`, '#ff6a6a');
   } else if (kind === 'gas') {
-    gasFx.on = true; gasFx.t = 0; gasFx.m.position.set(o.x, 0.9, o.z); gasFx.m.visible = true;
+    showGas(o.x, o.z); if (coop.on) coop.fx(2, '', o.x, 0.9, o.z, 0);
     if (!inSafe && Math.hypot(player.x - o.x, player.z - o.z) < TRAP.gasRadius && hasLOS(floor, o.x, o.z, player.x, player.z)) {
       if (pst.apply('daze', TRAP.gasDaze)) discover('status:daze', 'Daze'); if (pst.apply('slow', TRAP.gasSlow)) discover('status:slow', 'Slow');
     }
@@ -1551,7 +1560,7 @@ function cutBell(w) {
     if (o.kind !== "bell" || floor.patches.get(o.p.y * floor.w + o.p.x) !== "bell") continue;
     const bx = (o.p.x + 0.5) * TILE, bz = (o.p.y + 0.5) * TILE, dx = bx - player.x, dz = bz - player.z, d = Math.hypot(dx, dz);
     if (d > reach || (dx * fx + dz * fz) / (d || 1) < 0.6 || !hasLOS(floor, player.x, player.z, bx, bz)) continue;
-    floor.patches.delete(o.p.y * floor.w + o.p.x); o.mesh.visible = false;
+    floor.patches.delete(o.p.y * floor.w + o.p.x); o.mesh.visible = false; if (coop.on) coop.bell(o.p.y * floor.w + o.p.x, 0);
     discover("item:bell", "Tripwire bells"); flash("You cut the tripwire. No sound.");
     return true;
   }
@@ -2010,6 +2019,7 @@ function finishSearch(o, smashed) {
     else { sprung = true; springTrap(kind, o); }
     if (state === 'dead') return;
   }
+  if (coop.host && chest && !o.p.locked) coop.propState(o);                        // the padlock and tripwire go on the guest's screen too
   loud(noise);
   if (chest) { discover('item:chest', 'Chests'); Sfx.play('chest'); }
   if (theme.mechanic.kind === 'crowd' && o.p.kind !== 'door' && SEARCH_NOISE[o.p.kind]) watchedSearch();
@@ -2395,6 +2405,7 @@ function drawMinimap(step = 1) {
     mctx.fillStyle = o.p.kind === 'chest' ? TIERS[o.p.tier | 0].color : o.p.kind === 'merchant' ? '#6cf' : o.p.kind === 'questnpc' ? '#ff9a6a' : '#b08a5a';   // a chest's dot is its grade colour
     mctx.fillRect(o.p.x * S + S / 4, o.p.y * S + S / 4, S / 2 + 1, S / 2 + 1);
   }
+  if (coop.on) coopDot(mctx, S);                                                   // the partner on the minimap
   const px = player.x / TILE * S, py = player.z / TILE * S;
   mctx.save(); mctx.translate(px, py); mctx.rotate(-player.yaw);
   mctx.fillStyle = '#5fe08a';
@@ -2503,10 +2514,11 @@ hud.seed.textContent = `seed ${runSeed}`;
 
 function begin() {
   if (state === 'won' || state === 'dead') { location.search = '?seed=' + ((Math.random() * 4294967296) >>> 0); return; }
-  state = 'play'; session.started = true;
-  hud.overlay.style.display = 'none';
+  if (!session.started && !coop.beforeStart()) return;                            // co-op lobby: only the host's Start begins the run (js/coop.js)
+  startRun();
   canvas.requestPointerLock();
 }
+function startRun() { state = 'play'; session.started = true; hud.overlay.style.display = 'none'; }
 hud.overlay.addEventListener('click', begin);
 canvas.addEventListener('click', () => { if (state === 'play' && document.pointerLockElement !== canvas) canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
@@ -2596,7 +2608,7 @@ function frame(now) {
     if (pulse > 0) { events.push({ x: player.x, z: player.z, r: pulse * hush }); rings.push({ x: player.x, z: player.z, r: pulse * hush, t: 0 }); }
     if (player.noiseRadius > 0) events.push({ x: player.x, z: player.z, r: (player.noiseRadius + (under === 'brush' ? mt.rustle : 0)) * hush * (player.crouching ? PD.crouchNoise : 1) * (under === 'dark' ? mt.darkFoot : 1) * (under === 'crowd' ? mt.din : 1) });   // brush rustles: +3 m while you move in it; the Market din muffles your steps on a crowd patch
     if (under === 'bell') {                                                                                          // a tripwire bell: one loud alarm, then it is spent
-      floor.patches.delete(player.tileY * floor.w + player.tileX);
+      floor.patches.delete(player.tileY * floor.w + player.tileX); if (coop.on) coop.bell(player.tileY * floor.w + player.tileX, 1);
       const bo = decorObjs.find(o => o.kind === 'bell' && o.p.x === player.tileX && o.p.y === player.tileY); if (bo) bo.mesh.visible = false;
       events.push({ x: player.x, z: player.z, r: 14 }); rings.push({ x: player.x, z: player.z, r: 14, t: 0 });
       discover('item:bell', 'Tripwire bells'); flash('DING! A tripwire bell rings.');
