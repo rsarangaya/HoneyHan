@@ -178,7 +178,7 @@ const invUI = (() => {
   }
   function close() {
     root.style.display = 'none';
-    state = 'play';
+    if (state === 'inv') state = 'play';                          // (not over a death or a co-op end that happened while open)
     try { canvas.requestPointerLock(); } catch (e) {}
   }
   addEventListener('keydown', e => {

@@ -228,6 +228,8 @@ const pauseMenu = (() => {
   }
   const wd = document.getElementById('welcomeDiff');         // the welcome screen's difficulty button: Normal / Easy (assists)
   if (wd) { wd.addEventListener('click', e => { e.stopPropagation(); setDiff(!assist.easy); }); diffLabel(); }
+  const wc = document.getElementById('welcomeCoop');         // the welcome screen's Co-op entry: Host / Join with copy-paste codes (js/coop.js)
+  if (wc) wc.addEventListener('click', e => { e.stopPropagation(); coopMenu.open(); });
   discoverItem(inv.equip.weapon, true);                      // the starting sword is already known
   return { open, close, render };
 })();

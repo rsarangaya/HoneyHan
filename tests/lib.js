@@ -64,12 +64,12 @@ const HELPERS = () => {
 
 
 // run(title, async ({ open, check }) => {...}): opens the server and browser, runs the body, closes up, sets the exit code.
-async function run(title, body) {
+async function run(title, body, opts = {}) {   // opts.args: extra Chromium flags (the co-op test needs plain loopback ICE candidates)
   let failures = 0;
   const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? '  (' + detail + ')' : ''}`); if (!ok) failures++; };
   await new Promise(r => server.listen(0, r));
   const base = `http://localhost:${server.address().port}/`;
-  const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', ...(opts.args || [])] });
   const errors = [];
   // A fresh page on the given seed, started and with the helpers installed. 320 x 180 keeps software rendering playable.
   const open = async seed => {

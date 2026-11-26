@@ -531,7 +531,7 @@ const dealUI = (() => {
   }
   function close() {
     root.style.display = 'none';
-    state = 'play';
+    if (state === 'deal') state = 'play';
     player.keys[KEYS.interact] = false;                                                   // do not reopen at once if E is still held
     try { canvas.requestPointerLock(); } catch (e) {}
   }

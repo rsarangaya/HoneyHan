@@ -65,7 +65,7 @@ const shopUI = (() => {
   }
   function close() {
     root.style.display = 'none';
-    state = 'play';
+    if (state === 'shop') state = 'play';
     try { canvas.requestPointerLock(); } catch (e) {}
   }
   addEventListener('keydown', e => { if (e.code === 'Escape' && state === 'shop') { e.preventDefault(); e.stopImmediatePropagation(); close(); } });   // stop the pause menu opening on the same key

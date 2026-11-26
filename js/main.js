@@ -2,9 +2,10 @@
 const MAX_FLOOR = 5;       // floors per stage: floorNum is the floor WITHIN the stage, and floor 5 is the stage's boss arena (with the safe room)
 const STAGES = 4, FINAL_STAGE = 5;   // 4 themed stages, then stage 5: one boss arena with the final boss, the Cinder Wyrm
 const params = new URLSearchParams(location.search);
-const runSeed = params.has('seed') ? (parseInt(params.get('seed'), 10) >>> 0) : (Math.random() * 4294967296) >>> 0;
+let runSeed = params.has('seed') ? (parseInt(params.get('seed'), 10) >>> 0) : (Math.random() * 4294967296) >>> 0;
 // Stage 1 keeps the theme the seed always picked; stages 2 to 4 take three other themes, shuffled from the seed (no repeats).
-const stageThemes = (() => { const t0 = makeRng(runSeed).pick(THEMES); return [t0, ...makeRng((runSeed ^ 0x7e3a11) >>> 0).shuffle(THEMES.filter(t => t !== t0)).slice(0, STAGES - 1)]; })();
+const themesFor = sd => { const t0 = makeRng(sd).pick(THEMES); return [t0, ...makeRng((sd ^ 0x7e3a11) >>> 0).shuffle(THEMES.filter(t => t !== t0)).slice(0, STAGES - 1)]; };
+let stageThemes = themesFor(runSeed);
 let stage = 1, stageSeed = runSeed, theme = stageThemes[0];   // stageSeed is the run seed for stage 1 (so stage 1 generates exactly as before) and a seeded mix of it for the others
 
 const canvas = document.getElementById('game');
@@ -654,7 +655,7 @@ function buildFloor() {
   }
   Enemy.all = enemies;
   linkHandlers(enemies);
-  enemies.forEach(e => { e.cone.visible = dev.on; group.add(e.mesh); });
+  enemies.forEach((e, i) => { e.nid = i; e.cone.visible = dev.on; group.add(e.mesh); });   // nid: the same on both co-op machines (the floor is generated from the same seed)
   for (const b of enemies) if (b.boss) { nameTag(b, b.def.name, b.def.color); if (b.bm) b.tag.position.y = b.bm.tagY; }                // every boss has its name over its head
   decorObjs.forEach((o, i) => { o.src = floor.decor[i]; });
   for (const o of decorObjs) if (o.kind === 'altar' && !o.src.shrine) propObjs.push({ p: { kind: 'prayer', x: o.src.x, y: o.src.y, opened: !!o.src.prayed, src: o.src }, mesh: new THREE.Group(), x: o.x, z: o.z, r: 0, lid: null, mats: [] });   // a plain altar: hold E to pray once (pray)
@@ -747,6 +748,7 @@ function updateMovers(dt) {
 // the player only for the seal). Nothing runs unless a cloud is up. ----
 const clouds = []; let cloudsOn = 0;
 function spawnCloud(x, z, r, dur, daze, hitPlayer) {
+  if (coop.host && hitPlayer) coop.send({ k: 'cl', fk: coopFloorKey(), x, z, r, dur, daze });   // co-op: the guest breathes it too
   let c = null; for (let i = 0; i < clouds.length; i++) if (!clouds[i].on) { c = clouds[i]; break; }
   if (!c) {
     if (clouds.length >= 6) c = clouds[0];
@@ -955,6 +957,7 @@ function startAttack() {
 function playerHit() {
   const w = wstats();
   const t = findMeleeTarget(player, eyeY(), enemies, floor, w.reach);
+  if (coop.on && coop.melee(t, w)) return;                            // co-op friendly fire: the partner was in the swing
   if (!t) { if (!smashChest(w) && !cutBell(w)) loud(2); return; }   // swung at nothing (or at a locked chest)
   if (!t.zone) { loud(2); return; }   // (no on-screen 'aim off' text)
   dealHit(t.e, t.zone, w.dmg, w, w.noise);
@@ -967,6 +970,7 @@ function dealHit(e, zone, base, w, noise) {
   const guarded = !sneak && e.stun <= 0 && e.T.blockFront < 1 && e.facesPlayer(player);        // a raised shield or guard takes hits from the front
   const dmg = base * Math.min(TUNE.damageCap, ZONE_MUL[zone]) * (sneak ? Math.min(w.sneak, e.T.sneakCap) : 1) * (guarded ? e.T.blockFront : 1)
     * (inv.buffs.might > 0 ? 1.4 : 1) * PD.dmgMul * (e.resist[zone] || 1) * (e.bs ? bossTakeMul(e, zone) : 1);
+  if (coop.guest) return coopGuestHit(e, zone, dmg, sneak, guarded, w, noise);                // co-op guest: the host owns the enemy and only gets the claim
   const killed = e.hurt(dmg, player); Sfx.play('hit'); Sfx.play(killed ? 'edie' : 'ehurt');
   if (noise) loud(sneak && killed ? 2 : noise);   // a clean kill is nearly silent
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, sneak); mark(sneak ? 'SNEAK KILL' : 'KILLED', '#ffd23a'); if (w.kills) hogKill(); }
@@ -1025,6 +1029,7 @@ function bash() {
   const t = findMeleeTarget(player, eyeY(), enemies, floor, SHIELD.bashReach);
   if (!t) return;
   const e = t.e, sh = inv.equip.offhand;
+  if (coop.guest) { coop.hit(e, SHIELD.bashDmg * TIERS[sh.tier].mul * (e.bs ? bossTakeMul(e, 'body') : 1), 'body', false, true, { status: 'stun', dur: SHIELD.bashStun }); mark('BASH', '#7fe8ff'); return; }   // co-op guest: the host takes the bash
   const killed = e.hurt(SHIELD.bashDmg * TIERS[sh.tier].mul * (e.bs ? bossTakeMul(e, 'body') : 1), player);   // (a boss's open window counts for a bash and a wand too)
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); mark('KILLED', '#ffd23a'); return; }
   const stunned = e.addStatus('stun', SHIELD.bashStun);
@@ -1064,11 +1069,12 @@ function breakWand(w) {
   flash(`The ${WANDS[w.kind].name} crumbles to dust.`);
 }
 function hurtByWand(e, dmg) {                                                 // wand damage ignores armor
-  const killed = e.hurt(dmg * PD.dmgMul * (e.bs ? bossTakeMul(e, 'body') : 1), player); Sfx.play(killed ? 'edie' : 'ehurt');
+  const killed = e.hurt(dmg * PD.dmgMul * (e.bs ? bossTakeMul(e, 'body') : 1), coop.src || player); Sfx.play(killed ? 'edie' : 'ehurt');
   if (killed) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); }
   return killed;
 }
 function applyWand(kind, e) {
+  if (coop.guest) return coop.wand(kind, e);                                  // co-op guest: the host works the whole wand (damage, statuses, push, chain)
   const W = WANDS[kind], tag = s => { discover('status:' + s, STATUS[s].name); };
   const cy = Math.max(0.3, Math.min(1.5, (e.T.height || 1.7) * 0.6 * (e.scaleK || 1))) + (e.alt || 0);   // about its chest
   wandImpact(group, kind, e.x, cy, e.z);                                      // (a flash on the target; lightning adds one on the arc below)
@@ -1081,7 +1087,7 @@ function applyWand(kind, e) {
     if (o && !hurtByWand(o, W.chainDmg) && o.addStatus('stun', W.chainStun)) tag('stun');
     mark(o ? 'LIGHTNING ARCS' : 'LIGHTNING +STUN', '#ffe84a');
   } else if (kind === 'force') {
-    const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
+    const by = coop.src || player, dx = e.x - by.x, dz = e.z - by.z, d = Math.hypot(dx, dz) || 1;   // (co-op: pushed away from whoever zapped)
     let moved = 0, hitWall = false;
     if (!e.boss && !e.st.has('stuck')) {
       collider.props = floor.solids;
@@ -1107,7 +1113,7 @@ const SPEAK = typeof speechSynthesis !== 'undefined' && !params.has('mute') && !
 function playRage(it) {
   if (cb.rageCd > 0) { flash('The recorder is still rewinding.'); return; }
   cb.rageCd = RAGE.cd; loud(RAGE.noise); wandRing(group, 'rage', player.x, player.z, RAGE.radius, 0.7);   // the shout rolls out as a red ring
-  const victims = rageVictims(enemies, player.x, player.z).filter(e => e.enrage(RAGE.dur, player.x, player.z));
+  const victims = coop.guest ? coop.rage() : rageVictims(enemies, player.x, player.z).filter(e => e.enrage(RAGE.dur, player.x, player.z));
   discover('item:rage', "Hanahan's Rage");
   try { if (SPEAK) { SPEAK.cancel(); const u = new SpeechSynthesisUtterance(RAGE_LINES[Math.floor(Math.random() * RAGE_LINES.length)]); u.pitch = 0.55; u.rate = 1.15; SPEAK.speak(u); } } catch (err) {}
   flash(victims.length ? `Hanahan's Rage! ${victims.length} ${victims.length === 1 ? 'enemy turns' : 'enemies turn'} on each other.` : "Hanahan's Rage plays... but nobody is close enough to hear it.");
@@ -1134,14 +1140,17 @@ Enemy.burst = e => {
 
 // ---- enemy shots: an archer's arrows and a shaman's hexes fly at you. Arrows can be blocked, hexes cannot ----
 function spawnEnemyShot(s) {
+  const shotTgt = coop.shotTgt || player;                                             // co-op: the host aims a shot at whichever player the shooter is hunting
   const bk = BOSS_SHOT[s.kind], pm = bk ? bossFxAcquire(s.kind) : null;              // a boss's shot flies in a pooled mesh (js/boss.js); none free: no shot
   if (bk && !pm) return false;
-  const gravity = bk ? bk.g : s.kind === 'arrow' ? 4 : 0, tx = s.tx !== undefined ? s.tx : player.x, ty = s.time ? 0.05 : eyeY() - 0.3, tz = s.tz !== undefined ? s.tz : player.z;   // (a lobbed fireball: its own landing spot on the floor, s.time s from now)
+  const gravity = bk ? bk.g : s.kind === 'arrow' ? 4 : 0, tx = s.tx !== undefined ? s.tx : shotTgt.x, ty = s.time ? 0.05 : (shotTgt === player ? eyeY() : shotTgt.eye) - 0.3, tz = s.tz !== undefined ? s.tz : shotTgt.z;   // (a lobbed fireball: its own landing spot on the floor, s.time s from now)
   const dx = tx - s.x, dy = ty - s.y, dz = tz - s.z, dist = Math.hypot(dx, dz) || 1, t = s.time || Math.max(0.05, Math.hypot(dx, dy, dz) / s.speed);
   const jitter = s.time ? () => 0 : () => (gameRng() - 0.5) * 0.05 * dist / t;   // a little inaccuracy (none for a fireball: its ring on the floor is exact)
   const a = { x: s.x, y: s.y, z: s.z, vx: dx / t + jitter(), vy: (dy + 0.5 * gravity * t * t) / t, vz: dz / t + jitter(), gravity, life: 4, owner: 'enemy', kind: s.kind, from: s.from, stuck: false, pool: !!pm, ring: s.ring === undefined ? -1 : s.ring, dmg: s.dmg || 1, mv: s.mv || null, mesh: pm || (s.kind === 'arrow' ? makeArrowMesh() : makeBoltMesh({ hex: '#b060ff', thorn: '#4ac84a', curse: '#9adaff', dart: '#7aff5a' }[s.kind])) };
   if (s.fan) { const c = Math.cos(s.fan), n = Math.sin(s.fan), vx = a.vx; a.vx = vx * c - a.vz * n; a.vz = vx * n + a.vz * c; }   // a fan of shots: turn the velocity about the vertical axis
+  if (s.vel) { a.vx = s.vel[0]; a.vy = s.vel[1]; a.vz = s.vel[2]; }                  // co-op guest: the host's exact flight
   a.mesh.position.set(a.x, a.y, a.z); if (!pm) group.add(a.mesh); arrows.push(a);
+  if (coop.host) coop.shotSent(a, s);
   return true;
 }
 // A fireball landing (the Cinder Wyrm's volley): the ground burns there a moment, and anyone within the ring is hit like by any ground move (a block still hurts, knockback).
@@ -1257,6 +1266,7 @@ function updateArrows(dt) {
 // piece of equipment (Rare or better) and gold.
 let winTimer = 0;   // the final boss's delayed Run complete; cleared when a stage is restarted
 function bossDefeated(e) {
+  if (coop.host) coop.bossDown(e);
   e.corpseDone = true; awardKill(e, false);
   const rng = makeRng((e.seed ^ 0xb055) >>> 0);
   bossDead[stage] = true;
@@ -1408,7 +1418,9 @@ function dropSpawn(d, x, z, quest, rng) {
   const id = dropShape(d), M = dropShapeMesh(S, id), sc = id === 'gem' ? DROP_SHAPE.gem : null, k = dropScale(d), isKey = d.type === 'key';
   const it = { d, x: px, z: pz, q: quest || isKey, col: dropColor(d), yaw: rng() * 6.2832, sh: id, slot: M.arr.length, sx: sc ? sc[0] : k, sy: sc ? sc[1] : k, sz: sc ? sc[2] : k, hs: isKey ? 1.5 : 0.9, fail: false, cd: 0 };
   L.push(it); M.arr.push(it); M.mesh.count = M.arr.length; S.halo.count = L.length;
+  it.id = S.seq = (S.seq | 0) + 1;                                                 // floor-unique id (the same on both co-op machines for the generated drops)
   dropPlace(S, it); dropSet(S, L.length - 1);
+  if (coop.host) coop.dropMade(it);
 }
 function dropAll(list, e, quest) {
   const rng = makeRng((e.seed ^ 0xd209) >>> 0);
@@ -1423,9 +1435,10 @@ function updateDrops(dt) {
     const it = L[i], dx = it.x - px, dz = it.z - pz;
     if (dx * dx + dz * dz > R2) { it.fail = false; continue; }
     if (it.fail) { if (!player.keys[KEYS.interact] || (it.cd -= dt) > 0) continue; it.cd = DROPS.retry; }
+    if (coop.on && !coop.pickup(it)) continue;                                     // co-op: the host decides who gets it (first claim wins)
     const text = inv.add(it.d);
-    if (text) { flash('Found ' + text); dropRemove(S, i); }
-    else { if (!it.fail || player.keys[KEYS.interact]) flash(it.d.type === 'arrows' ? 'Quiver full' : 'Pack full: it stays on the floor'); it.fail = true; it.cd = DROPS.retry; }
+    if (text) { flash('Found ' + text); if (coop.on) coop.pickedUp(it); dropRemove(S, i); }
+    else { if (coop.on) coop.pickFail(it); if (!it.fail || player.keys[KEYS.interact]) flash(it.d.type === 'arrows' ? 'Quiver full' : 'Pack full: it stays on the floor'); it.fail = true; it.cd = DROPS.retry; }
   }
 }
 // Dead bodies despawn DROPS.bodyT s after death (deadT counts while this floor is the live one): out of the scene and the update list, their own geometry and
@@ -1458,6 +1471,7 @@ const blastDmg = d => BOMB.dmg * (1 - BOMB.falloff * d / BOMB.radius);          
 function explodeAt(x, z, src) {
   let fx = blastFx[0]; for (const f of blastFx) if (!f.on) { fx = f; break; }
   fx.on = true; fx.t = 0; fx.r = BOMB.radius; fx.m.position.set(x, 0.7, z); fx.m.visible = true;
+  if (coop.host && src) coop.blast(src, x, z);                                  // co-op: a goblin blowing itself up reaches the guest too (dropped bombs run on both)
   pending.push({ x, z, r: BOMB.noise, src: null });                              // the bang is heard far and wide
   const dp = Math.hypot(player.x - x, player.z - z);
   if (!inSafe && dp < BOMB.radius && hasLOS(floor, x, z, player.x, player.z)) {
@@ -1579,7 +1593,7 @@ function resolveEnemyAttack(e, zone, ranged = false, shotMv = null, shotDmg = 1)
       cb.stamina = 0; mark('GUARD BROKEN', '#ff6a4a'); damage(full * 0.5); hitStatuses(e, zone); return;
     }
     else if (cb.blockT <= bs.parryWin && !(mv && mv.parry === false)) {   // (a boss move with parry: false is only blocked)
-      if (!ranged) { e.stun = 1.0; e.winding = false; e.atkCd = 0.6; }            // parrying a blow staggers the attacker, an arrow just stops
+      if (!ranged) { e.stun = 1.0; e.winding = false; e.atkCd = 0.6; if (coop.guest) coop.parried(e); }            // parrying a blow staggers the attacker, an arrow just stops
       cb.stamina = Math.min(STAMINA_MAX, cb.stamina + TUNE.parryRestore);   // a parry gives stamina back
       mark(ranged ? 'ARROW BLOCKED' : 'PARRY', '#7fe8ff'); loud(5); return;
     } else if (bs.cost > 0) {
@@ -1849,6 +1863,7 @@ function awardKill(e, sneak) {
   const exempt = !!(e.boss || e.spec.mini);
   let base = e.boss ? (e.final ? PROG.xpFinalBoss : PROG.xpStageBoss * stageFactor(stage, TUNE)) : killXp(e.T, stage, floorNum, TUNE);
   if (!e.boss) { if (e.resp) base *= TUNE.xpRespawn; if (sneak) base *= 1 + TUNE.xpSneak; }
+  if (coop.on && !coop.share(e, base, exempt)) return;   // co-op: each player within range of the kill gets the XP
   gainXp(base, exempt);
 }
 function gainXp(base, exempt) {
@@ -1878,13 +1893,14 @@ function hitReaction(n) {
   requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 function damage(n) {
-  if (inSafe || cb.iframe > 0) return;             // the safe room, or the dash's invulnerable moment: nothing can hurt you
+  if (inSafe || cb.iframe > 0 || coop.down) return;             // the safe room, or the dash's invulnerable moment: nothing can hurt you
   hitReaction(n); Sfx.play('phurt', Math.min(1.5, 0.5 + n / 20));
   hunger.fight = 3;
   if (cb.eat) { cb.eat = null; flash('Interrupted!'); }
   if (dev.on) return;
   inv.hp = Math.max(0, inv.hp - n);
   if (inv.hp <= 0) {
+    if (coop.on && coop.downed()) return;            // co-op: down (revivable) while the partner still stands
     state = 'dead'; knock.m = 0; player.dashS.on = false;
     document.exitPointerLock();
     hud.overlayText.innerHTML = `<h1>You died on stage ${stage}, floor ${floorNum}</h1><p>Click to start a new run.</p>`;
@@ -1966,6 +1982,7 @@ function pray(o) {
   flash('You kneel and pray. A warm light closes your wounds.'); addLog('You prayed at an altar: +' + PRAYER.heal + ' HP.', '#ffd070');
 }
 function finishSearch(o, smashed) {
+  if (o.p.busy) return;                                                            // co-op: the partner is emptying this one
   if (o.p.kind === 'merchant') { shopUI.open(); return; }
   if (o.p.kind === 'altar') { dealUI.open(o); return; }
   if (o.p.kind === 'prayer') { pray(o); return; }
@@ -1973,10 +1990,11 @@ function finishSearch(o, smashed) {
   if (o.p.mimic && o.mimic && o.mimic.dormant) {                                    // it was a mimic: the lid yawns and it bites
     const m = o.mimic; m.wake(true, player); m.yaw = Math.atan2(-(player.x - m.x), -(player.z - m.z));
     discover('enemy:mimic', 'Mimic'); flash('It is a MIMIC!'); addLog('The chest was a mimic!', '#ff6a6a');
+    if (coop.guest) coop.mimicWake(o);
     return;
   }
   const chest = o.p.kind === 'chest', unlocked = chest && o.p.locked;
-  let noise = (SEARCH_NOISE[o.p.kind] || 0) + (chest ? 0.5 * (o.p.tier | 0) : 0);
+  let noise = (SEARCH_NOISE[o.p.kind] || 0) + (chest ? 0.5 * (o.p.tier | 0) : 0), sprung = false;
   if (unlocked) {
     const pk = inv.pack.find(i => i.type === 'lockpick');
     if (smashed) noise = 0;                                                         // the blows were loud already
@@ -1989,7 +2007,7 @@ function finishSearch(o, smashed) {
   } else if (chest && o.p.trap) {
     const kind = o.p.trap; o.p.trap = null; dropTell(o); discover('chest:trap', 'Trapped chests');
     if (player.crouching) { noise = 0; flash('You disarm the trap.'); addLog('You disarmed the trap.', '#9ac8ff'); }   // quiet, and the trap is gone
-    else springTrap(kind, o);
+    else { sprung = true; springTrap(kind, o); }
     if (state === 'dead') return;
   }
   loud(noise);
@@ -1997,17 +2015,19 @@ function finishSearch(o, smashed) {
   if (theme.mechanic.kind === 'crowd' && o.p.kind !== 'door' && SEARCH_NOISE[o.p.kind]) watchedSearch();
   if (o.p.kind === 'door') {
     inv.remove(inv.pack.find(i => i.type === 'key' && i.lock === o.p.lock));
-    openDoor(o);
+    openDoor(o); if (coop.on) coop.opened(o);
     if (theme.doors.noise) loud(theme.doors.noise);                         // an ice seal shatters loudly, a gate grinds
     if (theme.doors.style === 'spore') { const T = theme.mechanic.TUNE; spawnCloud(o.x, o.z, T.puffR, T.puffDur, T.puffDaze, true); flash('The spore seal bursts: a cloud of spores!'); }
     flash(`Unlocked the ${o.p.room}`); questDoorOpened(o);
     return;
   }
-  let drops = o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, effFloor(), makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
+  if (coop.guest) return coop.requestLoot(o, !!smashed, !!unlocked, sprung);       // co-op: the host alone owns what is inside
+  let drops = propDrops(o);
   const got = [], left = [], notes = [];
   if (smashed && !o.p.left) {                                                       // smashing a lock rattles what is inside
-    let broke = 0;
-    drops = drops.filter(d => { if (d.type !== 'potion') return true; let keep = 0; for (let i = d.n || 1; i > 0; i--) if (gameRng() >= LOCKED.potionBreak) keep++; broke += (d.n || 1) - keep; d.n = keep; return keep > 0; });
+    const n = drops.reduce((a, d) => a + (d.type === 'potion' ? d.n || 1 : 0), 0);
+    drops = breakPotions(drops);
+    const broke = n - drops.reduce((a, d) => a + (d.type === 'potion' ? d.n || 1 : 0), 0);
     if (broke) notes.push(`${broke} potion${broke > 1 ? 's' : ''} broke`);
   }
   for (const d of drops) {
@@ -2017,10 +2037,18 @@ function finishSearch(o, smashed) {
     else left.push(d);
   }
   if (left.length) { o.p.left = left; notes.push(`pack full, ${left.length} left behind`); }
-  else markOpened(o);
+  else { markOpened(o); if (coop.on) coop.opened(o); }
   if (got.length) Sfx.play('pickup'); let msg = got.length ? 'Found ' + got.join(', ') : left.length ? '' : 'Nothing useful';
   if (notes.length) msg += (msg ? ' ' : '') + `(${notes.join(', ')})`;
   flash(msg);
+}
+
+// What a searched prop holds: what was left behind last time, else its seeded roll.
+function propDrops(o) {
+  return o.p.left || (o.p.fixed ? [{ type: 'potion', kind: o.p.fixed, n: 1 }] : [...rollLoot(o.p.kind, effFloor(), makeRng(o.p.seed), o.p.bonus || 0, o.p.gear || [], o.p.type, Math.min(4, (o.p.tier | 0) + (o.p.grade | 0))), ...(o.p.extra || [])]);
+}
+function breakPotions(drops) {
+  return drops.filter(d => { if (d.type !== 'potion') return true; let keep = 0; for (let i = d.n || 1; i > 0; i--) if (gameRng() >= LOCKED.potionBreak) keep++; d.n = keep; return keep > 0; });
 }
 
 // Doors slide up out of the way once unlocked.
@@ -2244,6 +2272,7 @@ function changeFloor(n, dir) {
 // only while fewer than baseGuards enemies live, in a room that takes spawns (js/enemytypes.js spawnRoom), is not the player's, is under its cap, is out of line of
 // sight and respawnMinDist metres away, and not within 6 m of another enemy. No room fits: retry in 8 s. (This replaces the old floor 3+ trickle.)
 function updateRespawn(dt) {
+  if (coop.on) return;   // co-op: no replacement guards (they would not exist on both machines)
   if (floor.boss) return;
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
@@ -2292,6 +2321,7 @@ Enemy.summon = (boss, type) => {
     const e = new Enemy({ x: tx, y: ty, route: [{ x: tx, y: ty }, { x: tx, y: ty }], seed: (gameRng() * 4294967296) >>> 0, type }, floor);
     e.x = x; e.z = z; e.minion = boss; e.last = { x: player.x, z: player.z }; e.set('alerted');
     e.cone.visible = dev.on; group.add(e.mesh); enemies.push(e); e.sync(0);
+    if (coop.host) coop.summoned(e, boss);
     return true;
   }
   return false;
@@ -2395,6 +2425,7 @@ function checkStairs() {
     if (performance.now() - sealedMsgT > 2500) { sealedMsgT = performance.now(); flash('The way down is sealed until the boss falls.'); }
     return;
   }
+  if (coop.on && coop.stairs()) return;                                             // co-op: both players take the stairs together (js/coop.js)
   const up = upProgress();                                                          // climbing back up works only into floors still cached (never rebuilds one you left)
   if (up > 0.25) {
     const dest = floorNum > 1 ? floorCache[floorNum - 1] : stageCaches[stage - 1] && stageCaches[stage - 1][MAX_FLOOR];
@@ -2452,6 +2483,7 @@ function startStage(s) {
   prog.floorXp = {}; allyReset(); prisonerRun = null; prisonerWalk = null; for (const k of Object.keys(prisonerRuns)) delete prisonerRuns[k]; for (const k of Object.keys(bossDead)) delete bossDead[k];
   useStage(s); pinTheme = null; startFloor(1); pruneThemeTextures();
 }
+function setRunSeed(sd) { runSeed = sd >>> 0; stageThemes = themesFor(runSeed); hud.seed.textContent = `seed ${runSeed}`; }   // co-op: the guest plays the host's run (js/coop.js), then startStage(1)
 function finishRun() {
   state = 'won';
   document.exitPointerLock();
@@ -2488,7 +2520,7 @@ addEventListener('keydown', e => {
     if (e.code === 'KeyM') explored.fill(1);
   }
   const slot = [KEYS.slot1, KEYS.slot2, KEYS.slot3, KEYS.slot4].indexOf(e.code);
-  if (state === 'play' && !e.repeat && slot >= 0) {
+  if (state === 'play' && !e.repeat && slot >= 0 && !coop.down) {
     const msg = inv.use(slot);
     if (msg) flash(msg);
     if (inv.swapT > 0) cb.atk = null;
@@ -2547,10 +2579,11 @@ const perfStats = { logic: 0, dt: 0 };   // average milliseconds of game logic p
 function frame(now) {
   const dt = (now - last) / 1000; last = now; perfStats.dt = dt; const tl0 = performance.now();
   if (state === 'play') {
-    player.update(dt, floor); Sfx.walk(dt, Math.hypot(player.vx, player.vz), player.sprinting, player.crouching);
+    if (coop.on) coop.tick(dt);
+    if (!coop.down) player.update(dt, floor); Sfx.walk(dt, Math.hypot(player.vx, player.vz), player.sprinting, player.crouching);
     inv.update(dt);
-    updateSearch(dt); updateDrops(dt);
-    updateCombat(dt);
+    if (!coop.down) { updateSearch(dt); updateDrops(dt); }
+    if (!coop.down) updateCombat(dt);
     gameT += dt;
     updateRespawn(dt);
     updateArrows(dt);
@@ -2576,11 +2609,12 @@ function frame(now) {
     updateNoiseHud(Math.max(player.noiseRadius, pulse) * hush, dt); updateAssist(under, mt);
     pulse = 0;
     const noise = noiseCtx; noise.prints = floor.prints; noise.pt = mt; noise.t = gameT;
-    for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
+    if (coop.on) coop.enemies(Math.min(dt, 0.05), noise);
+    else for (const e of enemies) { const zone = e.update(Math.min(dt, 0.05), player, noise); if (zone) resolveEnemyAttack(e, zone); }
     if (allyRun) allyStep(Math.min(dt, 0.05), noise);                                  // the recruited ally (js/quests.js): returns at once unless one is alive on this floor
     separateBodies(enemies, player, floor);
     updateBombs(dt); updateGas(dt); updateClouds(dt); bossLanesUpdate(dt); bossPuddlesUpdate(dt); bossFlamesUpdate(dt);
-    for (const e of enemies) if (e.dead && !e.corpseDone) { if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
+    for (const e of enemies) if (e.dead && !e.corpseDone) { if (coop.guest) e.corpseDone = true; else if (e.boss) bossDefeated(e); else makeCorpse(e, false); addLog(e.spec.mini ? `${e.spec.mini.name} ${e.cause}.` : `The ${e.T.name.toLowerCase()} ${e.cause}.`, '#ff6a6a'); }
     goneBodies();
     reveal();
     if ((frameNo = (frameNo + 1) % 15) === 0) discoverEnemiesInView();
@@ -2617,7 +2651,7 @@ requestAnimationFrame(frame);
 
 // Debug hook for testing from the console.
 window.game = {
-  get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, quality, qualityApply, setQualityMode: m => setQualityMode(m, qualityApply), adaptQuality, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; }, prog, PD, spendPoint, gainXp, awardKill, get xpBudgetHere() { return xpBudget(stage, floorNum, TUNE); },
+  coop, get group() { return group; }, get noiseLevel() { return noiseLvl; }, get hearRing() { return hearRing; }, get hearRadius() { return hearR; }, assist, player, startFloor, startStage, changeStage, inv, cb, pst, hunger, arrows, perfStats, get floorCache() { return floorCache; }, get stageCaches() { return stageCaches; }, get stage() { return stage; }, get shopFloor() { return shopFloor; }, get stageThemes() { return stageThemes; }, quality, qualityApply, setQualityMode: m => setQualityMode(m, qualityApply), adaptQuality, renderInfo() { camera.position.set(player.x, eyeY(), player.z); camera.rotation.set(player.pitch, player.yaw, 0); updateCulling(player, cullChunks, propObjs, enemies); renderer.render(scene, camera); return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures }; }, get shopUI() { return shopUI; }, get rings() { return rings; }, get floor() { return floor; }, get enemies() { return enemies; }, get respawnQ() { return respawnQ; }, get baseGuards() { return baseGuards; }, updateRespawn, get state() { return state; }, prog, PD, spendPoint, gainXp, awardKill, get xpBudgetHere() { return xpBudget(stage, floorNum, TUNE); },
   draw() {
     camera.position.set(player.x, eyeY(), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);

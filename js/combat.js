@@ -8,6 +8,10 @@ const TUNE = {
   chaseSpeed: 5.0,                    // alerted guards run faster than a sprinting player
   playerAtkSpd: 1,                    // attack speed stat: x the weapon's spd. Swing time / this
   walkSpeed: 3.0, sprintSpeed: 4.6, crouchSpeed: 1.4,
+  coopFF: 0.5,                        // co-op friendly fire: share of the normal damage a partner's melee, arrow or wand does to you
+  coopRevive: 3,                      // s holding interact beside a downed partner to get them up (at coopReviveHp of their max HP)
+  coopReviveHp: 0.4, coopXpRange: 20, // m: a kill gives XP to each player this close
+  coopStairWait: 8,                   // s after one player reaches the stairs before the other is pulled along
   enemyTurnAlert: 12,                  // rad/s a guard turns in EVERY state (walking, patrol look-around, searching, alerted); wind-up and charge telegraphs stay slower on purpose
   patrolSpeed: 1.1,                   // unaware patrol pace: slower than a crouching player (1.4), so a sneaker can catch up
   patrolWaitMin: 3, patrolWaitMax: 7, patrolRestChance: 0.25, patrolRestMin: 8, patrolRestMax: 12,   // seconds a guard stands at a waypoint; sometimes a long rest

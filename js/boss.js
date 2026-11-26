@@ -213,7 +213,7 @@ const bossDefByTheme = themeName => { const t = typeof THEME_BY_NAME !== 'undefi
 function bossState(def) {
   const cd = {}; for (const mv of def.moves) cd[mv.id] = 0;
   return { st: 'idle', t: 0, mv: null, nx: null, combo: 0, phase: 0, spd: 1, windMul: 1, gcdMul: 1, tx: 0, tz: 0, dx: 0, dz: -1, ox: 0, oz: 0, exp: 0, expMul: 1, expAll: false, cd, cand: new Array(def.moves.length).fill(0),
-    air: false, cyc: 0, hp0: 0, hx: 0, hz: 0, R: def.fly ? def.fly.radii[0] : 0, cw: 1, fp: 0, a0: 0, dd: 0, dl: 0, hit: false, lowT: 0, y0: 0, sg: 1, tk: 0, run: 0 };   // air .. fp: a flying boss (cycle clock, home point, orbit radius and direction, flap clock); a0 .. hit: a dive or a landing; lowT: head down; y0, sg, tk: a sweep
+    air: false, cyc: 0, hp0: 0, hx: 0, hz: 0, R: def.fly ? def.fly.radii[0] : 0, cw: 1, fp: 0, a0: 0, dd: 0, dl: 0, hit: false, lowT: 0, y0: 0, sg: 1, tk: 0, run: 0, hit2: false };   // air .. fp: a flying boss (cycle clock, home point, orbit radius and direction, flap clock); a0 .. hit: a dive or a landing; lowT: head down; y0, sg, tk: a sweep
 }
 
 // ---- hit tests (pure: plain objects with x, z, yaw, zone, reach, bs; no globals) ----
@@ -267,6 +267,11 @@ function bossZone(y, e, d) {
 }
 
 // ---- state machine ----
+// Co-op: every strike also tests the OTHER player (e.other, set on the host by js/coop.js, which resolves it through e.otherHit). Solo: e.other is undefined.
+function bossOther(e, mv, los) {
+  const o = e.other; if (!o || (los && !hasLOS(e.floor, e.x, e.z, o.x, o.z))) return;
+  const z = moveHits(mv, e, o); if (z) e.otherHit(z);
+}
 // Where a blink lands: `dist` m behind the player (opposite his facing), nearer if a wall or prop is there, else in front of him, else it stays put. Writes bs.tx / bs.tz.
 function bossBlinkSpot(e, player, dist) {
   const bs = e.bs, sx = Math.sin(player.yaw), sz = Math.cos(player.yaw); collider.props = e.floor.solids; const r0 = collider.radius; collider.radius = e.r || r0;   // test with the boss own radius, not the shared 0.4 m
@@ -332,6 +337,7 @@ function bossDive(e, dt, player) {
   e.x = bs.ox + bs.dx * run; e.z = bs.oz + bs.dz * run; e.alt = run <= D ? bs.a0 + (lo - bs.a0) * c : lo + (f.alt - lo) * c;
   e.yaw = Math.atan2(-bs.dx, -bs.dz); e.walkT += sp * dt * 0.2;
   let attack = null;
+  if (e.other && !bs.hit2) { const z2 = diveHit(mv, bs.ox, bs.oz, bs.dx, bs.dz, run, e.alt, e.other); if (z2) { bs.hit2 = true; e.otherHit(z2); } }
   if (!bs.hit) { const z = diveHit(mv, bs.ox, bs.oz, bs.dx, bs.dz, run, e.alt, player); if (z) { bs.hit = true; attack = z; } }
   if (run >= L) { bossTeleHide(); bossAfter(e, mv, player); }
   return attack;
@@ -411,17 +417,18 @@ function bossStrike(e, mv, player, noise, los) {
   e.winding = false; e.atkCd = mv.gcd >= 0 ? mv.gcd * bs.gcdMul : e.cooldown; bs.cd[mv.id] = mv.cd;
   noise.emit(e.x, e.z, CLASH_R, e);                       // a fight is loud
   if (mv.shape !== 'leap' && mv.shape !== 'dive' && mv.shape !== 'sweep' && !mv.ticks) bossTeleHide();   // a leap keeps its landing mark until it lands, a whirlwind its circle until it stops, a dive its strip and a sweep its fan
-  if (mv.shape === 'leap' || mv.shape === 'charge' || mv.shape === 'dive') { bs.st = 'special'; bs.t = 0; bs.run = 0; bs.ox = e.x; bs.oz = e.z; bs.hit = false; bs.a0 = e.alt; return null; }
-  if (mv.shape === 'sweep') { bs.st = 'sweep'; bs.t = 0; bs.tk = 1; bs.y0 = e.yaw; bs.sg = -bs.sg; bossSweepTick(e, mv, 0); return hasLOS(e.floor, e.x, e.z, player.x, player.z) ? moveHits(mv, e, player) : null; }   // the first tick lands with the strike, the beam turns the other way each time
+  if (mv.shape === 'leap' || mv.shape === 'charge' || mv.shape === 'dive') { bs.st = 'special'; bs.t = 0; bs.run = 0; bs.ox = e.x; bs.oz = e.z; bs.hit = false; bs.hit2 = false; bs.a0 = e.alt; return null; }
+  if (mv.shape === 'sweep') { bs.st = 'sweep'; bs.t = 0; bs.tk = 1; bs.y0 = e.yaw; bs.sg = -bs.sg; bossSweepTick(e, mv, 0); bossOther(e, mv, true); return hasLOS(e.floor, e.x, e.z, player.x, player.z) ? moveHits(mv, e, player) : null; }   // the first tick lands with the strike, the beam turns the other way each time
   if (mv.shape === 'land') bossLand(e);
-  if (mv.ticks > 1) { bs.st = 'spin'; bs.t = 0; bs.tk = 1; return moveHits(mv, e, player); }   // the first tick lands with the strike, the rest while it spins
+  if (mv.ticks > 1) { bs.st = 'spin'; bs.t = 0; bs.tk = 1; bossOther(e, mv, false); return moveHits(mv, e, player); }   // the first tick lands with the strike, the rest while it spins
   let attack = null;
   if (mv.shape === 'blink') { e.x = bs.tx; e.z = bs.tz; e.yaw = Math.atan2(-(player.x - e.x), -(player.z - e.z)); }   // gone, and there behind you
   else if (mv.shape === 'projectile') bossFire(e, mv, noise);
   else if (mv.shape === 'summon') bossSummon(e, mv.spawn, mv.n || 1, mv.cap || e.def.summonCap || 4);
   else if (mv.cloud) { if (typeof spawnCloud === 'function') spawnCloud(bs.tx, bs.tz, mv.r, mv.cloud.dur, mv.cloud.daze, true); }   // a spore lob: a daze cloud where you stood, no damage
   else if (mv.shape !== 'cone' || los) attack = moveHits(mv, e, player);   // no swings through a wall corner
-  if (mv.lane) bossLaneAdd(e, mv);
+  if (!mv.cloud) bossOther(e, mv, mv.shape === 'cone');
+  if (mv.lane) { bossLaneAdd(e, mv); if (e.coopFx) e.coopFx('ln', mv); }
   bossAfter(e, mv, player);
   return attack;
 }
@@ -433,6 +440,7 @@ function bossCharge(e, dt, player) {
   const free = !Player.prototype.blocked.call(collider, e.floor, nx, nz); collider.radius = r0;
   e.yaw = Math.atan2(-bs.dx, -bs.dz); e.walkT += sp * dt * 5;
   if (free) { e.x = nx; e.z = nz; bs.run += step; }
+  if (e.other && !bs.hit2) { const z2 = moveHits(mv, e, e.other); if (z2) { bs.hit2 = true; e.otherHit(z2); } }
   const hit = moveHits(mv, e, player);
   if (hit) { bossAfter(e, mv, player); return hit; }
   if (!free && mv.selfStun) { bs.st = 'recover'; bs.t = 0; bs.combo = 0; e.stun = mv.selfStun; e.atkCd = Math.max(e.atkCd, 0.6); }   // it hit the stonework: a free window
@@ -473,7 +481,7 @@ function bossUpdate(e, dt, player, noise, dist, los) {
       const mv = bs.mv, n = mv.ticks; bs.t += dt;
       e.yaw += 9 * dt; bossTeleDraw(e, mv, 1);
       if (bs.tk < n && bs.t >= bs.tk * (mv.spin || 1.6) / (n - 1)) {
-        bs.tk++; e.hitMul = mv.dmg; attack = moveHits(mv, e, player);
+        bs.tk++; e.hitMul = mv.dmg; attack = moveHits(mv, e, player); bossOther(e, mv, false);
         if (bs.tk >= n) { bossTeleHide(); bossAfter(e, mv, player); }
       }
       break;
@@ -481,7 +489,7 @@ function bossUpdate(e, dt, player, noise, dist, los) {
     case 'sweep': {                                                     // the Fire Sweep: the beam turns mv.sweep degrees over mv.spin s, a tick every mv.tick s (the first came with the strike), flames where it falls
       const mv = bs.mv, n = Math.round(mv.spin / mv.tick); bs.t += dt;
       e.yaw = bs.y0 + bs.sg * mv.sweep * Math.PI / 180 * Math.min(1, bs.t / mv.spin); bossTeleDraw(e, mv, 1);
-      if (bs.tk < n && bs.t >= bs.tk * mv.tick) { bossSweepTick(e, mv, bs.tk); bs.tk++; e.hitMul = mv.dmg; if (hasLOS(e.floor, e.x, e.z, player.x, player.z)) attack = moveHits(mv, e, player); }
+      if (bs.tk < n && bs.t >= bs.tk * mv.tick) { bossSweepTick(e, mv, bs.tk); bs.tk++; e.hitMul = mv.dmg; if (hasLOS(e.floor, e.x, e.z, player.x, player.z)) attack = moveHits(mv, e, player); bossOther(e, mv, true); }
       if (bs.t >= mv.spin) { bossSweepTick(e, mv, n); bossTeleHide(); bossAfter(e, mv, player); }
       break;
     }
@@ -497,7 +505,7 @@ function bossUpdate(e, dt, player, noise, dist, los) {
       collider.radius = r0;
       e.alt = Math.sin(Math.PI * k) * (mv.h || 2.5);
       e.yaw = Math.atan2(-(bs.tx - bs.ox), -(bs.tz - bs.oz));
-      if (k >= 1) { e.alt = 0; bossTeleHide(); noise.emit(e.x, e.z, CLASH_R, e); attack = moveHits(mv, e, player); bossAfter(e, mv, player); }
+      if (k >= 1) { e.alt = 0; bossTeleHide(); noise.emit(e.x, e.z, CLASH_R, e); attack = moveHits(mv, e, player); bossOther(e, mv, false); bossAfter(e, mv, player); }
       break;
     }
     default: {                                                          // chase, same movement as every alerted guard
@@ -514,7 +522,8 @@ function bossUpdate(e, dt, player, noise, dist, los) {
 
 // Tick i of a Fire Sweep: a flame patch on the beam (8 m out, then 3 m farther each tick), mv.flame = { dur, r, n }.
 function bossSweepTick(e, mv, i) {
-  const d = 8 + 3 * i; bossFlameAdd(e.x - Math.sin(e.yaw) * d, e.z - Math.cos(e.yaw) * d, mv.flame.r, mv.flame.dur);
+  const d = 8 + 3 * i, x = e.x - Math.sin(e.yaw) * d, z = e.z - Math.cos(e.yaw) * d; bossFlameAdd(x, z, mv.flame.r, mv.flame.dur);
+  if (e.coopFx) e.coopFx('fl', mv, x, z);
 }
 
 // Summon up to n of enemy type `type` round the boss, never more than cap alive from this boss. Returns how many appeared. Main.js builds them (Enemy.summon).
